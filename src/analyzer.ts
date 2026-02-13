@@ -11,8 +11,11 @@ import {
 import type { DriftIssue, FileReport } from './types.js'
 
 const RULE_WEIGHTS: Record<string, { severity: DriftIssue['severity']; weight: number }> = {
-  'large-file':     { severity: 'error', weight: 20 },
-  'large-function': { severity: 'error', weight: 15 },
+  'large-file':     { severity: 'error',   weight: 20 },
+  'large-function': { severity: 'error',   weight: 15 },
+  'debug-leftover': { severity: 'warning', weight: 10 },
+  'dead-code':      { severity: 'warning', weight: 8  },
+  'any-abuse':      { severity: 'warning', weight: 8  },
 }
 
 type FunctionLike = FunctionDeclaration | ArrowFunction | FunctionExpression | MethodDeclaration
@@ -73,6 +76,80 @@ function detectLargeFunctions(file: SourceFile): DriftIssue[] {
   return issues
 }
 
+function detectDebugLeftovers(file: SourceFile): DriftIssue[] {
+  const issues: DriftIssue[] = []
+
+  for (const call of file.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const expr = call.getExpression().getText()
+    if (/^console\.(log|warn|error|debug|info)\b/.test(expr)) {
+      issues.push({
+        rule: 'debug-leftover',
+        severity: 'warning',
+        message: `console.${expr.split('.')[1]} left in production code.`,
+        line: call.getStartLineNumber(),
+        column: call.getStartLinePos(),
+        snippet: getSnippet(call, file),
+      })
+    }
+  }
+
+  const lines = file.getFullText().split('\n')
+  lines.forEach((line, i) => {
+    if (/\/\/\s*(TODO|FIXME|HACK|XXX|TEMP)\b/i.test(line)) {
+      issues.push({
+        rule: 'debug-leftover',
+        severity: 'warning',
+        message: `Unresolved marker found: ${line.trim().slice(0, 60)}`,
+        line: i + 1,
+        column: 1,
+        snippet: line.trim().slice(0, 120),
+      })
+    }
+  })
+
+  return issues
+}
+
+function detectDeadCode(file: SourceFile): DriftIssue[] {
+  const issues: DriftIssue[] = []
+
+  for (const imp of file.getImportDeclarations()) {
+    for (const named of imp.getNamedImports()) {
+      const name = named.getName()
+      const refs = file.getDescendantsOfKind(SyntaxKind.Identifier).filter(
+        (id) => id.getText() === name && id !== named.getNameNode()
+      )
+      if (refs.length === 0) {
+        issues.push({
+          rule: 'dead-code',
+          severity: 'warning',
+          message: `Unused import '${name}'. AI often imports more than it uses.`,
+          line: imp.getStartLineNumber(),
+          column: imp.getStartLinePos(),
+          snippet: getSnippet(imp, file),
+        })
+      }
+    }
+  }
+
+  return issues
+}
+
+function detectAnyAbuse(file: SourceFile): DriftIssue[] {
+  const issues: DriftIssue[] = []
+  for (const node of file.getDescendantsOfKind(SyntaxKind.AnyKeyword)) {
+    issues.push({
+      rule: 'any-abuse',
+      severity: 'warning',
+      message: `Explicit 'any' type detected. AI defaults to 'any' when it can't infer types properly.`,
+      line: node.getStartLineNumber(),
+      column: node.getStartLinePos(),
+      snippet: getSnippet(node, file),
+    })
+  }
+  return issues
+}
+
 function calculateScore(issues: DriftIssue[]): number {
   let raw = 0
   for (const issue of issues) {
@@ -85,6 +162,9 @@ export function analyzeFile(file: SourceFile): FileReport {
   const issues: DriftIssue[] = [
     ...detectLargeFile(file),
     ...detectLargeFunctions(file),
+    ...detectDebugLeftovers(file),
+    ...detectDeadCode(file),
+    ...detectAnyAbuse(file),
   ]
 
   return {
