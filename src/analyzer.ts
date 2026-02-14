@@ -10,12 +10,18 @@ import {
 } from 'ts-morph'
 import type { DriftIssue, FileReport } from './types.js'
 
+// Rules and their drift score weight
 const RULE_WEIGHTS: Record<string, { severity: DriftIssue['severity']; weight: number }> = {
-  'large-file':     { severity: 'error',   weight: 20 },
-  'large-function': { severity: 'error',   weight: 15 },
-  'debug-leftover': { severity: 'warning', weight: 10 },
-  'dead-code':      { severity: 'warning', weight: 8  },
-  'any-abuse':      { severity: 'warning', weight: 8  },
+  'large-file':               { severity: 'error',   weight: 20 },
+  'large-function':           { severity: 'error',   weight: 15 },
+  'debug-leftover':           { severity: 'warning', weight: 10 },
+  'dead-code':                { severity: 'warning', weight: 8  },
+  'duplicate-function-name':  { severity: 'error',   weight: 18 },
+  'comment-contradiction':    { severity: 'warning', weight: 12 },
+  'no-return-type':           { severity: 'info',    weight: 5  },
+  'catch-swallow':            { severity: 'warning', weight: 10 },
+  'magic-number':             { severity: 'info',    weight: 3  },
+  'any-abuse':                { severity: 'warning', weight: 8  },
 }
 
 type FunctionLike = FunctionDeclaration | ArrowFunction | FunctionExpression | MethodDeclaration
@@ -135,6 +141,31 @@ function detectDeadCode(file: SourceFile): DriftIssue[] {
   return issues
 }
 
+function detectDuplicateFunctionNames(file: SourceFile): DriftIssue[] {
+  const issues: DriftIssue[] = []
+  const seen = new Map<string, number>()
+
+  const fns = file.getFunctions()
+  for (const fn of fns) {
+    const name = fn.getName()
+    if (!name) continue
+    const normalized = name.toLowerCase().replace(/[_-]/g, '')
+    if (seen.has(normalized)) {
+      issues.push({
+        rule: 'duplicate-function-name',
+        severity: 'error',
+        message: `Function '${name}' looks like a duplicate of a previously defined function. AI often generates near-identical helpers.`,
+        line: fn.getStartLineNumber(),
+        column: fn.getStartLinePos(),
+        snippet: getSnippet(fn, file),
+      })
+    } else {
+      seen.set(normalized, fn.getStartLineNumber())
+    }
+  }
+  return issues
+}
+
 function detectAnyAbuse(file: SourceFile): DriftIssue[] {
   const issues: DriftIssue[] = []
   for (const node of file.getDescendantsOfKind(SyntaxKind.AnyKeyword)) {
@@ -146,6 +177,44 @@ function detectAnyAbuse(file: SourceFile): DriftIssue[] {
       column: node.getStartLinePos(),
       snippet: getSnippet(node, file),
     })
+  }
+  return issues
+}
+
+function detectCatchSwallow(file: SourceFile): DriftIssue[] {
+  const issues: DriftIssue[] = []
+  for (const tryCatch of file.getDescendantsOfKind(SyntaxKind.TryStatement)) {
+    const catchClause = tryCatch.getCatchClause()
+    if (!catchClause) continue
+    const block = catchClause.getBlock()
+    const stmts = block.getStatements()
+    if (stmts.length === 0) {
+      issues.push({
+        rule: 'catch-swallow',
+        severity: 'warning',
+        message: `Empty catch block silently swallows errors. Classic AI pattern to make code "not throw".`,
+        line: catchClause.getStartLineNumber(),
+        column: catchClause.getStartLinePos(),
+        snippet: getSnippet(catchClause, file),
+      })
+    }
+  }
+  return issues
+}
+
+function detectMissingReturnTypes(file: SourceFile): DriftIssue[] {
+  const issues: DriftIssue[] = []
+  for (const fn of file.getFunctions()) {
+    if (!fn.getReturnTypeNode()) {
+      issues.push({
+        rule: 'no-return-type',
+        severity: 'info',
+        message: `Function '${fn.getName() ?? 'anonymous'}' has no explicit return type.`,
+        line: fn.getStartLineNumber(),
+        column: fn.getStartLinePos(),
+        snippet: getSnippet(fn, file),
+      })
+    }
   }
   return issues
 }
@@ -164,7 +233,10 @@ export function analyzeFile(file: SourceFile): FileReport {
     ...detectLargeFunctions(file),
     ...detectDebugLeftovers(file),
     ...detectDeadCode(file),
+    ...detectDuplicateFunctionNames(file),
     ...detectAnyAbuse(file),
+    ...detectCatchSwallow(file),
+    ...detectMissingReturnTypes(file),
   ]
 
   return {
