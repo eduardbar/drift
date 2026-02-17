@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0a0f"/>
+      <stop offset="100%" style="stop-color:#0f0f1a"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="100%" style="stop-color:#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:0.15"/>
+      <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:0.05"/>
+    </linearGradient>
+    <filter id="blur-glow">
+      <feGaussianBlur stdDeviation="40" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+    <filter id="soft-glow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bg)"/>
+
+  <!-- Ambient glow top-left -->
+  <ellipse cx="200" cy="200" rx="300" ry="250" fill="url(#glow)" filter="url(#blur-glow)" opacity="0.8"/>
+
+  <!-- Ambient glow bottom-right -->
+  <ellipse cx="1050" cy="480" rx="280" ry="220" fill="url(#glow)" filter="url(#blur-glow)" opacity="0.6"/>
+
+  <!-- Grid lines subtle -->
+  <line x1="0" y1="210" x2="1200" y2="210" stroke="#ffffff" stroke-opacity="0.03" stroke-width="1"/>
+  <line x1="0" y1="420" x2="1200" y2="420" stroke="#ffffff" stroke-opacity="0.03" stroke-width="1"/>
+  <line x1="300" y1="0" x2="300" y2="630" stroke="#ffffff" stroke-opacity="0.03" stroke-width="1"/>
+  <line x1="900" y1="0" x2="900" y2="630" stroke="#ffffff" stroke-opacity="0.03" stroke-width="1"/>
+
+  <!-- Left accent bar -->
+  <rect x="72" y="180" width="4" height="270" rx="2" fill="url(#accent)"/>
+
+  <!-- Main title "drift" -->
+  <text x="102" y="310" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', monospace" font-size="120" font-weight="700" fill="#ffffff" letter-spacing="-4">drift</text>
+
+  <!-- Subtitle -->
+  <text x="104" y="370" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="24" font-weight="400" fill="#94a3b8" letter-spacing="0.5">Detect silent technical debt left by AI-generated code.</text>
+
+  <!-- Terminal block right side -->
+  <rect x="680" y="165" width="448" height="300" rx="12" fill="#0d0d18" stroke="#ffffff" stroke-opacity="0.08" stroke-width="1"/>
+
+  <!-- Terminal header bar -->
+  <rect x="680" y="165" width="448" height="40" rx="12" fill="#1a1a2e"/>
+  <rect x="680" y="185" width="448" height="20" fill="#1a1a2e"/>
+
+  <!-- Terminal dots -->
+  <circle cx="710" cy="185" r="6" fill="#ff5f57"/>
+  <circle cx="730" cy="185" r="6" fill="#febc2e"/>
+  <circle cx="750" cy="185" r="6" fill="#28c840"/>
+
+  <!-- Terminal text -->
+  <text x="700" y="235" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="13" fill="#6366f1">$</text>
+  <text x="716" y="235" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="13" fill="#e2e8f0"> npx @eduardbar/drift scan ./src</text>
+
+  <text x="700" y="265" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="13" fill="#64748b">  drift — vibe coding debt detector</text>
+
+  <text x="700" y="295" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="13" fill="#64748b">  Score </text>
+  <text x="755" y="295" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="13" font-weight="700" fill="#ef4444"> 67</text>
+  <text x="779" y="295" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="13" fill="#64748b">/100  HIGH</text>
+
+  <text x="700" y="320" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#475569">  4 file(s)  ·  5 errors  ·  12 warnings</text>
+
+  <text x="700" y="352" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#64748b">  src/api/users.ts</text>
+  <text x="700" y="371" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#ef4444">    ✖ </text>
+  <text x="720" y="371" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#ef4444">large-file</text>
+  <text x="800" y="371" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#94a3b8"> 412 lines detected</text>
+
+  <text x="700" y="390" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#eab308">    ▲ </text>
+  <text x="720" y="390" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#eab308">catch-swallow</text>
+  <text x="820" y="390" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#94a3b8"> empty catch block</text>
+
+  <text x="700" y="409" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#eab308">    ▲ </text>
+  <text x="720" y="409" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#eab308">any-abuse</text>
+  <text x="793" y="409" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#94a3b8"> explicit any type</text>
+
+  <text x="700" y="440" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#22c55e">    ◦ </text>
+  <text x="720" y="440" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#64748b">no-return-type</text>
+  <text x="830" y="440" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#475569"> missing return type</text>
+
+  <!-- Badges row -->
+  <rect x="104" y="405" width="100" height="26" rx="5" fill="#1e1e3a" stroke="#6366f1" stroke-opacity="0.4" stroke-width="1"/>
+  <text x="154" y="423" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" fill="#818cf8" text-anchor="middle">TypeScript</text>
+
+  <rect x="214" y="405" width="72" height="26" rx="5" fill="#1e1e3a" stroke="#6366f1" stroke-opacity="0.4" stroke-width="1"/>
+  <text x="250" y="423" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" fill="#818cf8" text-anchor="middle">ts-morph</text>
+
+  <rect x="296" y="405" width="52" height="26" rx="5" fill="#1e1e3a" stroke="#6366f1" stroke-opacity="0.4" stroke-width="1"/>
+  <text x="322" y="423" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" fill="#818cf8" text-anchor="middle">MIT</text>
+
+  <!-- Author -->
+  <text x="104" y="520" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="16" fill="#334155">github.com/eduardbar/drift</text>
+
+  <!-- Bottom accent line -->
+  <rect x="0" y="622" width="1200" height="8" fill="url(#accent)" opacity="0.7"/>
+</svg>
