@@ -19,6 +19,7 @@ export interface DriftReport {
   files: FileReport[]
   totalIssues: number
   totalScore: number
+  totalFiles: number
   summary: {
     errors: number
     warnings: number

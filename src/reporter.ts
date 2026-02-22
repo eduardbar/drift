@@ -1,4 +1,5 @@
-import type { FileReport, DriftReport, DriftIssue } from './types.js'
+import type { FileReport, DriftReport } from './types.js'
+import { scoreToGradeText, severityIcon } from './utils.js'
 
 export function buildReport(targetPath: string, files: FileReport[]): DriftReport {
   const allIssues = files.flatMap((f) => f.issues)
@@ -19,6 +20,7 @@ export function buildReport(targetPath: string, files: FileReport[]): DriftRepor
     files: files.filter((f) => f.issues.length > 0).sort((a, b) => b.score - a.score),
     totalIssues: allIssues.length,
     totalScore,
+    totalFiles: files.length,
     summary: {
       errors: allIssues.filter((i) => i.severity === 'error').length,
       warnings: allIssues.filter((i) => i.severity === 'warning').length,
@@ -29,7 +31,7 @@ export function buildReport(targetPath: string, files: FileReport[]): DriftRepor
 }
 
 export function formatMarkdown(report: DriftReport): string {
-  const grade = scoreToGrade(report.totalScore)
+  const grade = scoreToGradeText(report.totalScore)
   const lines: string[] = []
 
   lines.push(`# drift report`)
@@ -71,7 +73,7 @@ export function formatMarkdown(report: DriftReport): string {
       for (const issue of file.issues) {
         const icon = severityIcon(issue.severity)
         lines.push(`**${icon} [${issue.rule}]** Line ${issue.line}: ${issue.message}`)
-        lines.push(`\`\`\``)
+        lines.push(`\`\`\`typescript`)
         lines.push(issue.snippet)
         lines.push(`\`\`\``)
         lines.push(``)
@@ -80,18 +82,4 @@ export function formatMarkdown(report: DriftReport): string {
   }
 
   return lines.join('\n')
-}
-
-function scoreToGrade(score: number): { badge: string; label: string } {
-  if (score === 0) return { badge: '✦ CLEAN', label: 'clean' }
-  if (score < 20) return { badge: '◎ LOW', label: 'low' }
-  if (score < 45) return { badge: '◈ MODERATE', label: 'moderate' }
-  if (score < 70) return { badge: '◉ HIGH', label: 'high' }
-  return { badge: '⬡ CRITICAL', label: 'critical' }
-}
-
-function severityIcon(s: DriftIssue['severity']): string {
-  if (s === 'error') return '✖'
-  if (s === 'warning') return '▲'
-  return '◦'
 }

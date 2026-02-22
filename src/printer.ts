@@ -1,5 +1,6 @@
 import kleur from 'kleur'
-import type { DriftReport, DriftIssue } from './types.js'
+import type { DriftReport } from './types.js'
+import { scoreToGrade, severityIcon } from './utils.js'
 
 export function printConsole(report: DriftReport): void {
   console.log()
@@ -69,18 +70,4 @@ export function printConsole(report: DriftReport): void {
     }
     console.log()
   }
-}
-
-function scoreToGrade(score: number): { badge: string } {
-  if (score === 0) return { badge: kleur.green('CLEAN') }
-  if (score < 20) return { badge: kleur.green('LOW') }
-  if (score < 45) return { badge: kleur.yellow('MODERATE') }
-  if (score < 70) return { badge: kleur.red('HIGH') }
-  return { badge: kleur.bold().red('CRITICAL') }
-}
-
-function severityIcon(s: DriftIssue['severity']): string {
-  if (s === 'error') return '✖'
-  if (s === 'warning') return '▲'
-  return '◦'
 }
