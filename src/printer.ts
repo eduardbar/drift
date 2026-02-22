@@ -1,10 +1,13 @@
 import kleur from 'kleur'
 import type { DriftReport } from './types.js'
-import { scoreToGrade, severityIcon } from './utils.js'
+import { scoreToGrade, severityIcon, scoreBar } from './utils.js'
 
 export function printConsole(report: DriftReport): void {
+  const sep = kleur.gray('  ' + '─'.repeat(50))
+
   console.log()
-  console.log(kleur.bold().white('  drift') + kleur.gray(' — vibe coding debt detector'))
+  console.log(kleur.bold().white('  drift') + kleur.gray('  —  vibe coding debt detector'))
+  console.log(sep)
   console.log()
 
   const grade = scoreToGrade(report.totalScore)
@@ -14,14 +17,28 @@ export function printConsole(report: DriftReport): void {
     ? kleur.yellow
     : kleur.red
 
+  const bar = scoreBar(report.totalScore)
   console.log(
-    `  Score  ${scoreColor().bold(String(report.totalScore).padStart(3))}${kleur.gray('/100')}  ${grade.badge}`
+    `  Score   ${kleur.gray(bar)}  ${scoreColor().bold(String(report.totalScore))}/100  ${grade.badge}`
   )
+
+  const cleanFiles = report.totalFiles - report.files.length
   console.log(
     kleur.gray(
-      `  ${report.files.length} file(s) with issues  ·  ${report.summary.errors} errors  ·  ${report.summary.warnings} warnings  ·  ${report.summary.infos} info`
+      `  ${report.files.length} file(s) with issues  ·  ${report.summary.errors} errors  ·  ${report.summary.warnings} warnings  ·  ${report.summary.infos} info  ·  ${cleanFiles} files clean`
     )
   )
+  console.log()
+
+  // Top issues in header
+  const topRules = Object.entries(report.summary.byRule).sort((a, b) => b[1] - a[1]).slice(0, 3)
+  if (topRules.length > 0) {
+    const parts = topRules.map(([rule, count]) => `${kleur.cyan(rule)} ${kleur.gray(`×${count}`)}`)
+    console.log(`  Top issues:  ${parts.join(kleur.gray('  ·  '))}`)
+    console.log()
+  }
+
+  console.log(sep)
   console.log()
 
   if (report.files.length === 0) {
@@ -57,16 +74,6 @@ export function printConsole(report: DriftReport): void {
       if (issue.snippet) {
         console.log(kleur.gray(`       ${issue.snippet.split('\n')[0].slice(0, 100)}`))
       }
-    }
-    console.log()
-  }
-
-  // Top drifting rules summary
-  const sorted = Object.entries(report.summary.byRule).sort((a, b) => b[1] - a[1]).slice(0, 3)
-  if (sorted.length > 0) {
-    console.log(kleur.gray('  Top rules:'))
-    for (const [rule, count] of sorted) {
-      console.log(kleur.gray(`    · ${rule}: ${count}`))
     }
     console.log()
   }
