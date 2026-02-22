@@ -72,7 +72,8 @@ export function printConsole(report: DriftReport): void {
           kleur.white(issue.message)
       )
       if (issue.snippet) {
-        console.log(kleur.gray(`       ${issue.snippet.split('\n')[0].slice(0, 100)}`))
+        const snippetIndent = '    ' + ' '.repeat(icon.length + 1)
+        console.log(kleur.gray(`${snippetIndent}${issue.snippet.split('\n')[0].slice(0, 120)}`))
       }
     }
     console.log()
