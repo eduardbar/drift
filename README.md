@@ -25,10 +25,15 @@ drift scans your TypeScript/JavaScript codebase for the specific patterns AI too
 ```bash
 $ npx @eduardbar/drift scan ./src
 
-  drift — vibe coding debt detector
+  drift  —  vibe coding debt detector
+  ──────────────────────────────────────────────────
 
-  Score    67/100  HIGH
-  4 file(s) with issues  ·  5 errors  ·  12 warnings  ·  3 info
+  Score   █████████████░░░░░░░  67/100  HIGH
+  4 file(s) with issues  ·  5 errors  ·  12 warnings  ·  3 info  ·  18 files clean
+
+  Top issues:  debug-leftover ×8  ·  any-abuse ×5  ·  no-return-type ×3
+
+  ──────────────────────────────────────────────────
 
   src/api/users.ts (score 85/100)
     ✖ L1    large-file              File has 412 lines (threshold: 300)
@@ -39,11 +44,6 @@ $ npx @eduardbar/drift scan ./src
   src/utils/helpers.ts (score 70/100)
     ✖ L12   duplicate-function-name 'formatDate' looks like a duplicate
     ▲ L55   dead-code               Unused import 'debounce'
-
-  Top rules:
-    · debug-leftover: 8
-    · any-abuse: 5
-    · no-return-type: 3
 ```
 
 ---
@@ -67,11 +67,16 @@ npm install --save-dev @eduardbar/drift
 ## 🚀 Usage
 
 ```bash
-drift scan                            # Scan current directory
-drift scan ./src                      # Scan a specific path
-drift scan ./src --output report.md   # Write Markdown report to file
-drift scan ./src --json               # Output raw JSON
-drift scan ./src --min-score 50       # Exit code 1 if score > 50
+# Recommended — no install needed
+npx @eduardbar/drift scan .
+npx @eduardbar/drift scan ./src
+npx @eduardbar/drift scan ./src --output report.md
+npx @eduardbar/drift scan ./src --json
+npx @eduardbar/drift scan ./src --min-score 50
+
+# Install globally if you want the short 'drift' command
+npm install -g @eduardbar/drift
+drift scan .
 ```
 
 ### Options
@@ -148,6 +153,12 @@ cd drift
 npm install
 npm run build
 node dist/cli.js scan ./src
+```
+
+Or without cloning:
+
+```bash
+npx @eduardbar/drift scan .
 ```
 
 ---
