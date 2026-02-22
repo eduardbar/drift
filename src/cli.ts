@@ -22,9 +22,9 @@ program
   .action((targetPath: string | undefined, options: { output?: string; json?: boolean; minScore: string }) => {
     const resolvedPath = resolve(targetPath ?? '.')
 
-    console.error(`\nScanning ${resolvedPath}...`)
-
+    process.stderr.write(`\nScanning ${resolvedPath}...\n`)
     const files = analyzeProject(resolvedPath)
+    process.stderr.write(`  Found ${files.length} TypeScript file(s)\n\n`)
     const report = buildReport(resolvedPath, files)
 
     if (options.json) {
