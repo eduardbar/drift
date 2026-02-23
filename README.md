@@ -188,12 +188,20 @@ npx @eduardbar/drift scan .
 
 ## 🤝 Contributing
 
-PRs are welcome. If you find a new AI code pattern worth detecting, open an issue with an example and we'll add a rule.
+PRs are welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full guide.
 
-1. Fork the repo
-2. Create a branch: `git checkout -b feat/rule-name`
-3. Add your rule in `src/analyzer.ts`
-4. Open a PR
+**Adding a new detection rule:**
+
+1. Fork the repo and create a branch: `git checkout -b feat/rule-name`
+2. Add the rule weight to `RULE_WEIGHTS` in `src/analyzer.ts`
+3. Implement the AST detection logic using ts-morph
+4. Add a `fix_suggestion` for the rule in `src/printer.ts`
+5. Update the rules table in `README.md` and `AGENTS.md`
+6. Open a PR — use the [PR template](./.github/PULL_REQUEST_TEMPLATE.md)
+
+Before opening an issue, check [existing issues](https://github.com/eduardbar/drift/issues). Use the [bug report](./.github/ISSUE_TEMPLATE/bug_report.md) or [feature request](./.github/ISSUE_TEMPLATE/feature_request.md) templates.
+
+Please read [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) before participating.
 
 ---
 

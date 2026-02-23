@@ -23,6 +23,14 @@
   ],
   "author": "eduardbar",
   "license": "MIT",
+  "homepage": "https://github.com/eduardbar/drift#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eduardbar/drift.git"
+  },
+  "bugs": {
+    "url": "https://github.com/eduardbar/drift/issues"
+  },
   "dependencies": {
     "commander": "^14.0.3",
     "kleur": "^4.1.5",
