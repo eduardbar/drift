@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0a0f"/>
+      <stop offset="100%" style="stop-color:#0f0f1a"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="100%" style="stop-color:#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="green-accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#22c55e"/>
+      <stop offset="100%" style="stop-color:#16a34a"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:0.15"/>
+      <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:0.05"/>
+    </linearGradient>
+    <linearGradient id="glow2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#22c55e;stop-opacity:0.10"/>
+      <stop offset="100%" style="stop-color:#16a34a;stop-opacity:0.03"/>
+    </linearGradient>
+    <filter id="blur-glow">
+      <feGaussianBlur stdDeviation="40" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bg)"/>
+
+  <!-- Ambient glows -->
+  <ellipse cx="200" cy="200" rx="300" ry="250" fill="url(#glow)" filter="url(#blur-glow)" opacity="0.8"/>
+  <ellipse cx="1050" cy="480" rx="280" ry="220" fill="url(#glow2)" filter="url(#blur-glow)" opacity="0.6"/>
+
+  <!-- Grid lines subtle -->
+  <line x1="0" y1="210" x2="1200" y2="210" stroke="#ffffff" stroke-opacity="0.03" stroke-width="1"/>
+  <line x1="0" y1="420" x2="1200" y2="420" stroke="#ffffff" stroke-opacity="0.03" stroke-width="1"/>
+  <line x1="300" y1="0" x2="300" y2="630" stroke="#ffffff" stroke-opacity="0.03" stroke-width="1"/>
+  <line x1="900" y1="0" x2="900" y2="630" stroke="#ffffff" stroke-opacity="0.03" stroke-width="1"/>
+
+  <!-- Left accent bar -->
+  <rect x="72" y="155" width="4" height="310" rx="2" fill="url(#accent)"/>
+
+  <!-- Version badge -->
+  <rect x="102" y="155" width="105" height="32" rx="6" fill="#1e1e3a" stroke="#6366f1" stroke-opacity="0.6" stroke-width="1.5"/>
+  <text x="154" y="176" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14" font-weight="700" fill="#818cf8" text-anchor="middle">v0.3.0</text>
+
+  <!-- New badge -->
+  <rect x="218" y="155" width="80" height="32" rx="6" fill="#14532d" stroke="#22c55e" stroke-opacity="0.6" stroke-width="1.5"/>
+  <text x="258" y="176" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14" font-weight="700" fill="#22c55e" text-anchor="middle">NEW</text>
+
+  <!-- Main title "drift" -->
+  <text x="102" y="295" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', monospace" font-size="110" font-weight="700" fill="#ffffff" letter-spacing="-4">drift</text>
+
+  <!-- Subtitle -->
+  <text x="104" y="345" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="22" font-weight="400" fill="#94a3b8" letter-spacing="0.5">Detect AI-generated technical debt. Zero config.</text>
+
+  <!-- Feature pills row -->
+  <rect x="104" y="370" width="145" height="30" rx="8" fill="#1a2a1a" stroke="#22c55e" stroke-opacity="0.5" stroke-width="1"/>
+  <text x="176" y="390" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13" font-weight="600" fill="#22c55e" text-anchor="middle">--ai  LLM output</text>
+
+  <rect x="260" y="370" width="130" height="30" rx="8" fill="#1a1a2e" stroke="#6366f1" stroke-opacity="0.5" stroke-width="1"/>
+  <text x="325" y="390" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13" font-weight="600" fill="#818cf8" text-anchor="middle">--fix  suggestions</text>
+
+  <rect x="401" y="370" width="145" height="30" rx="8" fill="#1a1a2e" stroke="#6366f1" stroke-opacity="0.5" stroke-width="1"/>
+  <text x="473" y="390" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13" font-weight="600" fill="#818cf8" text-anchor="middle">drift-ignore</text>
+
+  <rect x="557" y="370" width="140" height="30" rx="8" fill="#1a1a2e" stroke="#6366f1" stroke-opacity="0.5" stroke-width="1"/>
+  <text x="627" y="390" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13" font-weight="600" fill="#818cf8" text-anchor="middle">--min-score CI</text>
+
+  <!-- Terminal block right side -->
+  <rect x="660" y="140" width="468" height="335" rx="12" fill="#0d0d18" stroke="#ffffff" stroke-opacity="0.08" stroke-width="1"/>
+
+  <!-- Terminal header bar -->
+  <rect x="660" y="140" width="468" height="40" rx="12" fill="#1a1a2e"/>
+  <rect x="660" y="160" width="468" height="20" fill="#1a1a2e"/>
+
+  <!-- Terminal dots -->
+  <circle cx="690" cy="160" r="6" fill="#ff5f57"/>
+  <circle cx="710" cy="160" r="6" fill="#febc2e"/>
+  <circle cx="730" cy="160" r="6" fill="#28c840"/>
+
+  <text x="894" y="165" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="11" fill="#475569" text-anchor="middle">drift</text>
+
+  <text x="680" y="210" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="12" fill="#6366f1">$</text>
+  <text x="695" y="210" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="12" fill="#e2e8f0"> drift scan ./src --ai | pbcopy</text>
+
+  <text x="680" y="238" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#475569">  {</text>
+  <text x="680" y="256" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#475569">    "summary": {</text>
+  <text x="680" y="274" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#94a3b8">      "score": </text>
+  <text x="775" y="274" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" font-weight="700" fill="#ef4444">52</text>
+  <text x="792" y="274" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#94a3b8">, "grade": </text>
+  <text x="863" y="274" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#eab308">"HIGH"</text>
+
+  <text x="680" y="292" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#475569">    },</text>
+  <text x="680" y="310" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#475569">    "priority_order": [</text>
+  <text x="680" y="328" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#475569">      { "rank": 1, "rule": </text>
+  <text x="844" y="328" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#22c55e">"debug-leftover"</text>
+  <text x="956" y="328" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#475569">,</text>
+
+  <text x="680" y="346" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#475569">        "effort": </text>
+  <text x="775" y="346" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#22c55e">"low"</text>
+  <text x="810" y="346" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#94a3b8">, "fix_suggestion": "..."</text>
+
+  <text x="680" y="364" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#475569">    ],</text>
+  <text x="680" y="382" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#475569">    "recommended_action": </text>
+  <text x="680" y="400" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#818cf8">      "Fix 3 low-effort issues first."</text>
+
+  <text x="680" y="418" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#475569">  }</text>
+  <text x="680" y="436" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#64748b">  ↳ paste into Claude/GPT as context</text>
+  <text x="680" y="454" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="11" fill="#22c55e">  ✓ prioritized by severity + effort</text>
+
+  <!-- Author -->
+  <text x="104" y="500" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="15" fill="#334155">npx @eduardbar/drift scan . --ai</text>
+  <text x="104" y="525" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14" fill="#475569">github.com/eduardbar/drift  ·  MIT  ·  TypeScript  ·  ts-morph</text>
+
+  <!-- Bottom accent line -->
+  <rect x="0" y="622" width="1200" height="8" fill="url(#accent)" opacity="0.7"/>
+</svg>

@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675" width="1200" height="675">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0a0f"/>
+      <stop offset="100%" style="stop-color:#0f0f1a"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="100%" style="stop-color:#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="green-bar" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#22c55e"/>
+      <stop offset="100%" style="stop-color:#16a34a"/>
+    </linearGradient>
+    <linearGradient id="red-bar" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#ef4444"/>
+      <stop offset="100%" style="stop-color:#dc2626"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:0.15"/>
+      <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:0.05"/>
+    </linearGradient>
+    <filter id="blur-glow">
+      <feGaussianBlur stdDeviation="50" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="675" fill="url(#bg)"/>
+  <ellipse cx="600" cy="200" rx="500" ry="200" fill="url(#glow)" filter="url(#blur-glow)" opacity="0.6"/>
+
+  <!-- Grid lines -->
+  <line x1="0" y1="225" x2="1200" y2="225" stroke="#ffffff" stroke-opacity="0.025" stroke-width="1"/>
+  <line x1="0" y1="450" x2="1200" y2="450" stroke="#ffffff" stroke-opacity="0.025" stroke-width="1"/>
+  <line x1="400" y1="0" x2="400" y2="675" stroke="#ffffff" stroke-opacity="0.025" stroke-width="1"/>
+  <line x1="800" y1="0" x2="800" y2="675" stroke="#ffffff" stroke-opacity="0.025" stroke-width="1"/>
+
+  <!-- Top accent bar -->
+  <rect x="0" y="0" width="1200" height="5" fill="url(#accent)" opacity="0.8"/>
+
+  <!-- drift title centered -->
+  <text x="600" y="120" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', monospace" font-size="90" font-weight="700" fill="#ffffff" letter-spacing="-3" text-anchor="middle">drift</text>
+
+  <!-- Version tag -->
+  <rect x="540" y="132" width="120" height="28" rx="14" fill="#1e1e3a" stroke="#6366f1" stroke-opacity="0.7" stroke-width="1.5"/>
+  <text x="600" y="151" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14" font-weight="700" fill="#818cf8" text-anchor="middle">v0.3.0</text>
+
+  <!-- Tagline -->
+  <text x="600" y="195" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" fill="#94a3b8" text-anchor="middle">Measure AI-generated debt. One command.</text>
+
+  <!-- 3 score cards -->
+  <!-- Card 1: shadcn/ui CLI — Score 0 -->
+  <rect x="68" y="225" width="330" height="210" rx="12" fill="#0d0d18" stroke="#22c55e" stroke-opacity="0.3" stroke-width="1"/>
+  <text x="233" y="258" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13" fill="#64748b" text-anchor="middle">shadcn/ui — CLI source</text>
+  <text x="233" y="320" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', monospace" font-size="72" font-weight="700" fill="#22c55e" text-anchor="middle">0</text>
+  <text x="233" y="348" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" fill="#22c55e" text-anchor="middle">CLEAN</text>
+  <!-- mini score bar full green -->
+  <rect x="100" y="368" width="266" height="6" rx="3" fill="#1e2a1e"/>
+  <rect x="100" y="368" width="5" height="6" rx="3" fill="url(#green-bar)"/>
+  <text x="233" y="395" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="11" fill="#475569" text-anchor="middle">production-grade code</text>
+  <text x="233" y="413" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="11" fill="#475569" text-anchor="middle">0 issues · 0 warnings</text>
+
+  <!-- Card 2: Vibe-coded module — Score 52 -->
+  <rect x="435" y="225" width="330" height="210" rx="12" fill="#0d0d18" stroke="#eab308" stroke-opacity="0.3" stroke-width="1"/>
+  <text x="600" y="258" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13" fill="#64748b" text-anchor="middle">vibe-coded module</text>
+  <text x="600" y="320" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', monospace" font-size="72" font-weight="700" fill="#eab308" text-anchor="middle">52</text>
+  <text x="600" y="348" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" fill="#eab308" text-anchor="middle">HIGH</text>
+  <!-- mini score bar 52% -->
+  <rect x="467" y="368" width="266" height="6" rx="3" fill="#1e1e1e"/>
+  <rect x="467" y="368" width="138" height="6" rx="3" fill="#eab308"/>
+  <text x="600" y="395" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="11" fill="#475569" text-anchor="middle">review before shipping</text>
+  <text x="600" y="413" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="11" fill="#475569" text-anchor="middle">3 errors · 8 warnings</text>
+
+  <!-- Card 3: Full vibe dump — Score 89 -->
+  <rect x="802" y="225" width="330" height="210" rx="12" fill="#0d0d18" stroke="#ef4444" stroke-opacity="0.3" stroke-width="1"/>
+  <text x="967" y="258" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13" fill="#64748b" text-anchor="middle">full vibe-coding dump</text>
+  <text x="967" y="320" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', monospace" font-size="72" font-weight="700" fill="#ef4444" text-anchor="middle">89</text>
+  <text x="967" y="348" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" fill="#ef4444" text-anchor="middle">CRITICAL</text>
+  <!-- mini score bar 89% -->
+  <rect x="834" y="368" width="266" height="6" rx="3" fill="#1e1e1e"/>
+  <rect x="834" y="368" width="237" height="6" rx="3" fill="url(#red-bar)"/>
+  <text x="967" y="395" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="11" fill="#475569" text-anchor="middle">rewrite before anyone sees it</text>
+  <text x="967" y="413" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="11" fill="#475569" text-anchor="middle">7 errors · 14 warnings</text>
+
+  <!-- Bottom CTA -->
+  <text x="600" y="480" font-family="'Cascadia Code', 'Fira Code', 'Consolas', monospace" font-size="18" fill="#6366f1" text-anchor="middle">npx @eduardbar/drift scan .</text>
+
+  <text x="600" y="520" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14" fill="#475569" text-anchor="middle">NEW in v0.3.0: --ai · --fix · drift-ignore · CI-ready · Windows compatible</text>
+
+  <text x="600" y="560" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14" fill="#334155" text-anchor="middle">github.com/eduardbar/drift  ·  MIT Open Source</text>
+
+  <!-- Bottom accent line -->
+  <rect x="0" y="667" width="1200" height="8" fill="url(#accent)" opacity="0.7"/>
+</svg>

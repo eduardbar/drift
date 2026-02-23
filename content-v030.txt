@@ -1,0 +1,165 @@
+================================================================
+POST LINKEDIN
+Imagen: assets/og-v030-linkedin.png
+================================================================
+
+La IA escribe el código. Pero no asume responsabilidad por él.
+
+Y ese es el problema.
+
+Cuando tú haces code review, buscas cosas como:
+- catch blocks que tragan errores reales en silencio
+- console.logs viviendo en lógica de producción
+- imports de tres refactors atrás que nadie borró
+- funciones de 50 líneas haciendo cinco cosas distintas
+- funciones sin return type que rompieron el type inference sin avisar
+
+Cuando usas IA para escribir código...
+No hay esa segunda mirada.
+Y el riesgo no explota hoy. Se acumula.
+
+El CI sigue verde. El deploy sigue funcionando. El codebase se está pudriendo.
+
+---
+
+Construí drift para eso.
+
+Un CLI que escanea tu proyecto TypeScript con análisis AST real y le pone un score a cada archivo por deuda AI-generada.
+
+0 es limpio. 100 es "reescribe esto antes de que alguien lo vea".
+
+🚀 drift v0.3.0 — esto es lo que llegó:
+
+🔥 --ai → JSON estructurado para pasarle directamente a Claude o GPT. Issues ordenados por severidad y esfuerzo. Quick wins primero. Con fix_suggestion por issue. Con recommended_action generada.
+
+drift scan ./src --ai | pbcopy → pégalo en el chat → el modelo ya sabe dónde empezar.
+
+🔥 --fix → sugerencias inline en consola para cada issue. Ya no solo te digo qué está mal. Te muestro qué hacer.
+
+🔥 drift-ignore → control quirúrgico.
+// drift-ignore por línea.
+// drift-ignore-file para archivos completos con output intencional.
+
+🔥 CI-ready con un flag:
+npx @eduardbar/drift scan ./src --min-score 60
+Exit 1 si el score supera el umbral. Un npx en tu GitHub Actions.
+
+🔥 Windows-compatible → el npx fallaba silenciosamente en Windows con ES modules. Arreglado.
+
+---
+
+Lo corrí en el CLI source de shadcn/ui → score 0.
+Lo corrí en mis propios módulos con vibe coding → 40 a 60.
+
+La diferencia existe. drift la hace medible.
+
+npx @eduardbar/drift scan .
+
+MIT. Zero config. Sin cloud. Sin setup.
+
+⭐ Si te sirve, deja una estrella: github.com/eduardbar/drift
+
+#TypeScript #OpenSource #VibeCoding #TechDebt #DeveloperTools #CleanCode #WebDev
+
+
+================================================================
+HILO X/TWITTER
+Tweet 1 con imagen: assets/og-v030-x.png
+================================================================
+
+--- Tweet 1 ---
+La IA escribe el código. Pero no asume responsabilidad por él.
+
+Y ese es el problema real del vibe coding.
+
+Construí drift para medirlo. v0.3.0 acaba de salir.
+
+Hilo 🧵
+
+--- Tweet 2 ---
+Meses de vibe coding. CI verde. Deploy funcionando.
+
+Y nadie sabía que el codebase se estaba pudriendo.
+
+Catch blocks vacíos tragando errores reales.
+console.logs en producción.
+Funciones sin return type rompiendo el type inference.
+Imports de tres refactors atrás que nadie borró.
+
+El problema no explota hoy. Se acumula.
+
+--- Tweet 3 ---
+drift escanea tu proyecto TypeScript con análisis AST real.
+
+Le pone un score a cada archivo por deuda AI-generada.
+
+0 = limpio.
+100 = reescribe esto antes de que alguien lo vea.
+
+Un comando:
+
+    npx @eduardbar/drift scan .
+
+Sin config. Sin cloud. Sin setup.
+
+--- Tweet 4 ---
+Nuevo en v0.3.0: --ai
+
+Output JSON para pasarle directamente a Claude/GPT.
+
+Issues ordenados por severidad + esfuerzo.
+Quick wins primero.
+fix_suggestion por issue.
+recommended_action generada.
+
+    drift scan ./src --ai | pbcopy
+
+Pégalo en el chat. El modelo ya sabe dónde empezar.
+
+--- Tweet 5 ---
+Nuevo en v0.3.0: --fix
+
+Ya no solo te digo qué está mal.
+Te muestro qué hacer.
+
+    │ - console.log(userData)
+    │ + Remove this or use a proper logging library
+
+Inline. En consola. Sin salir de la terminal.
+
+--- Tweet 6 ---
+drift-ignore para control quirúrgico.
+
+    // drift-ignore       ← suprime esta línea
+    // drift-ignore-file  ← suprime el archivo entero
+
+drift se corre sobre sí mismo.
+printer.ts tiene drift-ignore-file en la línea 1 porque sus console.log son output intencional, no deuda.
+
+Si no se come su propio dog food, no te lo recomendaría.
+
+--- Tweet 7 ---
+CI en un flag:
+
+    npx @eduardbar/drift scan ./src --min-score 60
+
+Exit 1 si el score supera el umbral.
+
+Un npx en tu GitHub Actions.
+No setup. No config. No cloud.
+Corre en Windows, Linux, macOS.
+
+--- Tweet 8 ---
+Lo corrí en el CLI source de shadcn/ui.
+Score: 0. Producción real. Cero deuda.
+
+Lo corrí en mis propios módulos con vibe coding.
+Score: 40-60.
+
+La diferencia existe. drift la hace medible.
+
+MIT. Open source.
+
+github.com/eduardbar/drift
+
+Si te sirvió, una estrella no cuesta nada ⭐
