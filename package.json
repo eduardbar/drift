@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "drift": "dist/cli.js"
+    "drift": "bin/drift.js"
   },
   "scripts": {
     "build": "tsc",
