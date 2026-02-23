@@ -1,9 +1,45 @@
 // drift-ignore-file
 import kleur from 'kleur'
-import type { DriftReport } from './types.js'
+import type { DriftIssue, DriftReport } from './types.js'
 import { scoreToGrade, severityIcon, scoreBar } from './utils.js'
 
-export function printConsole(report: DriftReport): void {
+function formatFixSuggestion(issue: DriftIssue): string[] {
+  const suggestions: Record<string, string[]> = {
+    'debug-leftover': [
+      'Remove this console.log statement',
+      'Or replace with a proper logging library',
+    ],
+    'any-abuse': [
+      "Replace 'any' with 'unknown' for type safety",
+      'Or define a proper interface/type for this data',
+    ],
+    'dead-code': [
+      'Remove this unused import',
+    ],
+    'catch-swallow': [
+      'Add error handling: console.error(error) or logger.error(error)',
+      'Or re-throw if this should bubble up: throw error',
+    ],
+    'large-function': [
+      'Extract logic into smaller functions',
+      'Each function should do one thing',
+    ],
+    'large-file': [
+      'Split into multiple files by responsibility',
+      'Consider using a directory with index.ts',
+    ],
+    'no-return-type': [
+      'Add explicit return type: function foo(): ReturnType',
+    ],
+    'duplicate-function-name': [
+      'Consolidate with existing function',
+      'Or rename to clarify different behavior',
+    ],
+  }
+  return suggestions[issue.rule] ?? ['Review and fix manually']
+}
+
+export function printConsole(report: DriftReport, options?: { showFix?: boolean }): void {
   const sep = kleur.gray('  ' + '─'.repeat(50))
 
   console.log()
@@ -72,7 +108,18 @@ export function printConsole(report: DriftReport): void {
           `  ` +
           kleur.white(issue.message)
       )
-      if (issue.snippet) {
+      if (options?.showFix) {
+        const fixes = formatFixSuggestion(issue)
+        console.log(kleur.gray('       ┌──────────────────────────────────────────────────────┐'))
+        if (issue.snippet) {
+          const line = issue.snippet.split('\n')[0].slice(0, 48)
+          console.log(kleur.gray('       │  ') + kleur.red('- ' + line))
+        }
+        for (const fix of fixes) {
+          console.log(kleur.gray('       │  ') + kleur.green('+ ' + fix))
+        }
+        console.log(kleur.gray('       └──────────────────────────────────────────────────────┘'))
+      } else if (issue.snippet) {
         const snippetIndent = '    ' + ' '.repeat(icon.length + 1)
         console.log(kleur.gray(`${snippetIndent}${issue.snippet.split('\n')[0].slice(0, 120)}`))
       }

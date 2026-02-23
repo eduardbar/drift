@@ -120,24 +120,29 @@ export function formatMarkdown(report: DriftReport): string {
   return lines.join('\n')
 }
 
-export function formatAIOutput(report: DriftReport): AIOutput {
-  const allIssues: Array<{ file: string; issue: DriftIssue }> = []
+function collectAllIssues(report: DriftReport): Array<{ file: string; issue: DriftIssue }> {
+  const all: Array<{ file: string; issue: DriftIssue }> = []
   for (const file of report.files) {
     for (const issue of file.issues) {
-      allIssues.push({ file: file.path, issue })
+      all.push({ file: file.path, issue })
     }
   }
+  return all
+}
 
-  const sortedIssues = allIssues.sort((a, b) => {
+function sortIssues(issues: Array<{ file: string; issue: DriftIssue }>): Array<{ file: string; issue: DriftIssue }> {
+  return issues.sort((a, b) => {
     const sevDiff = SEVERITY_ORDER[a.issue.severity] - SEVERITY_ORDER[b.issue.severity]
     if (sevDiff !== 0) return sevDiff
     const effortA = RULE_EFFORT[a.issue.rule] ?? 'medium'
     const effortB = RULE_EFFORT[b.issue.rule] ?? 'medium'
     return EFFORT_ORDER[effortA] - EFFORT_ORDER[effortB]
   })
+}
 
-  const priorityOrder: AIIssue[] = sortedIssues.map((item, index) => ({
-    rank: index + 1,
+function buildAIIssue(item: { file: string; issue: DriftIssue }, rank: number): AIIssue {
+  return {
+    rank,
     file: item.file,
     line: item.issue.line,
     rule: item.issue.rule,
@@ -146,20 +151,24 @@ export function formatAIOutput(report: DriftReport): AIOutput {
     snippet: item.issue.snippet,
     fix_suggestion: FIX_SUGGESTIONS[item.issue.rule] ?? 'Review and fix this issue',
     effort: RULE_EFFORT[item.issue.rule] ?? 'medium',
-  }))
+  }
+}
 
+function buildRecommendedAction(priorityOrder: AIIssue[]): string {
+  if (priorityOrder.length === 0) return 'No issues detected. Codebase looks clean.'
+  const lowEffortCount = priorityOrder.filter((i) => i.effort === 'low').length
+  if (lowEffortCount > 0) {
+    return `Focus on fixing ${lowEffortCount} low-effort issue(s) first - they're quick wins.`
+  }
+  return 'Start with the highest priority issue and work through them in order.'
+}
+
+export function formatAIOutput(report: DriftReport): AIOutput {
+  const allIssues = collectAllIssues(report)
+  const sortedIssues = sortIssues(allIssues)
+  const priorityOrder = sortedIssues.map((item, i) => buildAIIssue(item, i + 1))
   const rulesDetected = [...new Set(allIssues.map((i) => i.issue.rule))]
   const grade = scoreToGradeText(report.totalScore)
-
-  let recommendedAction = 'No issues detected. Codebase looks clean.'
-  if (priorityOrder.length > 0) {
-    const lowEffortCount = priorityOrder.filter((i) => i.effort === 'low').length
-    if (lowEffortCount > 0) {
-      recommendedAction = `Focus on fixing ${lowEffortCount} low-effort issue(s) first - they're quick wins that improve code quality significantly.`
-    } else {
-      recommendedAction = 'Start with the highest priority issue listed and work through them in order.'
-    }
-  }
 
   return {
     summary: {
@@ -174,7 +183,7 @@ export function formatAIOutput(report: DriftReport): AIOutput {
       project_type: 'typescript',
       scan_path: report.targetPath,
       rules_detected: rulesDetected,
-      recommended_action: recommendedAction,
+      recommended_action: buildRecommendedAction(priorityOrder),
     },
   }
 }

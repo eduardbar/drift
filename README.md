@@ -72,6 +72,8 @@ npx @eduardbar/drift scan .
 npx @eduardbar/drift scan ./src
 npx @eduardbar/drift scan ./src --output report.md
 npx @eduardbar/drift scan ./src --json
+npx @eduardbar/drift scan ./src --ai
+npx @eduardbar/drift scan ./src --fix
 npx @eduardbar/drift scan ./src --min-score 50
 
 # Install globally if you want the short 'drift' command
@@ -85,7 +87,28 @@ drift scan .
 |------|-------------|
 | `--output <file>` | Write Markdown report to a file |
 | `--json` | Output raw JSON instead of console output |
+| `--ai` | Output AI-optimized JSON for LLM consumption (Claude, GPT, etc.) |
+| `--fix` | Show fix suggestions for each detected issue |
 | `--min-score <n>` | Exit with code 1 if overall score exceeds threshold |
+
+### AI Integration
+
+Use `--ai` to get structured output that LLMs can consume:
+
+```bash
+npx @eduardbar/drift scan ./src --ai
+```
+
+Output includes:
+- Priority-ordered issues (by severity and effort)
+- Fix suggestions for each issue
+- Recommended action for quick wins
+
+Use `--fix` to see concrete fix suggestions in terminal:
+
+```bash
+npx @eduardbar/drift scan ./src --fix
+```
 
 ---
 
