@@ -3,9 +3,6 @@ name: Publish to npm
 on:
   release:
     types: [published]
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
@@ -23,7 +20,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/v{0}', inputs.tag) || '' }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/v{0}', inputs.tag) || github.ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -46,13 +43,26 @@ jobs:
           fi
           echo "Version check passed: $PKG_VERSION"
 
+      - name: Check if version already published
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if npm view @eduardbar/drift@$PKG_VERSION version 2>/dev/null; then
+            echo "Version $PKG_VERSION already published on npm. Skipping."
+            echo "skip_publish=true" >> $GITHUB_ENV
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Install dependencies
+        if: env.skip_publish != 'true'
         run: npm ci
 
       - name: Build
+        if: env.skip_publish != 'true'
         run: npm run build
 
       - name: Publish to npm
+        if: env.skip_publish != 'true'
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
