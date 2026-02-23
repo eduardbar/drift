@@ -27,3 +27,32 @@ export interface DriftReport {
     byRule: Record<string, number>
   }
 }
+
+export interface AIOutput {
+  summary: {
+    score: number
+    grade: string
+    total_issues: number
+    files_affected: number
+    files_clean: number
+  }
+  priority_order: AIIssue[]
+  context_for_ai: {
+    project_type: string
+    scan_path: string
+    rules_detected: string[]
+    recommended_action: string
+  }
+}
+
+export interface AIIssue {
+  rank: number
+  file: string
+  line: number
+  rule: string
+  severity: string
+  message: string
+  snippet: string
+  fix_suggestion: string
+  effort: 'low' | 'medium' | 'high'
+}
