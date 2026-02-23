@@ -1,4 +1,4 @@
-import type { FileReport, DriftReport } from './types.js'
+import type { FileReport, DriftReport, DriftIssue } from './types.js'
 import { scoreToGradeText, severityIcon } from './utils.js'
 
 export function buildReport(targetPath: string, files: FileReport[]): DriftReport {
@@ -30,54 +30,65 @@ export function buildReport(targetPath: string, files: FileReport[]): DriftRepor
   }
 }
 
+function formatHeader(report: DriftReport, grade: { badge: string }): string[] {
+  return [
+    `# drift report`,
+    ``,
+    `> Generated: ${new Date(report.scannedAt).toLocaleString()}`,
+    `> Path: \`${report.targetPath}\``,
+    ``,
+    `## Overall drift score: ${report.totalScore}/100 ${grade.badge}`,
+    ``,
+    `| | Count |`,
+    `|---|---|`,
+    `| Errors | ${report.summary.errors} |`,
+    `| Warnings | ${report.summary.warnings} |`,
+    `| Info | ${report.summary.infos} |`,
+    `| Files with issues | ${report.files.length} |`,
+    `| Total issues | ${report.totalIssues} |`,
+    ``,
+  ]
+}
+
+function formatByRule(byRule: Record<string, number>): string[] {
+  if (Object.keys(byRule).length === 0) return []
+  const sorted = Object.entries(byRule).sort((a, b) => b[1] - a[1])
+  return [
+    `## Issues by rule`,
+    ``,
+    ...sorted.map(([rule, count]) => `- \`${rule}\`: ${count}`),
+    ``,
+  ]
+}
+
+function formatFileSection(file: { path: string; score: number; issues: DriftIssue[] }): string[] {
+  const lines: string[] = [
+    `### \`${file.path}\` — score ${file.score}/100`,
+    ``,
+  ]
+  for (const issue of file.issues) {
+    lines.push(`**${severityIcon(issue.severity)} [${issue.rule}]** Line ${issue.line}: ${issue.message}`)
+    lines.push(`\`\`\`typescript`)
+    lines.push(issue.snippet)
+    lines.push(`\`\`\``)
+    lines.push(``)
+  }
+  return lines
+}
+
 export function formatMarkdown(report: DriftReport): string {
   const grade = scoreToGradeText(report.totalScore)
   const lines: string[] = []
 
-  lines.push(`# drift report`)
-  lines.push(``)
-  lines.push(`> Generated: ${new Date(report.scannedAt).toLocaleString()}`)
-  lines.push(`> Path: \`${report.targetPath}\``)
-  lines.push(``)
-  lines.push(`## Overall drift score: ${report.totalScore}/100 ${grade.badge}`)
-  lines.push(``)
-  lines.push(`| | Count |`)
-  lines.push(`|---|---|`)
-  lines.push(`| Errors | ${report.summary.errors} |`)
-  lines.push(`| Warnings | ${report.summary.warnings} |`)
-  lines.push(`| Info | ${report.summary.infos} |`)
-  lines.push(`| Files with issues | ${report.files.length} |`)
-  lines.push(`| Total issues | ${report.totalIssues} |`)
-  lines.push(``)
-
-  if (Object.keys(report.summary.byRule).length > 0) {
-    lines.push(`## Issues by rule`)
-    lines.push(``)
-    const sorted = Object.entries(report.summary.byRule).sort((a, b) => b[1] - a[1])
-    for (const [rule, count] of sorted) {
-      lines.push(`- \`${rule}\`: ${count}`)
-    }
-    lines.push(``)
-  }
+  lines.push(...formatHeader(report, grade))
+  lines.push(...formatByRule(report.summary.byRule))
 
   if (report.files.length === 0) {
-    lines.push(`## No drift detected`)
-    lines.push(``)
-    lines.push(`No issues found. Clean codebase.`)
+    lines.push(`## No drift detected`, ``, `No issues found. Clean codebase.`)
   } else {
-    lines.push(`## Files (sorted by drift score)`)
-    lines.push(``)
+    lines.push(`## Files (sorted by drift score)`, ``)
     for (const file of report.files) {
-      lines.push(`### \`${file.path}\` — score ${file.score}/100`)
-      lines.push(``)
-      for (const issue of file.issues) {
-        const icon = severityIcon(issue.severity)
-        lines.push(`**${icon} [${issue.rule}]** Line ${issue.line}: ${issue.message}`)
-        lines.push(`\`\`\`typescript`)
-        lines.push(issue.snippet)
-        lines.push(`\`\`\``)
-        lines.push(``)
-      }
+      lines.push(...formatFileSection(file))
     }
   }
 
