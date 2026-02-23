@@ -38,6 +38,7 @@ program
       const md = formatMarkdown(report)
       const outPath = resolve(options.output)
       writeFileSync(outPath, md, 'utf8')
+      // drift-ignore
       console.error(`Report saved to ${outPath}`)
     }
 

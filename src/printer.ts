@@ -1,3 +1,4 @@
+// drift-ignore-file
 import kleur from 'kleur'
 import type { DriftReport } from './types.js'
 import { scoreToGrade, severityIcon, scoreBar } from './utils.js'
