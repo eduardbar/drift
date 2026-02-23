@@ -1,13 +1,44 @@
 # Roadmap
 
-This is where drift is going. Everything here comes from real pain — Reddit threads, Hacker News discussions, GitHub issues, and devs building ad-hoc tools to fill gaps that nothing else covers.
+## What drift is, and what it's trying to become
 
-**Principles that don't change:**
-- Always free for the developer. MIT. No tiers.
-- Zero config to start — one command, one number.
-- Fast — results in under 3 seconds on any normal project.
-- One actionable number, not 400 warnings nobody reads.
-- Readable by humans and by LLMs.
+ESLint tells you if your code is **correct**.  
+SonarQube tells you if your code is **complex**.  
+drift tells you if your code is **going to kill your codebase in 6 months**.
+
+That is a different problem. And no existing tool solves it.
+
+The gap became critical in 2024–2025. AI tools let two engineers generate the technical debt of fifty. The code compiles. The tests pass. ESLint is green. And six months later nobody understands it, refactoring has stopped, and the codebase is effectively write-only.
+
+> *"You're staring at 847 lines of code you didn't write, don't understand, and can't debug without asking the AI to fix it seventeen times until something sticks."*  
+> — Reddit, r/vibecoding
+
+> *"39.9% drop in refactoring activity with AI tools. 8x increase in duplicated code blocks."*  
+> — GitClear, analysis of 211M lines of code
+
+drift's goal is to be the tool that sits between ESLint and SonarQube — lightweight enough to run on every commit, specific enough to catch what neither of them can, and simple enough that a score of 0 actually means something.
+
+**What drift is not:**
+- Not an ESLint replacement for style or correctness rules
+- Not a SonarQube replacement for security scanning
+- Not a cloud product, not a SaaS, not freemium
+
+**What drift is:**
+- A zero-config static analysis CLI that scores your TypeScript project's structural health
+- A CI gate that blocks debt from accumulating silently
+- A shared language for teams to talk about code quality: "our drift score went from 40 to 18 this sprint"
+- Always free. MIT. No tiers.
+
+---
+
+## Principles that don't change
+
+- **Always free for the developer.** MIT. Forever. No paid tier, no cloud lock-in.
+- **Zero config to start.** One command, one number. Config is optional and additive.
+- **Fast.** Results in under 3 seconds on any normal project.
+- **One actionable number, not 400 warnings nobody reads.**
+- **Cross-file analysis.** ESLint sees one file. drift sees the project.
+- **Readable by humans and by LLMs.** `--ai` flag produces structured output for Claude, GPT, Gemini.
 
 ---
 
@@ -18,62 +49,72 @@ This is where drift is going. Everything here comes from real pain — Reddit th
 - `--json`, `--ai` (LLM-optimized output), `--fix` (inline suggestions)
 - `--min-score` for CI (exit 1 if score exceeds threshold)
 - `drift-ignore` per line and per file
-- Windows / Linux / macOS compatible
-- `npx` zero config
+- Windows / Linux / macOS compatible via `npx`
 
 ---
 
 ## What's next
 
-These aren't ordered by date — they're ordered by impact. The most painful gaps first.
-
-### Complexity detection
-
-> *"AI generates correct code but 10x more complex than needed."*
-> — Hacker News, 2025
-
-ESLint checks if your code is correct. It doesn't measure how hard it is to understand.
-
-- **`high-complexity`** — cyclomatic complexity > 10 per function
-- **`deep-nesting`** — nesting depth > 3 levels
-- **`too-many-params`** — functions with more than 4 parameters
-- **`high-coupling`** — modules importing more than 10 distinct dependencies
-- **`promise-style-mix`** — `async/await` and `.then()` mixed in the same file
+Ordered by real developer pain — most common complaint first.
 
 ---
 
-### Historical drift (`drift diff` / `drift trend`)
+### 1. Complexity detection
 
-> *"Zero visibility on whether we're actually improving."*
-> — Reddit r/devsecops
+> *"AI generates a nuclear option for a problem that needed a screwdriver."*  
+> — Hacker News
 
-> *"39.9% drop in refactoring activity with AI tools."*
-> — GitClear, analysis of 211M lines of code
+> *"One of my devs implemented a batching process. He presented extremely robust, high-quality code. The problem was that it was MASSIVE overkill."*  
+> — Hacker News, r/ExperiencedDevs
 
-The current state of the score matters. The trend matters more.
+ESLint has a `complexity` rule. It measures cyclomatic complexity — the number of branches. That's not the same as cognitive complexity — how hard it is to *understand*. Biome has `noExcessiveCognitiveComplexity`. Neither gives you a score.
 
-- **`drift diff HEAD~N`** — show what got worse between two commits
-- **`drift trend --commits 30`** — ASCII chart of score evolution over time
-- **`drift blame`** — which commits added the most debt
+**Planned rules:**
+- `high-complexity` — cyclomatic complexity > 10 per function
+- `deep-nesting` — nesting depth > 3 levels (if inside if inside for inside try = unreadable)
+- `too-many-params` — functions with more than 4 parameters (AI doesn't refactor into objects)
+- `high-coupling` — files importing more than 10 distinct modules
+- `promise-style-mix` — `async/await` and `.then()` mixed in the same file
 
-No database. No server. Git is the source of truth.
+**Why this matters:** Complexity is the #1 reason codebases become write-only. AI generates correct code. Not simple code.
 
 ---
 
-### Architectural boundary detection
+### 2. Cross-file dead code detection
 
-> *"AI coding tools keep breaking architecture — so I built a guard layer."*
-> — Reddit r/javascript (a developer built this ad-hoc, confirming the gap exists)
+> *"After integrating Knip I removed around 3,500 lines of dead code at once."*  
+> — dev.to
 
-This is the largest unaddressed gap in the current tooling landscape. ESLint can validate import paths. It can't tell you if your UI layer is importing directly from your database layer.
+> *"ESLint's architecture works on a file-by-file basis and was never intended to provide linting based on project-wide usage stats."*  
+> — typescript-eslint issue #371, marked **wontfix**
 
-- **`circular-dependency`** — module A depends on B which depends on A
-- **`layer-violation`** — import from a prohibited layer (configurable, zero config by default)
-- **`cross-boundary-import`** — module outside its domain importing from another domain
+ESLint detects unused variables *inside a file*. It cannot detect unused exports, unused files, or dead modules across the project. This is a fundamental architectural limitation — not a missing rule.
 
-Optional config for teams that want explicit rules:
+**Planned features:**
+- `unused-export` — exported symbol never imported anywhere in the project
+- `dead-file` — file never imported by anything
+- `unused-dependency` — package in `package.json` with zero imports in the codebase
+
+**Why this matters:** Dead code is cognitive overhead. Every unused export is a trap for the next developer. ESLint will never fix this — the `wontfix` label is permanent.
+
+---
+
+### 3. Architectural boundary detection
+
+> *"AI coding tools keep breaking architecture — so I built a guard layer."*  
+> — Reddit, r/javascript
+
+This is the largest unaddressed gap in the ecosystem. ESLint can validate import paths with `no-restricted-imports`. It cannot tell you if your UI layer is importing directly from your database layer, or if your domain logic has dependencies on your HTTP framework.
+
+**Planned rules:**
+- `circular-dependency` — module A depends on B which depends on A
+- `layer-violation` — import from a prohibited architectural layer
+- `cross-boundary-import` — module outside its domain importing from another domain
+
+Zero config by default — drift infers what it can from the import graph. For teams that want explicit enforcement:
+
 ```ts
-// drift.config.ts — only needed if you want architectural rules
+// drift.config.ts — optional
 export default {
   boundaries: {
     layers: ['ui', 'domain', 'infrastructure'],
@@ -82,60 +123,91 @@ export default {
 }
 ```
 
-Without config, drift infers what it can from the import graph.
+**Why this matters:** Architecture violations are invisible until they're catastrophic. AI generates code that works today and breaks your architecture silently.
 
 ---
 
-### Pattern inconsistency detection
+### 4. Historical drift (`drift diff` / `drift trend`)
 
-> *"8x increase in duplicated code blocks with AI tools."*
-> — GitClear
+> *"Zero visibility on whether we're actually improving."*  
+> — Reddit, r/devsecops
 
-AI doesn't reuse — it regenerates. The same pattern appears in 6 different forms across the same codebase.
+The current score matters. The trend matters more. Is your codebase getting better or worse sprint over sprint? Nobody knows — because no tool measures it in a way that's easy to track.
 
-- **`semantic-duplication`** — code blocks with equivalent logic detected via AST fingerprinting (not text comparison)
-- **`naming-inconsistency`** — mixed naming conventions in the same scope
+**Planned commands:**
+- `drift diff HEAD~N` — what got worse between two commits
+- `drift trend --commits 30` — ASCII chart of score evolution over time  
+- `drift blame` — which commits introduced the most debt
+
+No database. No server. Git is the source of truth.
+
+**Why this matters:** A score of 45 means nothing without context. A score that went from 80 to 45 over 4 sprints means your team is actually improving.
 
 ---
 
-### Static HTML report + README badge
+### 5. AI authorship heuristics
 
-> *"It's all disconnected — different dashboards, zero visibility."*
-> — Reddit r/devsecops
+> *"Companies will try to overcome AI-generated technical debt by throwing more AI at the problem."*  
+> — Hacker News
+
+> *"When 95% of code is projected to be AI-generated by 2030 but 45% of it fails basic security tests, we're building a house of cards."*  
+> — Reddit, r/vibecoding
+
+The hardest and most differentiated item on this list. Patterns that are statistically more common in AI-generated code than human-written code.
+
+**Planned rules:**
+- `over-commented` — comments that describe exactly what the code already says (AI documents the obvious)
+- `unnecessary-abstraction` — class or interface used in exactly one place (AI loves creating things it doesn't use)
+- `hardcoded-config` — strings that look like URLs, tokens, or environment-specific paths hardcoded in logic
+- `inconsistent-error-handling` — different error handling patterns in equivalent functions across the same file
+
+**Why this matters:** These patterns don't fail tests. ESLint doesn't catch them. They accumulate until the codebase is unmaintainable.
+
+---
+
+### 6. Static HTML report + README badge
+
+> *"It's all disconnected — different dashboards, zero visibility."*  
+> — Reddit, r/devsecops
 
 No server. No account. No cloud.
 
-- **`drift report`** — generates a single self-contained `drift-report.html` file, open in any browser
-- **`drift badge`** — generates a `badge.svg` with the current score for your README
-- **`drift ci`** — structured output with GitHub Actions annotations on the exact lines
+**Planned features:**
+- `drift report` — single self-contained `drift-report.html`, open in any browser
+- `drift badge` — `badge.svg` with the current score for your README  
+- `drift ci` — GitHub Actions annotations on the exact lines with issues (inline in the PR diff)
 
 ---
 
-### ESLint plugin
+### 7. ESLint plugin
 
 Meet developers where they already are.
 
-- **`eslint-plugin-drift`** — exposes drift's rules as standard ESLint rules, configurable as `error` or `warn`
+- `eslint-plugin-drift` — exposes drift's rules as standard ESLint rules
 - Compatible with ESLint 9 flat config
-- The CLI remains the canonical way to use drift — the plugin is an integration path for teams already deep in ESLint
+- The CLI remains canonical — the plugin is an integration path for teams already deep in ESLint
+
+**Why this matters:** Not everyone will install a new CLI. An ESLint plugin removes all friction and puts drift's rules into a toolchain devs already trust.
 
 ---
 
-### AI authorship heuristics
+### 8. Pattern inconsistency detection
 
-> *"No one in the company knows how to deal with it other than throwing more tokens at it."*
-> — Hacker News
+> *"8x increase in duplicated code blocks with AI tools."*  
+> — GitClear
 
-The hardest and most differentiated thing on this list. Detect patterns that are statistically more common in AI-generated code than human-written code.
+AI doesn't reuse — it regenerates. The same logic appears in 4 different forms across the same file.
 
-- **`over-commented`** — comments that describe exactly what the code already says
-- **`unnecessary-abstraction`** — class or interface used in exactly one place
-- **`hardcoded-config`** — strings that look like URLs, tokens, or paths hardcoded in logic
+**Planned rules:**
+- `semantic-duplication` — code blocks with equivalent logic detected via AST fingerprinting (not text comparison — that's what grep does)
+- `naming-inconsistency` — mixed naming conventions in the same module (camelCase + snake_case + PascalCase for the same concept)
 
 ---
 
 ## How to influence this roadmap
 
-Open an issue. If you're seeing a pattern that drift doesn't catch, describe it with a code example and we'll add it. The rules in drift exist because real developers kept finding the same thing in AI-generated code.
+Open an issue. If you're seeing a pattern that drift doesn't catch, describe it with a code example. Every rule in drift exists because real developers kept finding the same thing in AI-generated code.
 
-The roadmap grows from what the community reports — not from assumptions.
+The roadmap grows from community reports — not from assumptions.
+
+If you want to implement one of these, see [CONTRIBUTING.md](./CONTRIBUTING.md).
