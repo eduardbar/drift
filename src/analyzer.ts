@@ -26,6 +26,21 @@ const RULE_WEIGHTS: Record<string, { severity: DriftIssue['severity']; weight: n
 
 type FunctionLike = FunctionDeclaration | ArrowFunction | FunctionExpression | MethodDeclaration
 
+function hasIgnoreComment(file: SourceFile, line: number): boolean {
+  const lines = file.getFullText().split('\n')
+  const currentLine = lines[line - 1] ?? ''
+  const prevLine = lines[line - 2] ?? ''
+
+  if (/\/\/\s*drift-ignore\b/.test(currentLine)) return true
+  if (/\/\/\s*drift-ignore\b/.test(prevLine)) return true
+  return false
+}
+
+function isFileIgnored(file: SourceFile): boolean {
+  const firstLines = file.getFullText().split('\n').slice(0, 10).join('\n')
+  return /\/\/\s*drift-ignore-file\b/.test(firstLines)
+}
+
 function getSnippet(node: Node, file: SourceFile): string {
   const startLine = node.getStartLineNumber()
   const lines = file.getFullText().split('\n')
@@ -68,12 +83,14 @@ function detectLargeFunctions(file: SourceFile): DriftIssue[] {
 
   for (const fn of fns) {
     const lines = getFunctionLikeLines(fn)
+    const startLine = fn.getStartLineNumber()
     if (lines > 50) {
+      if (hasIgnoreComment(file, startLine)) continue
       issues.push({
         rule: 'large-function',
         severity: 'error',
         message: `Function spans ${lines} lines (threshold: 50). AI tends to dump logic into single functions.`,
-        line: fn.getStartLineNumber(),
+        line: startLine,
         column: fn.getStartLinePos(),
         snippet: getSnippet(fn, file),
       })
@@ -87,12 +104,14 @@ function detectDebugLeftovers(file: SourceFile): DriftIssue[] {
 
   for (const call of file.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const expr = call.getExpression().getText()
+    const line = call.getStartLineNumber()
     if (/^console\.(log|warn|error|debug|info)\b/.test(expr)) {
+      if (hasIgnoreComment(file, line)) continue
       issues.push({
         rule: 'debug-leftover',
         severity: 'warning',
         message: `console.${expr.split('.')[1]} left in production code.`,
-        line: call.getStartLineNumber(),
+        line,
         column: call.getStartLinePos(),
         snippet: getSnippet(call, file),
       })
@@ -100,15 +119,16 @@ function detectDebugLeftovers(file: SourceFile): DriftIssue[] {
   }
 
   const lines = file.getFullText().split('\n')
-  lines.forEach((line, i) => {
-    if (/\/\/\s*(TODO|FIXME|HACK|XXX|TEMP)\b/i.test(line)) {
+  lines.forEach((lineContent, i) => {
+    if (/\/\/\s*(TODO|FIXME|HACK|XXX|TEMP)\b/i.test(lineContent)) {
+      if (hasIgnoreComment(file, i + 1)) return
       issues.push({
         rule: 'debug-leftover',
         severity: 'warning',
-        message: `Unresolved marker found: ${line.trim().slice(0, 60)}`,
+        message: `Unresolved marker found: ${lineContent.trim().slice(0, 60)}`,
         line: i + 1,
         column: 1,
-        snippet: line.trim().slice(0, 120),
+        snippet: lineContent.trim().slice(0, 120),
       })
     }
   })
@@ -228,6 +248,14 @@ function calculateScore(issues: DriftIssue[]): number {
 }
 
 export function analyzeFile(file: SourceFile): FileReport {
+  if (isFileIgnored(file)) {
+    return {
+      path: file.getFilePath(),
+      issues: [],
+      score: 0,
+    }
+  }
+
   const issues: DriftIssue[] = [
     ...detectLargeFile(file),
     ...detectLargeFunctions(file),
