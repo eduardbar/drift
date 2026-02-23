@@ -1,6 +1,17 @@
 # Contributing to drift
 
-First off — thanks for taking the time. drift is built on the idea that the community knows best what patterns AI leaves behind, and every rule added here helps every TypeScript developer who runs this.
+Thanks for taking the time. drift exists because ESLint solves correctness and SonarQube solves enterprise complexity — but nobody solved the middle: code that compiles, passes linting, and quietly accumulates into a codebase no one can maintain six months later.
+
+Every rule in drift was added because real developers kept finding the same pattern in AI-generated code and had no automated way to catch it. That's the contribution model: you see something repeatedly, you open an issue, we add a rule.
+
+**The gap drift fills:**
+
+| Tool | What it catches | What it misses |
+|------|-----------------|----------------|
+| ESLint | Correctness, style, per-file patterns | Cross-file dead code, architecture violations, complexity trends |
+| SonarQube | Enterprise security, deep complexity | Lightweight, fast, free for small teams |
+| knip | Unused exports and files | Structural health, AI-specific patterns, score |
+| **drift** | Structural debt, AI patterns, cross-file analysis, score | Style, correctness (intentionally) |
 
 ## How to contribute
 
@@ -89,14 +100,16 @@ A good drift rule:
 
 ### What drift is NOT
 
-drift is not a linter for style or correctness. That's ESLint's job and it does it well.
+drift is not a linter for style or correctness. That's ESLint's job and it does it well. drift does not replace ESLint — it runs alongside it.
 
 drift detects patterns that are:
-- Syntactically correct
-- Pass linting
+- Syntactically correct and pass linting
 - But accumulate into a codebase no one can maintain
+- Specifically amplified by AI code generation tools
 
-If your contribution overlaps with an ESLint rule, it probably doesn't belong in drift.
+If your proposed rule overlaps with an existing ESLint rule (e.g. `no-unused-vars`, `complexity`, `no-empty`), it does not belong in drift — unless drift can do something ESLint fundamentally cannot (e.g. cross-file analysis, architectural context, project-wide scoring).
+
+The test: *"Could ESLint catch this with a single-file rule?"* If yes, it's probably not a drift rule.
 
 ## Development setup
 
