@@ -1,6 +1,8 @@
 import * as fs from 'node:fs'
 import * as crypto from 'node:crypto'
 import * as path from 'node:path'
+import * as os from 'node:os'
+import { execSync } from 'node:child_process'
 import {
   Project,
   SourceFile,
@@ -11,7 +13,11 @@ import {
   FunctionExpression,
   MethodDeclaration,
 } from 'ts-morph'
-import type { DriftIssue, FileReport, DriftConfig, LayerDefinition, ModuleBoundary } from './types.js'
+import type {
+  DriftIssue, FileReport, DriftConfig, LayerDefinition, ModuleBoundary,
+  HistoricalAnalysis, TrendDataPoint, BlameAttribution, DriftTrendReport, DriftBlameReport,
+} from './types.js'
+import { buildReport } from './reporter.js'
 
 // Rules and their drift score weight
 export const RULE_WEIGHTS: Record<string, { severity: DriftIssue['severity']; weight: number }> = {
@@ -1448,4 +1454,495 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
   }
 
   return reports
+}
+
+// ---------------------------------------------------------------------------
+// Git helpers
+// ---------------------------------------------------------------------------
+
+/** Analyse a file given its absolute path string (wraps analyzeFile). */
+function analyzeFilePath(filePath: string): FileReport {
+  const proj = new Project({
+    skipAddingFilesFromTsConfig: true,
+    compilerOptions: { allowJs: true },
+  })
+  const sf = proj.addSourceFileAtPath(filePath)
+  return analyzeFile(sf)
+}
+
+/**
+ * Execute a git command synchronously and return stdout.
+ * Throws a descriptive error if the command fails or git is not available.
+ */
+function execGit(cmd: string, cwd: string): string {
+  try {
+    return execSync(cmd, { cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    throw new Error(`Git command failed: ${cmd}\n${msg}`)
+  }
+}
+
+/**
+ * Verify the given directory is a git repository.
+ * Throws if git is not available or the directory is not a repo.
+ */
+function assertGitRepo(cwd: string): void {
+  try {
+    execGit('git rev-parse --is-inside-work-tree', cwd)
+  } catch {
+    throw new Error(`Directory is not a git repository: ${cwd}`)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Historical analysis helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Analyse a single file as it existed at a given commit hash.
+ * Writes the blob to a temp file, runs analyzeFile, then cleans up.
+ */
+async function analyzeFileAtCommit(
+  filePath: string,
+  commitHash: string,
+  projectRoot: string,
+): Promise<FileReport> {
+  const relPath = path.relative(projectRoot, filePath).replace(/\\/g, '/')
+  const blob = execGit(`git show ${commitHash}:${relPath}`, projectRoot)
+
+  const tmpFile = path.join(os.tmpdir(), `drift-${crypto.randomBytes(8).toString('hex')}.ts`)
+  try {
+    fs.writeFileSync(tmpFile, blob, 'utf8')
+    const report = analyzeFilePath(tmpFile)
+    // Replace temp path with original for readable output
+    return { ...report, path: filePath }
+  } finally {
+    try { fs.unlinkSync(tmpFile) } catch { /* ignore cleanup errors */ }
+  }
+}
+
+/**
+ * Analyse all TypeScript files changed in a single commit.
+ */
+async function analyzeSingleCommit(
+  commitHash: string,
+  targetPath: string,
+): Promise<HistoricalAnalysis> {
+  // --name-only lists changed files; format gives metadata
+  const raw = execGit(
+    `git show --name-only --format="%H|%ai|%an|%s" ${commitHash}`,
+    targetPath,
+  )
+
+  const lines = raw.split('\n')
+  // First non-empty line is the metadata line
+  const metaLine = lines[0] ?? ''
+  const [hash, dateStr, author, ...msgParts] = metaLine.split('|')
+  const message = msgParts.join('|').trim()
+  const commitDate = new Date(dateStr ?? '')
+
+  // Collect changed .ts/.tsx files (lines after the empty separator)
+  const changedFiles: string[] = []
+  let pastSeparator = false
+  for (const line of lines.slice(1)) {
+    if (!pastSeparator && line.trim() === '') { pastSeparator = true; continue }
+    if (pastSeparator && (line.endsWith('.ts') || line.endsWith('.tsx'))) {
+      changedFiles.push(path.join(targetPath, line.trim()))
+    }
+  }
+
+  const fileReports = await Promise.all(
+    changedFiles.map(f => analyzeFileAtCommit(f, hash ?? commitHash, targetPath).catch(() => null)),
+  )
+
+  const validReports = fileReports.filter((r): r is FileReport => r !== null)
+  const totalScore = validReports.reduce((s, r) => s + r.score, 0)
+  const averageScore = validReports.length > 0 ? totalScore / validReports.length : 0
+
+  return {
+    commitHash: hash ?? commitHash,
+    commitDate,
+    author: author ?? '',
+    message,
+    files: validReports,
+    totalScore,
+    averageScore,
+  }
+}
+
+/**
+ * Run historical analysis over all commits since a given date.
+ * Returns results ordered chronologically (oldest first).
+ */
+async function analyzeHistoricalCommits(
+  sinceDate: Date,
+  targetPath: string,
+  maxCommits: number,
+): Promise<HistoricalAnalysis[]> {
+  assertGitRepo(targetPath)
+
+  const isoDate = sinceDate.toISOString()
+  const raw = execGit(
+    `git log --since="${isoDate}" --format="%H" --max-count=${maxCommits}`,
+    targetPath,
+  )
+
+  if (!raw) return []
+
+  const hashes = raw.split('\n').filter(Boolean)
+  const analyses = await Promise.all(
+    hashes.map(h => analyzeSingleCommit(h, targetPath).catch(() => null)),
+  )
+
+  return analyses
+    .filter((a): a is HistoricalAnalysis => a !== null)
+    .sort((a, b) => a.commitDate.getTime() - b.commitDate.getTime())
+}
+
+// ---------------------------------------------------------------------------
+// TrendAnalyzer
+// ---------------------------------------------------------------------------
+
+export class TrendAnalyzer {
+  private readonly projectPath: string
+  private readonly config: DriftConfig | undefined
+
+  constructor(projectPath: string, config?: DriftConfig) {
+    this.projectPath = projectPath
+    this.config = config
+  }
+
+  // --- Static utility methods -----------------------------------------------
+
+  static calculateMovingAverage(data: TrendDataPoint[], windowSize: number): number[] {
+    return data.map((_, i) => {
+      const start = Math.max(0, i - windowSize + 1)
+      const window = data.slice(start, i + 1)
+      return window.reduce((s, p) => s + p.score, 0) / window.length
+    })
+  }
+
+  static linearRegression(data: TrendDataPoint[]): { slope: number; intercept: number; r2: number } {
+    const n = data.length
+    if (n < 2) return { slope: 0, intercept: data[0]?.score ?? 0, r2: 0 }
+
+    const xs = data.map((_, i) => i)
+    const ys = data.map(p => p.score)
+
+    const xMean = xs.reduce((s, x) => s + x, 0) / n
+    const yMean = ys.reduce((s, y) => s + y, 0) / n
+
+    const ssXX = xs.reduce((s, x) => s + (x - xMean) ** 2, 0)
+    const ssXY = xs.reduce((s, x, i) => s + (x - xMean) * (ys[i]! - yMean), 0)
+    const ssYY = ys.reduce((s, y) => s + (y - yMean) ** 2, 0)
+
+    const slope = ssXX === 0 ? 0 : ssXY / ssXX
+    const intercept = yMean - slope * xMean
+    const r2 = ssYY === 0 ? 1 : (ssXY ** 2) / (ssXX * ssYY)
+
+    return { slope, intercept, r2 }
+  }
+
+  /** Generate a simple horizontal ASCII bar chart (one bar per data point). */
+  static generateTrendChart(data: TrendDataPoint[]): string {
+    if (data.length === 0) return '(no data)'
+
+    const maxScore = Math.max(...data.map(p => p.score), 1)
+    const chartWidth = 40
+
+    const lines = data.map(p => {
+      const barLen = Math.round((p.score / maxScore) * chartWidth)
+      const bar = '█'.repeat(barLen)
+      const dateStr = p.date.toISOString().slice(0, 10)
+      return `${dateStr} │${bar.padEnd(chartWidth)} ${p.score.toFixed(1)}`
+    })
+
+    return lines.join('\n')
+  }
+
+  // --- Instance method -------------------------------------------------------
+
+  async analyzeTrend(options: {
+    period?: 'week' | 'month' | 'quarter' | 'year'
+    since?: string
+    until?: string
+  }): Promise<DriftTrendReport> {
+    assertGitRepo(this.projectPath)
+
+    const periodDays: Record<string, number> = {
+      week: 7, month: 30, quarter: 90, year: 365,
+    }
+    const days = periodDays[options.period ?? 'month'] ?? 30
+    const sinceDate = options.since
+      ? new Date(options.since)
+      : new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+
+    const historicalAnalyses = await analyzeHistoricalCommits(sinceDate, this.projectPath, 100)
+
+    const trendPoints: TrendDataPoint[] = historicalAnalyses.map(h => ({
+      date: h.commitDate,
+      score: h.averageScore,
+      fileCount: h.files.length,
+      avgIssuesPerFile: h.files.length > 0
+        ? h.files.reduce((s, f) => s + f.issues.length, 0) / h.files.length
+        : 0,
+    }))
+
+    const regression = TrendAnalyzer.linearRegression(trendPoints)
+
+    // Current state report
+    const currentFiles = analyzeProject(this.projectPath, this.config)
+    const baseReport = buildReport(this.projectPath, currentFiles)
+
+    return {
+      ...baseReport,
+      trend: trendPoints,
+      regression,
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// BlameAnalyzer
+// ---------------------------------------------------------------------------
+
+interface GitBlameEntry {
+  hash: string
+  author: string
+  email: string
+  line: string
+}
+
+function parseGitBlame(blameOutput: string): GitBlameEntry[] {
+  const entries: GitBlameEntry[] = []
+  const lines = blameOutput.split('\n')
+  let i = 0
+
+  while (i < lines.length) {
+    const headerLine = lines[i]
+    if (!headerLine || headerLine.trim() === '') { i++; continue }
+
+    // Porcelain blame format: first line is "<hash> <orig-line> <final-line> [<num-lines>]"
+    const headerMatch = headerLine.match(/^([0-9a-f]{40})\s/)
+    if (!headerMatch) { i++; continue }
+
+    const hash = headerMatch[1]!
+    let author = ''
+    let email = ''
+    let codeLine = ''
+    i++
+
+    while (i < lines.length && !lines[i]!.match(/^[0-9a-f]{40}\s/)) {
+      const l = lines[i]!
+      if (l.startsWith('author ')) author = l.slice(7).trim()
+      else if (l.startsWith('author-mail ')) email = l.slice(12).replace(/[<>]/g, '').trim()
+      else if (l.startsWith('\t')) codeLine = l.slice(1)
+      i++
+    }
+
+    entries.push({ hash, author, email, line: codeLine })
+  }
+
+  return entries
+}
+
+export class BlameAnalyzer {
+  private readonly projectPath: string
+  private readonly config: DriftConfig | undefined
+
+  constructor(projectPath: string, config?: DriftConfig) {
+    this.projectPath = projectPath
+    this.config = config
+  }
+
+  /** Blame a single file: returns per-author attribution. */
+  static async analyzeFileBlame(filePath: string): Promise<BlameAttribution[]> {
+    const dir = path.dirname(filePath)
+    assertGitRepo(dir)
+
+    const blameOutput = execGit(`git blame --porcelain "${filePath}"`, dir)
+    const entries = parseGitBlame(blameOutput)
+
+    // Analyse issues in the file
+    const report = analyzeFilePath(filePath)
+
+    // Map line numbers of issues to authors
+    const issuesByLine = new Map<number, number>()
+    for (const issue of report.issues) {
+      issuesByLine.set(issue.line, (issuesByLine.get(issue.line) ?? 0) + 1)
+    }
+
+    // Aggregate by author
+    const byAuthor = new Map<string, BlameAttribution>()
+    entries.forEach((entry, idx) => {
+      const key = entry.email || entry.author
+      if (!byAuthor.has(key)) {
+        byAuthor.set(key, {
+          author: entry.author,
+          email: entry.email,
+          commits: 0,
+          linesChanged: 0,
+          issuesIntroduced: 0,
+          avgScoreImpact: 0,
+        })
+      }
+      const attr = byAuthor.get(key)!
+      attr.linesChanged++
+      const lineNum = idx + 1
+      if (issuesByLine.has(lineNum)) {
+        attr.issuesIntroduced += issuesByLine.get(lineNum)!
+      }
+    })
+
+    // Count unique commits per author
+    const commitsByAuthor = new Map<string, Set<string>>()
+    for (const entry of entries) {
+      const key = entry.email || entry.author
+      if (!commitsByAuthor.has(key)) commitsByAuthor.set(key, new Set())
+      commitsByAuthor.get(key)!.add(entry.hash)
+    }
+
+    const total = entries.length || 1
+    const results: BlameAttribution[] = []
+    for (const [key, attr] of byAuthor) {
+      attr.commits = commitsByAuthor.get(key)?.size ?? 0
+      attr.avgScoreImpact = (attr.linesChanged / total) * report.score
+      results.push(attr)
+    }
+
+    return results.sort((a, b) => b.issuesIntroduced - a.issuesIntroduced)
+  }
+
+  /** Blame for a specific rule across all files in targetPath. */
+  static async analyzeRuleBlame(rule: string, targetPath: string): Promise<BlameAttribution[]> {
+    assertGitRepo(targetPath)
+
+    const tsFiles = fs
+      .readdirSync(targetPath, { recursive: true, encoding: 'utf8' })
+      .filter((f): f is string => (f.endsWith('.ts') || f.endsWith('.tsx')) && !f.includes('node_modules'))
+      .map(f => path.join(targetPath, f))
+
+    const combined = new Map<string, BlameAttribution>()
+
+    for (const file of tsFiles) {
+      const report = analyzeFilePath(file)
+      const ruleIssues = report.issues.filter(i => i.rule === rule)
+      if (ruleIssues.length === 0) continue
+
+      let blameEntries: GitBlameEntry[] = []
+      try {
+        const blameOutput = execGit(`git blame --porcelain "${file}"`, targetPath)
+        blameEntries = parseGitBlame(blameOutput)
+      } catch { continue }
+
+      for (const issue of ruleIssues) {
+        const entry = blameEntries[issue.line - 1]
+        if (!entry) continue
+        const key = entry.email || entry.author
+        if (!combined.has(key)) {
+          combined.set(key, {
+            author: entry.author,
+            email: entry.email,
+            commits: 0,
+            linesChanged: 0,
+            issuesIntroduced: 0,
+            avgScoreImpact: 0,
+          })
+        }
+        const attr = combined.get(key)!
+        attr.issuesIntroduced++
+        attr.avgScoreImpact += RULE_WEIGHTS[rule]?.weight ?? 5
+      }
+    }
+
+    return Array.from(combined.values()).sort((a, b) => b.issuesIntroduced - a.issuesIntroduced)
+  }
+
+  /** Overall blame across all files and rules. */
+  static async analyzeOverallBlame(targetPath: string): Promise<BlameAttribution[]> {
+    assertGitRepo(targetPath)
+
+    const tsFiles = fs
+      .readdirSync(targetPath, { recursive: true, encoding: 'utf8' })
+      .filter((f): f is string => (f.endsWith('.ts') || f.endsWith('.tsx')) && !f.includes('node_modules'))
+      .map(f => path.join(targetPath, f))
+
+    const combined = new Map<string, BlameAttribution>()
+    const commitsByAuthor = new Map<string, Set<string>>()
+
+    for (const file of tsFiles) {
+      let blameEntries: GitBlameEntry[] = []
+      try {
+        const blameOutput = execGit(`git blame --porcelain "${file}"`, targetPath)
+        blameEntries = parseGitBlame(blameOutput)
+      } catch { continue }
+
+      const report = analyzeFilePath(file)
+      const issuesByLine = new Map<number, number>()
+      for (const issue of report.issues) {
+        issuesByLine.set(issue.line, (issuesByLine.get(issue.line) ?? 0) + 1)
+      }
+
+      blameEntries.forEach((entry, idx) => {
+        const key = entry.email || entry.author
+        if (!combined.has(key)) {
+          combined.set(key, {
+            author: entry.author,
+            email: entry.email,
+            commits: 0,
+            linesChanged: 0,
+            issuesIntroduced: 0,
+            avgScoreImpact: 0,
+          })
+          commitsByAuthor.set(key, new Set())
+        }
+        const attr = combined.get(key)!
+        attr.linesChanged++
+        commitsByAuthor.get(key)!.add(entry.hash)
+        const lineNum = idx + 1
+        if (issuesByLine.has(lineNum)) {
+          attr.issuesIntroduced += issuesByLine.get(lineNum)!
+          attr.avgScoreImpact += report.score * (1 / (blameEntries.length || 1))
+        }
+      })
+    }
+
+    for (const [key, attr] of combined) {
+      attr.commits = commitsByAuthor.get(key)?.size ?? 0
+    }
+
+    return Array.from(combined.values()).sort((a, b) => b.issuesIntroduced - a.issuesIntroduced)
+  }
+
+  // --- Instance method -------------------------------------------------------
+
+  async analyzeBlame(options: {
+    target?: 'file' | 'rule' | 'overall'
+    top?: number
+    filePath?: string
+    rule?: string
+  }): Promise<DriftBlameReport> {
+    assertGitRepo(this.projectPath)
+
+    let blame: BlameAttribution[] = []
+    const mode = options.target ?? 'overall'
+
+    if (mode === 'file' && options.filePath) {
+      blame = await BlameAnalyzer.analyzeFileBlame(options.filePath)
+    } else if (mode === 'rule' && options.rule) {
+      blame = await BlameAnalyzer.analyzeRuleBlame(options.rule, this.projectPath)
+    } else {
+      blame = await BlameAnalyzer.analyzeOverallBlame(this.projectPath)
+    }
+
+    if (options.top) {
+      blame = blame.slice(0, options.top)
+    }
+
+    const currentFiles = analyzeProject(this.projectPath, this.config)
+    const baseReport = buildReport(this.projectPath, currentFiles)
+
+    return { ...baseReport, blame }
+  }
 }

@@ -9,12 +9,24 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+---
+
+## [0.9.0] - 2026-02-24
+
 ### Added
 
-- **Phase 6: Static HTML report + README badge** — output commands for visibility
+- **Phase 4: Historical drift analysis**
+  - `drift trend [path]` — `TrendAnalyzer` reads git log and computes drift score per commit over time; outputs a score-over-time table and detects score regressions across the project history
+  - `drift blame [path]` — `BlameAnalyzer` maps each detected issue to the git commit and author that introduced it using `git blame`; output includes author, commit hash, date, and issue description per line
+- **Phase 6: Static HTML report + README badge + CI annotations**
   - `drift report [path]` — generates a self-contained `drift-report.html` with score, per-file breakdown, collapsible issue list, and fix suggestions
-  - `drift badge [path]` — generates a `badge.svg` with the current drift score for your README
+  - `drift badge [path]` — generates a `badge.svg` with the current drift score for embedding in a README
   - `drift ci [path]` — emits GitHub Actions workflow annotations inline on PR diffs and writes a step summary; supports `--min-score` to gate PRs
+
+### Fixed
+
+- `VERSION` is now read dynamically from `package.json` at runtime — no longer hardcoded as a string constant in `cli.ts`
+- Added missing `program.parse()` call in `cli.ts` — subcommands (`scan`, `diff`, `trend`, `blame`, `report`, `badge`, `ci`) were registered but never executed when the CLI was invoked
 
 ---
 

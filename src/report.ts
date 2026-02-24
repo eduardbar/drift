@@ -1,7 +1,9 @@
 import { basename } from 'node:path'
+import { createRequire } from 'node:module'
 import { DriftReport, DriftIssue } from './types.js'
 
-const VERSION = '0.6.0'
+const require = createRequire(import.meta.url)
+const { version: VERSION } = require('../package.json') as { version: string }
 
 function severityColor(severity: DriftIssue['severity']): string {
   switch (severity) {

@@ -2,6 +2,9 @@
 import { Command } from 'commander'
 import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { createRequire } from 'node:module'
+const require = createRequire(import.meta.url)
+const { version: VERSION } = require('../package.json') as { version: string }
 import { analyzeProject } from './analyzer.js'
 import { buildReport, formatMarkdown, formatAIOutput } from './reporter.js'
 import { printConsole, printDiff } from './printer.js'
@@ -11,13 +14,14 @@ import { computeDiff } from './diff.js'
 import { generateHtmlReport } from './report.js'
 import { generateBadge } from './badge.js'
 import { emitCIAnnotations, printCISummary } from './ci.js'
+import { TrendAnalyzer, BlameAnalyzer } from './analyzer.js'
 
 const program = new Command()
 
 program
   .name('drift')
   .description('Detect silent technical debt left by AI-generated code')
-  .version('0.6.0')
+  .version(VERSION)
 
 program
   .command('scan [path]', { isDefault: true })
@@ -161,6 +165,48 @@ program
     if (minScore > 0 && report.totalScore > minScore) {
       process.exit(1)
     }
+  })
+
+program
+  .command('trend [period]')
+  .description('Analyze trend of technical debt over time')
+  .option('--since <date>', 'Start date for trend analysis (ISO format)')
+  .option('--until <date>', 'End date for trend analysis (ISO format)')
+  .action(async (period: string | undefined, options: { since?: string; until?: string }) => {
+    const resolvedPath = resolve('.')
+    process.stderr.write(`\nAnalyzing trend in ${resolvedPath}...\n`)
+    
+    const config = await loadConfig(resolvedPath)
+    const analyzer = new TrendAnalyzer(resolvedPath, config)
+    
+    const trendData = await analyzer.analyzeTrend({
+      period: period as 'week' | 'month' | 'quarter' | 'year',
+      since: options.since,
+      until: options.until
+    })
+    
+    process.stderr.write(`\nTrend analysis complete:\n`)
+    process.stdout.write(JSON.stringify(trendData, null, 2) + '\n')
+  })
+
+program
+  .command('blame [target]')
+  .description('Analyze which files/rules contribute most to technical debt')
+  .option('--top <n>', 'Number of top contributors to show (default: 10)', '10')
+  .action(async (target: string | undefined, options: { top: string }) => {
+    const resolvedPath = resolve('.')
+    process.stderr.write(`\nAnalyzing blame in ${resolvedPath}...\n`)
+    
+    const config = await loadConfig(resolvedPath)
+    const analyzer = new BlameAnalyzer(resolvedPath, config)
+    
+    const blameData = await analyzer.analyzeBlame({
+      target: target as 'file' | 'rule' | 'overall' | undefined,
+      top: Number(options.top)
+    })
+    
+    process.stderr.write(`\nBlame analysis complete:\n`)
+    process.stdout.write(JSON.stringify(blameData, null, 2) + '\n')
   })
 
 program.parse()

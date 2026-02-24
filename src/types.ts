@@ -112,3 +112,47 @@ export interface DriftDiff {
   newIssuesCount: number
   resolvedIssuesCount: number
 }
+
+/** Historical analysis data for a single commit */
+export interface HistoricalAnalysis {
+  commitHash: string;
+  commitDate: Date;
+  author: string;
+  message: string;
+  files: FileReport[];
+  totalScore: number;
+  averageScore: number;
+}
+
+/** Trend data point for score evolution */
+export interface TrendDataPoint {
+  date: Date;
+  score: number;
+  fileCount: number;
+  avgIssuesPerFile: number;
+}
+
+/** Blame attribution data */
+export interface BlameAttribution {
+  author: string;
+  email: string;
+  commits: number;
+  linesChanged: number;
+  issuesIntroduced: number;
+  avgScoreImpact: number;
+}
+
+/** Extended DriftReport with historical context */
+export interface DriftTrendReport extends DriftReport {
+  trend: TrendDataPoint[];
+  regression: {
+    slope: number;
+    intercept: number;
+    r2: number;
+  };
+}
+
+/** Extended DriftReport with blame data */
+export interface DriftBlameReport extends DriftReport {
+  blame: BlameAttribution[];
+}
