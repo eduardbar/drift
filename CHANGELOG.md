@@ -23,6 +23,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `loadConfig()` — new async config loader in `src/config.ts`. Discovers `drift.config.ts / .js / .json` at project root. All rules except `layer-violation` and `cross-boundary-import` work without any config.
 - `DriftConfig`, `LayerDefinition`, `ModuleBoundary` types exported from the package.
 - Fix suggestions for all Phase 3 rules in `src/printer.ts`.
+- **Phase 4: `drift diff` — historical comparison**:
+  - `drift diff [ref]` command: compare current project state against any git ref (commit, branch, tag). Default ref: `HEAD~1`.
+  - Uses `git show <ref>:<file>` for non-destructive extraction — no checkout, no stash, no repo state changes.
+  - Detects new issues introduced and issues resolved per file.
+  - Shows score delta per file and overall (`+N` red = regression, `-N` green = improvement).
+  - `--json` flag outputs raw `DriftDiff` JSON for CI consumption.
+  - New types `DriftDiff` and `FileDiff` exported from the package.
+  - New `computeDiff()` function exported for programmatic use.
 
 ---
 

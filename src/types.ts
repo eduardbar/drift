@@ -87,3 +87,28 @@ export interface DriftConfig {
   layers?: LayerDefinition[]
   modules?: ModuleBoundary[]
 }
+
+// ---------------------------------------------------------------------------
+// Diff
+// ---------------------------------------------------------------------------
+
+export interface FileDiff {
+  path: string            // path relativo al project root
+  scoreBefore: number
+  scoreAfter: number
+  scoreDelta: number      // positivo = empeoró (más deuda), negativo = mejoró
+  newIssues: DriftIssue[]
+  resolvedIssues: DriftIssue[]
+}
+
+export interface DriftDiff {
+  baseRef: string         // git ref del baseline (e.g. "HEAD~1", "main")
+  projectPath: string     // path absoluto del proyecto
+  scannedAt: string       // ISO timestamp
+  files: FileDiff[]       // solo archivos con cambios (delta != 0 o issues diff != 0)
+  totalScoreBefore: number
+  totalScoreAfter: number
+  totalDelta: number      // positivo = más deuda, negativo = menos deuda
+  newIssuesCount: number
+  resolvedIssuesCount: number
+}

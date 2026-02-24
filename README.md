@@ -91,6 +91,20 @@ drift scan .
 | `--fix` | Show fix suggestions for each detected issue |
 | `--min-score <n>` | Exit with code 1 if overall score exceeds threshold |
 
+### `drift diff [ref]`
+
+Compare the current state of your project against any git ref:
+
+```bash
+drift diff           # HEAD vs HEAD~1 (default)
+drift diff HEAD~3    # HEAD vs 3 commits ago
+drift diff main      # HEAD vs branch main
+drift diff abc1234   # HEAD vs specific commit
+drift diff --json    # Output raw JSON diff
+```
+
+Shows score delta, new issues introduced, and issues resolved per file.
+
 ### AI Integration
 
 Use `--ai` to get structured output that LLMs can consume:

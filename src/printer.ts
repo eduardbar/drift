@@ -1,6 +1,6 @@
 // drift-ignore-file
 import kleur from 'kleur'
-import type { DriftIssue, DriftReport } from './types.js'
+import type { DriftIssue, DriftReport, DriftDiff } from './types.js'
 import { scoreToGrade, severityIcon, scoreBar } from './utils.js'
 
 function formatFixSuggestion(issue: DriftIssue): string[] {
@@ -181,6 +181,73 @@ export function printConsole(report: DriftReport, options?: { showFix?: boolean 
         const snippetIndent = '    ' + ' '.repeat(icon.length + 1)
         console.log(kleur.gray(`${snippetIndent}${issue.snippet.split('\n')[0].slice(0, 120)}`))
       }
+    }
+    console.log()
+  }
+}
+
+export function printDiff(diff: DriftDiff): void {
+  const { totalDelta, totalScoreBefore, totalScoreAfter, newIssuesCount, resolvedIssuesCount } = diff
+
+  const deltaSign = totalDelta > 0 ? '+' : ''
+  const deltaColor = totalDelta > 0 ? kleur.red : totalDelta < 0 ? kleur.green : kleur.white
+  const baseGrade = scoreToGrade(totalScoreBefore)
+  const headGrade = scoreToGrade(totalScoreAfter)
+
+  console.log()
+  console.log(kleur.bold('  drift diff') + kleur.gray(`  — comparing HEAD vs ${diff.baseRef}`))
+  console.log('  ' + '─'.repeat(50))
+  console.log()
+  console.log(
+    `  Score  ${kleur.bold(String(totalScoreBefore))} ${baseGrade.badge}  →  ` +
+    `${kleur.bold(String(totalScoreAfter))} ${headGrade.badge}  ` +
+    deltaColor(`(${deltaSign}${totalDelta})`)
+  )
+  console.log()
+
+  if (newIssuesCount > 0) {
+    console.log(`  ${kleur.red(`▲ ${newIssuesCount} new issue${newIssuesCount !== 1 ? 's' : ''} introduced`)}`)
+  }
+  if (resolvedIssuesCount > 0) {
+    console.log(`  ${kleur.green(`▼ ${resolvedIssuesCount} issue${resolvedIssuesCount !== 1 ? 's' : ''} resolved`)}`)
+  }
+  if (newIssuesCount === 0 && resolvedIssuesCount === 0) {
+    console.log(`  ${kleur.gray('No issue changes detected')}`)
+  }
+
+  if (diff.files.length === 0) {
+    console.log()
+    console.log(`  ${kleur.gray('No file-level changes detected')}`)
+    console.log()
+    return
+  }
+
+  console.log()
+  console.log('  ' + '─'.repeat(50))
+  console.log()
+
+  for (const file of diff.files) {
+    const rel = file.path.replace(/\\/g, '/').split('/').pop() ?? file.path
+    const fileDeltaSign = file.scoreDelta > 0 ? '+' : ''
+    const fileDeltaColor = file.scoreDelta > 0 ? kleur.red : kleur.green
+
+    console.log(
+      `  ${kleur.bold(rel)}` +
+      `  ${kleur.gray(`${file.scoreBefore} → ${file.scoreAfter}`)}` +
+      `  ${fileDeltaColor(`${fileDeltaSign}${file.scoreDelta}`)}`
+    )
+
+    for (const issue of file.newIssues) {
+      console.log(
+        `    ${kleur.red('+')} ${severityIcon(issue.severity)} ` +
+        `${kleur.yellow(issue.rule)}  ${kleur.gray(`L${issue.line}`)}  ${issue.message}`
+      )
+    }
+    for (const issue of file.resolvedIssues) {
+      console.log(
+        `    ${kleur.green('-')} ${severityIcon(issue.severity)} ` +
+        `${kleur.yellow(issue.rule)}  ${kleur.gray(`L${issue.line}`)}  ${issue.message}`
+      )
     }
     console.log()
   }

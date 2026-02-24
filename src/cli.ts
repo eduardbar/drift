@@ -4,8 +4,10 @@ import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { analyzeProject } from './analyzer.js'
 import { buildReport, formatMarkdown, formatAIOutput } from './reporter.js'
-import { printConsole } from './printer.js'
+import { printConsole, printDiff } from './printer.js'
 import { loadConfig } from './config.js'
+import { extractFilesAtRef, cleanupTempDir } from './git.js'
+import { computeDiff } from './diff.js'
 
 const program = new Command()
 
@@ -55,6 +57,55 @@ program
     const minScore = Number(options.minScore)
     if (minScore > 0 && report.totalScore > minScore) {
       process.exit(1)
+    }
+  })
+
+program
+  .command('diff [ref]')
+  .description('Compare current state against a git ref (default: HEAD~1)')
+  .option('--json', 'Output raw JSON diff')
+  .action(async (ref: string | undefined, options: { json?: boolean }) => {
+    const baseRef = ref ?? 'HEAD~1'
+    const projectPath = resolve('.')
+
+    let tempDir: string | undefined
+
+    try {
+      process.stderr.write(`\nComputing diff: HEAD vs ${baseRef}...\n\n`)
+
+      // Scan current state
+      const config = await loadConfig(projectPath)
+      const currentFiles = analyzeProject(projectPath, config)
+      const currentReport = buildReport(projectPath, currentFiles)
+
+      // Extract base state from git
+      tempDir = extractFilesAtRef(projectPath, baseRef)
+      const baseFiles = analyzeProject(tempDir, config)
+
+      // Remap base file paths to match current project paths
+      // (temp dir paths → project paths for accurate comparison)
+      const baseReport = buildReport(tempDir, baseFiles)
+      const remappedBase = {
+        ...baseReport,
+        files: baseReport.files.map(f => ({
+          ...f,
+          path: f.path.replace(tempDir!, projectPath),
+        })),
+      }
+
+      const diff = computeDiff(remappedBase, currentReport, baseRef)
+
+      if (options.json) {
+        process.stdout.write(JSON.stringify(diff, null, 2) + '\n')
+      } else {
+        printDiff(diff)
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      process.stderr.write(`\n  Error: ${message}\n\n`)
+      process.exit(1)
+    } finally {
+      if (tempDir) cleanupTempDir(tempDir)
     }
   })
 
