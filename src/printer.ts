@@ -66,6 +66,18 @@ function formatFixSuggestion(issue: DriftIssue): string[] {
       'Remove the comment — the code already says what it does',
       'Replace with a comment explaining WHY, not what: // retry because upstream is flaky',
     ],
+    'unused-export': [
+      "Remove the export keyword if it's only used internally",
+      'Or delete the declaration entirely if it serves no purpose',
+    ],
+    'dead-file': [
+      'Delete the file if it is no longer needed',
+      'Or import it from an entry point if it should be active',
+    ],
+    'unused-dependency': [
+      'Remove it from package.json: npm uninstall <pkg>',
+      'Or verify it is used transitively and document why it is kept',
+    ],
   }
   return suggestions[issue.rule] ?? ['Review and fix manually']
 }

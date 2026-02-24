@@ -1,3 +1,5 @@
+import * as fs from 'node:fs'
+import * as path from 'node:path'
 import {
   Project,
   SourceFile,
@@ -28,6 +30,10 @@ const RULE_WEIGHTS: Record<string, { severity: DriftIssue['severity']; weight: n
   'too-many-params':          { severity: 'warning', weight: 8  },
   'high-coupling':            { severity: 'warning', weight: 10 },
   'promise-style-mix':        { severity: 'warning', weight: 7  },
+  // Phase 2: cross-file dead code
+  'unused-export':            { severity: 'warning', weight: 8  },
+  'dead-file':                { severity: 'warning', weight: 10 },
+  'unused-dependency':        { severity: 'warning', weight: 6  },
 }
 
 type FunctionLike = FunctionDeclaration | ArrowFunction | FunctionExpression | MethodDeclaration
@@ -623,5 +629,189 @@ export function analyzeProject(targetPath: string): FileReport[] {
     `!${targetPath}/**/*.spec.*`,
   ])
 
-  return project.getSourceFiles().map(analyzeFile)
+  const sourceFiles = project.getSourceFiles()
+
+  // Phase 1: per-file analysis
+  const reports: FileReport[] = sourceFiles.map(analyzeFile)
+  const reportByPath = new Map<string, FileReport>()
+  for (const r of reports) reportByPath.set(r.path, r)
+
+  // Phase 2: cross-file analysis — build import graph first
+  const allImportedPaths = new Set<string>()   // absolute paths of files that are imported
+  const allImportedNames = new Map<string, Set<string>>() // file path → set of imported names
+  const allLiteralImports = new Set<string>()  // raw module specifiers (for unused-dependency)
+
+  for (const sf of sourceFiles) {
+    const sfPath = sf.getFilePath()
+    for (const decl of sf.getImportDeclarations()) {
+      const moduleSpecifier = decl.getModuleSpecifierValue()
+      allLiteralImports.add(moduleSpecifier)
+
+      // Resolve to absolute path for dead-file / unused-export
+      const resolved = decl.getModuleSpecifierSourceFile()
+      if (resolved) {
+        const resolvedPath = resolved.getFilePath()
+        allImportedPaths.add(resolvedPath)
+
+        // Collect named imports { A, B } and default imports
+        const named = decl.getNamedImports().map(n => n.getName())
+        const def = decl.getDefaultImport()?.getText()
+        const ns = decl.getNamespaceImport()?.getText()
+
+        if (!allImportedNames.has(resolvedPath)) {
+          allImportedNames.set(resolvedPath, new Set())
+        }
+        const nameSet = allImportedNames.get(resolvedPath)!
+        for (const n of named) nameSet.add(n)
+        if (def) nameSet.add('default')
+        if (ns) nameSet.add('*') // namespace import — counts all exports as used
+      }
+    }
+
+    // Also register re-exports: export { X, Y } from './module'
+    // These count as "using" X and Y from the source module
+    for (const exportDecl of sf.getExportDeclarations()) {
+      const reExportedModule = exportDecl.getModuleSpecifierSourceFile()
+      if (!reExportedModule) continue
+
+      const reExportedPath = reExportedModule.getFilePath()
+      allImportedPaths.add(reExportedPath)
+
+      if (!allImportedNames.has(reExportedPath)) {
+        allImportedNames.set(reExportedPath, new Set())
+      }
+      const nameSet = allImportedNames.get(reExportedPath)!
+
+      const namedExports = exportDecl.getNamedExports()
+      if (namedExports.length === 0) {
+        // export * from './module' — namespace re-export, all names used
+        nameSet.add('*')
+      } else {
+        for (const ne of namedExports) nameSet.add(ne.getName())
+      }
+    }
+  }
+
+  // Detect unused-export and dead-file per source file
+  for (const sf of sourceFiles) {
+    const sfPath = sf.getFilePath()
+    const report = reportByPath.get(sfPath)
+    if (!report) continue
+
+    // dead-file: file is never imported by anyone
+    // Exclude entry-point candidates: index.ts, main.ts, cli.ts, app.ts, bin files
+    const basename = path.basename(sfPath)
+    const isBinFile = sfPath.replace(/\\/g, '/').includes('/bin/')
+    const isEntryPoint = /^(index|main|cli|app)\.(ts|tsx|js|jsx)$/.test(basename) || isBinFile
+    if (!isEntryPoint && !allImportedPaths.has(sfPath)) {
+      const issue: DriftIssue = {
+        rule: 'dead-file',
+        severity: RULE_WEIGHTS['dead-file'].severity,
+        message: 'File is never imported — may be dead code',
+        line: 1,
+        column: 1,
+        snippet: basename,
+      }
+      report.issues.push(issue)
+      report.score = calculateScore(report.issues)
+    }
+
+    // unused-export: named exports not imported anywhere
+    // Skip barrel files (index.ts) — their entire surface is the public API
+    const isBarrel = /^index\.(ts|tsx|js|jsx)$/.test(basename)
+    const importedNamesForFile = allImportedNames.get(sfPath)
+    const hasNamespaceImport = importedNamesForFile?.has('*') ?? false
+    if (!isBarrel && !hasNamespaceImport) {
+      for (const exportDecl of sf.getExportDeclarations()) {
+        for (const namedExport of exportDecl.getNamedExports()) {
+          const name = namedExport.getName()
+          if (!importedNamesForFile?.has(name)) {
+            const line = namedExport.getStartLineNumber()
+            const issue: DriftIssue = {
+              rule: 'unused-export',
+              severity: RULE_WEIGHTS['unused-export'].severity,
+              message: `'${name}' is exported but never imported`,
+              line,
+              column: 1,
+              snippet: namedExport.getText().slice(0, 80),
+            }
+            report.issues.push(issue)
+            report.score = calculateScore(report.issues)
+          }
+        }
+      }
+
+      // Also check inline export declarations (export function foo, export const bar)
+      for (const exportSymbol of sf.getExportedDeclarations()) {
+        const [exportName, declarations] = [exportSymbol[0], exportSymbol[1]]
+        if (exportName === 'default') continue
+        if (importedNamesForFile?.has(exportName)) continue
+
+        for (const decl of declarations) {
+          // Skip if this is a re-export from another file
+          if (decl.getSourceFile().getFilePath() !== sfPath) continue
+
+          const line = decl.getStartLineNumber()
+          const issue: DriftIssue = {
+            rule: 'unused-export',
+            severity: RULE_WEIGHTS['unused-export'].severity,
+            message: `'${exportName}' is exported but never imported`,
+            line,
+            column: 1,
+            snippet: decl.getText().split('\n')[0].slice(0, 80),
+          }
+          report.issues.push(issue)
+          report.score = calculateScore(report.issues)
+          break // one issue per export name is enough
+        }
+      }
+    }
+  }
+
+  // Detect unused-dependency: packages in package.json never imported
+  const pkgPath = path.join(targetPath, 'package.json')
+  if (fs.existsSync(pkgPath)) {
+    let pkg: Record<string, unknown>
+    try {
+      pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'))
+    } catch {
+      pkg = {}
+    }
+
+    const deps = {
+      ...((pkg.dependencies as Record<string, string>) ?? {}),
+    }
+
+    const unusedDeps: string[] = []
+    for (const depName of Object.keys(deps)) {
+      // Skip type-only packages (@types/*)
+      if (depName.startsWith('@types/')) continue
+
+      // A dependency is "used" if any import specifier starts with the package name
+      // (handles sub-paths like 'lodash/merge', 'date-fns/format', etc.)
+      const isUsed = [...allLiteralImports].some(
+        imp => imp === depName || imp.startsWith(depName + '/')
+      )
+      if (!isUsed) unusedDeps.push(depName)
+    }
+
+    if (unusedDeps.length > 0) {
+      const pkgIssues: DriftIssue[] = unusedDeps.map(dep => ({
+        rule: 'unused-dependency',
+        severity: RULE_WEIGHTS['unused-dependency'].severity,
+        message: `'${dep}' is in package.json but never imported`,
+        line: 1,
+        column: 1,
+        snippet: `"${dep}"`,
+      }))
+
+      reports.push({
+        path: pkgPath,
+        issues: pkgIssues,
+        score: calculateScore(pkgIssues),
+      })
+    }
+  }
+
+  return reports
 }

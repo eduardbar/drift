@@ -7,6 +7,18 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Phase 2: cross-file dead code detection** — three new rules that require project-level import graph analysis (ESLint cannot do this by design — issue wontfix #371):
+  - `unused-export` (warning, weight 8): named exports that are never imported anywhere in the project.
+  - `dead-file` (warning, weight 10): source files that are never imported by any other file.
+  - `unused-dependency` (warning, weight 6): packages listed in `dependencies` in `package.json` that are never imported in source code.
+- `analyzeProject()` now builds a cross-file import graph before per-file analysis, enabling project-level rules without additional dependencies.
+- Fix suggestions for all three new rules in `src/printer.ts`.
+
+---
+
 ## [0.3.0]
 
 ### Added

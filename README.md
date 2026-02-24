@@ -129,6 +129,9 @@ npx @eduardbar/drift scan ./src --fix
 | `too-many-params` | warning | Functions with more than 4 parameters — AI avoids options objects |
 | `high-coupling` | warning | Files importing from more than 10 modules — AI imports broadly |
 | `promise-style-mix` | warning | `async/await` and `.then()` mixed in the same file |
+| `unused-export` | warning | Named exports never imported anywhere in the project — cross-file dead code |
+| `dead-file` | warning | Files never imported by any other file — invisible dead code |
+| `unused-dependency` | warning | Packages in `package.json` never imported in source code |
 | `no-return-type` | info | Missing explicit return types on functions |
 | `magic-number` | info | Numeric literals used directly in logic — extract to named constants |
 
