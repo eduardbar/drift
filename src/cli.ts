@@ -5,6 +5,7 @@ import { resolve } from 'node:path'
 import { analyzeProject } from './analyzer.js'
 import { buildReport, formatMarkdown, formatAIOutput } from './reporter.js'
 import { printConsole } from './printer.js'
+import { loadConfig } from './config.js'
 
 const program = new Command()
 
@@ -21,11 +22,12 @@ program
   .option('--ai', 'Output AI-optimized JSON for LLM consumption')
   .option('--fix', 'Show fix suggestions for each issue')
   .option('--min-score <n>', 'Exit with code 1 if overall score exceeds this threshold', '0')
-  .action((targetPath: string | undefined, options: { output?: string; json?: boolean; ai?: boolean; fix?: boolean; minScore: string }) => {
+  .action(async (targetPath: string | undefined, options: { output?: string; json?: boolean; ai?: boolean; fix?: boolean; minScore: string }) => {
     const resolvedPath = resolve(targetPath ?? '.')
 
     process.stderr.write(`\nScanning ${resolvedPath}...\n`)
-    const files = analyzeProject(resolvedPath)
+    const config = await loadConfig(resolvedPath)
+    const files = analyzeProject(resolvedPath, config)
     process.stderr.write(`  Found ${files.length} TypeScript file(s)\n\n`)
     const report = buildReport(resolvedPath, files)
 

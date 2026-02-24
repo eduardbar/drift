@@ -135,6 +135,32 @@ npx @eduardbar/drift scan ./src --fix
 | `unused-dependency` | warning | Packages in `package.json` never imported in source code |
 | `no-return-type` | info | Missing explicit return types on functions |
 | `magic-number` | info | Numeric literals used directly in logic — extract to named constants |
+| `layer-violation` | error | Layer imports a layer it's not allowed to (requires `drift.config.ts`) |
+| `cross-boundary-import` | warning | Module imports from another module outside allowed boundaries (requires `drift.config.ts`) |
+
+---
+
+## ⚙️ Configuration (optional)
+
+Architectural rules (`layer-violation`, `cross-boundary-import`) require a `drift.config.ts` at your project root:
+
+```ts
+import type { DriftConfig } from '@eduardbar/drift'
+
+export default {
+  layers: [
+    { name: 'domain',  patterns: ['src/domain/**'],  canImportFrom: [] },
+    { name: 'app',     patterns: ['src/app/**'],     canImportFrom: ['domain'] },
+    { name: 'infra',   patterns: ['src/infra/**'],   canImportFrom: ['domain', 'app'] },
+  ],
+  modules: [
+    { name: 'auth',    root: 'src/modules/auth',    allowedExternalImports: ['src/shared'] },
+    { name: 'billing', root: 'src/modules/billing', allowedExternalImports: ['src/shared'] },
+  ],
+} satisfies DriftConfig
+```
+
+Without a config file, these two rules are silently skipped. All other rules run automatically with no configuration needed.
 
 ---
 

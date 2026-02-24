@@ -16,8 +16,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   - `unused-dependency` (warning, weight 6): packages listed in `dependencies` in `package.json` that are never imported in source code.
 - `analyzeProject()` now builds a cross-file import graph before per-file analysis, enabling project-level rules without additional dependencies.
 - Fix suggestions for all three new rules in `src/printer.ts`.
-- **Phase 3 (partial): structural architecture analysis**:
+- **Phase 3: structural architecture analysis**:
   - `circular-dependency` (error, weight 14): detects circular import chains using DFS cycle detection. Reports the full cycle path as `A → B → C → A`.
+  - `layer-violation` (error, weight 16): flags imports that violate declared architectural layers. Requires `drift.config.ts`.
+  - `cross-boundary-import` (warning, weight 10): flags imports across module boundaries outside allowed paths. Requires `drift.config.ts`.
+- `loadConfig()` — new async config loader in `src/config.ts`. Discovers `drift.config.ts / .js / .json` at project root. All rules except `layer-violation` and `cross-boundary-import` work without any config.
+- `DriftConfig`, `LayerDefinition`, `ModuleBoundary` types exported from the package.
+- Fix suggestions for all Phase 3 rules in `src/printer.ts`.
 
 ---
 

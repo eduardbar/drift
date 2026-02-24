@@ -56,3 +56,34 @@ export interface AIIssue {
   fix_suggestion: string
   effort: 'low' | 'medium' | 'high'
 }
+
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+
+/**
+ * Layer definition for architectural boundary enforcement.
+ */
+export interface LayerDefinition {
+  name: string
+  patterns: string[]
+  canImportFrom: string[]
+}
+
+/**
+ * Module boundary definition for cross-boundary enforcement.
+ */
+export interface ModuleBoundary {
+  name: string
+  root: string
+  allowedExternalImports?: string[]
+}
+
+/**
+ * Optional project-level configuration for drift.
+ * Place in drift.config.ts (or .js / .json) at the project root.
+ */
+export interface DriftConfig {
+  layers?: LayerDefinition[]
+  modules?: ModuleBoundary[]
+}

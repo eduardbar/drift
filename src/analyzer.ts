@@ -10,7 +10,7 @@ import {
   FunctionExpression,
   MethodDeclaration,
 } from 'ts-morph'
-import type { DriftIssue, FileReport } from './types.js'
+import type { DriftIssue, FileReport, DriftConfig, LayerDefinition, ModuleBoundary } from './types.js'
 
 // Rules and their drift score weight
 const RULE_WEIGHTS: Record<string, { severity: DriftIssue['severity']; weight: number }> = {
@@ -36,6 +36,9 @@ const RULE_WEIGHTS: Record<string, { severity: DriftIssue['severity']; weight: n
   'unused-dependency':        { severity: 'warning', weight: 6  },
   // Phase 3: architectural boundaries
   'circular-dependency':      { severity: 'error',   weight: 14 },
+  // Phase 3b/c: layer and module boundary enforcement (require drift.config.ts)
+  'layer-violation':          { severity: 'error',   weight: 16 },
+  'cross-boundary-import':    { severity: 'warning', weight: 10 },
 }
 
 type FunctionLike = FunctionDeclaration | ArrowFunction | FunctionExpression | MethodDeclaration
@@ -611,7 +614,7 @@ export function analyzeFile(file: SourceFile): FileReport {
   }
 }
 
-export function analyzeProject(targetPath: string): FileReport[] {
+export function analyzeProject(targetPath: string, config?: DriftConfig): FileReport[] {
   const project = new Project({
     skipAddingFilesFromTsConfig: true,
     compilerOptions: { allowJs: true },
@@ -884,6 +887,96 @@ export function analyzeProject(targetPath: string): FileReport[] {
     }
     report.issues.push(issue)
     report.score = calculateScore(report.issues)
+  }
+
+  // ── Phase 3b: layer-violation ──────────────────────────────────────────
+  if (config?.layers && config.layers.length > 0) {
+    const { layers } = config
+
+    function getLayer(filePath: string): LayerDefinition | undefined {
+      const rel = filePath.replace(/\\/g, '/')
+      return layers.find(layer =>
+        layer.patterns.some(pattern => {
+          const regexStr = pattern
+            .replace(/\\/g, '/')
+            .replace(/[.+^${}()|[\]]/g, '\\$&')
+            .replace(/\*\*/g, '###DOUBLESTAR###')
+            .replace(/\*/g, '[^/]*')
+            .replace(/###DOUBLESTAR###/g, '.*')
+          return new RegExp(`^${regexStr}`).test(rel)
+        })
+      )
+    }
+
+    for (const [filePath, imports] of importGraph.entries()) {
+      const fileLayer = getLayer(filePath)
+      if (!fileLayer) continue
+
+      for (const importedPath of imports) {
+        const importedLayer = getLayer(importedPath)
+        if (!importedLayer) continue
+        if (importedLayer.name === fileLayer.name) continue
+
+        if (!fileLayer.canImportFrom.includes(importedLayer.name)) {
+          const report = reportByPath.get(filePath)
+          if (report) {
+            const weight = RULE_WEIGHTS['layer-violation']?.weight ?? 5
+            report.issues.push({
+              rule: 'layer-violation',
+              severity: 'error',
+              message: `Layer '${fileLayer.name}' must not import from layer '${importedLayer.name}'`,
+              line: 1,
+              column: 1,
+              snippet: `import from '${path.relative(targetPath, importedPath).replace(/\\/g, '/')}'`,
+            })
+            report.score = Math.min(100, report.score + weight)
+          }
+        }
+      }
+    }
+  }
+
+  // ── Phase 3c: cross-boundary-import ────────────────────────────────────
+  if (config?.modules && config.modules.length > 0) {
+    const { modules } = config
+
+    function getModule(filePath: string): ModuleBoundary | undefined {
+      const rel = filePath.replace(/\\/g, '/')
+      return modules.find(m => rel.startsWith(m.root.replace(/\\/g, '/')))
+    }
+
+    for (const [filePath, imports] of importGraph.entries()) {
+      const fileModule = getModule(filePath)
+      if (!fileModule) continue
+
+      for (const importedPath of imports) {
+        const importedModule = getModule(importedPath)
+        if (!importedModule) continue
+        if (importedModule.name === fileModule.name) continue
+
+        const allowedImports = fileModule.allowedExternalImports ?? []
+        const relImported = importedPath.replace(/\\/g, '/')
+        const isAllowed = allowedImports.some(allowed =>
+          relImported.startsWith(allowed.replace(/\\/g, '/'))
+        )
+
+        if (!isAllowed) {
+          const report = reportByPath.get(filePath)
+          if (report) {
+            const weight = RULE_WEIGHTS['cross-boundary-import']?.weight ?? 5
+            report.issues.push({
+              rule: 'cross-boundary-import',
+              severity: 'warning',
+              message: `Module '${fileModule.name}' must not import from module '${importedModule.name}'`,
+              line: 1,
+              column: 1,
+              snippet: `import from '${path.relative(targetPath, importedPath).replace(/\\/g, '/')}'`,
+            })
+            report.score = Math.min(100, report.score + weight)
+          }
+        }
+      }
+    }
   }
 
   return reports

@@ -83,6 +83,16 @@ function formatFixSuggestion(issue: DriftIssue): string[] {
       'Move shared logic to a third file that neither of the cyclic modules imports',
       'Use dependency injection to break the compile-time dependency',
     ],
+    'layer-violation': [
+      'Move the import to a layer that is allowed to access this dependency',
+      'Introduce a port/interface in the domain layer to invert the dependency (Dependency Inversion Principle)',
+      'Or adjust the layer rules in drift.config.ts if this import is intentional',
+    ],
+    'cross-boundary-import': [
+      "Import from the module's public API barrel (index.ts) instead of internal paths",
+      'Or add the module to allowedExternalImports in drift.config.ts if this is intentional',
+      'Consider using dependency injection or an event bus to decouple the modules',
+    ],
   }
   return suggestions[issue.rule] ?? ['Review and fix manually']
 }
