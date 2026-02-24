@@ -18,6 +18,18 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.8.0] - 2026-02-24
+
+### Added
+- `semantic-duplication` rule — Type-2 AST clone detection via SHA-256 fingerprinting
+- Normalizes parameter names, local variable names, and literals before hashing — detects identical logic with different variable names
+- Runs cross-file across the entire project; reports each duplicate pointing to all other locations
+- Minimum threshold: functions with ≥ 8 body lines (reduces noise from trivial helpers)
+- Skips test framework helpers (describe, it, test, beforeEach, afterEach)
+- RULE_WEIGHTS entry: severity `warning`, weight `12`
+
+---
+
 ## [0.7.0] - 2026-02-24
 
 ### Added
