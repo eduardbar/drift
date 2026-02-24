@@ -11,6 +11,17 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **Phase 6: Static HTML report + README badge** — output commands for visibility
+  - `drift report [path]` — generates a self-contained `drift-report.html` with score, per-file breakdown, collapsible issue list, and fix suggestions
+  - `drift badge [path]` — generates a `badge.svg` with the current drift score for your README
+  - `drift ci [path]` — emits GitHub Actions workflow annotations inline on PR diffs and writes a step summary; supports `--min-score` to gate PRs
+
+---
+
+## [0.5.0] — 2026-02-24
+
+### Added
+
 - **Phase 5: AI authorship heuristics** — 5 new rules that detect patterns AI code generators produce
   - `over-commented` (info, weight 4): functions where comment density ≥ 40% — AI over-documents the obvious
   - `hardcoded-config` (warning, weight 10): hardcoded URLs, IPs, or connection strings instead of env vars

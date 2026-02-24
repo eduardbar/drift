@@ -105,6 +105,40 @@ drift diff --json    # Output raw JSON diff
 
 Shows score delta, new issues introduced, and issues resolved per file.
 
+### `drift report [path]`
+
+Generate a self-contained `drift-report.html` — open in any browser:
+
+```bash
+drift report           # scan current directory
+drift report ./src     # scan specific path
+```
+
+No server needed. The file embeds all styles and data inline.
+
+### `drift badge [path]`
+
+Generate a `badge.svg` with the current score for your README:
+
+```bash
+drift badge            # writes badge.svg to current directory
+drift badge ./src      # scan specific path
+```
+
+Drop the generated file in your repo and reference it as a local badge.
+
+### `drift ci [path]`
+
+Emit GitHub Actions annotations and step summary:
+
+```bash
+drift ci               # scan current directory
+drift ci ./src         # scan specific path
+drift ci --min-score 60  # exit code 1 if score exceeds threshold
+```
+
+Outputs inline annotations visible in the PR diff. Use `--min-score` to gate merges.
+
 ### AI Integration
 
 Use `--ai` to get structured output that LLMs can consume:
@@ -183,9 +217,21 @@ Without a config file, these two rules are silently skipped. All other rules run
 
 ---
 
-## ⚙️ CI Integration
+## ⚙️ CI / GitHub Actions
 
-Drop this into your GitHub Actions workflow to block merges when drift exceeds your threshold:
+Add drift to your PR workflow to gate on score and get inline annotations:
+
+```yaml
+- name: Run drift
+  run: npx @eduardbar/drift ci --min-score 60
+```
+
+This will:
+- Emit inline annotations on the exact lines with issues (visible in the PR diff)
+- Write a summary to the GitHub Actions step summary
+- Exit with code 1 if the score exceeds the threshold
+
+If you only need a pass/fail gate without annotations, `scan` works too:
 
 ```yaml
 - name: Check for vibe coding drift

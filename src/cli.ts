@@ -8,13 +8,16 @@ import { printConsole, printDiff } from './printer.js'
 import { loadConfig } from './config.js'
 import { extractFilesAtRef, cleanupTempDir } from './git.js'
 import { computeDiff } from './diff.js'
+import { generateHtmlReport } from './report.js'
+import { generateBadge } from './badge.js'
+import { emitCIAnnotations, printCISummary } from './ci.js'
 
 const program = new Command()
 
 program
   .name('drift')
   .description('Detect silent technical debt left by AI-generated code')
-  .version('0.1.0')
+  .version('0.6.0')
 
 program
   .command('scan [path]', { isDefault: true })
@@ -106,6 +109,57 @@ program
       process.exit(1)
     } finally {
       if (tempDir) cleanupTempDir(tempDir)
+    }
+  })
+
+program
+  .command('report [path]')
+  .description('Generate a self-contained HTML report')
+  .option('-o, --output <file>', 'Output file path (default: drift-report.html)', 'drift-report.html')
+  .action(async (targetPath: string | undefined, options: { output: string }) => {
+    const resolvedPath = resolve(targetPath ?? '.')
+    process.stderr.write(`\nScanning ${resolvedPath}...\n`)
+    const config = await loadConfig(resolvedPath)
+    const files = analyzeProject(resolvedPath, config)
+    process.stderr.write(`  Found ${files.length} TypeScript file(s)\n\n`)
+    const report = buildReport(resolvedPath, files)
+    const html = generateHtmlReport(report)
+    const outPath = resolve(options.output)
+    writeFileSync(outPath, html, 'utf8')
+    process.stderr.write(`  Report saved to ${outPath}\n\n`)
+  })
+
+program
+  .command('badge [path]')
+  .description('Generate a badge.svg with the current drift score')
+  .option('-o, --output <file>', 'Output file path (default: badge.svg)', 'badge.svg')
+  .action(async (targetPath: string | undefined, options: { output: string }) => {
+    const resolvedPath = resolve(targetPath ?? '.')
+    process.stderr.write(`\nScanning ${resolvedPath}...\n`)
+    const config = await loadConfig(resolvedPath)
+    const files = analyzeProject(resolvedPath, config)
+    const report = buildReport(resolvedPath, files)
+    const svg = generateBadge(report.totalScore)
+    const outPath = resolve(options.output)
+    writeFileSync(outPath, svg, 'utf8')
+    process.stderr.write(`  Badge saved to ${outPath}\n`)
+    process.stderr.write(`  Score: ${report.totalScore}/100\n\n`)
+  })
+
+program
+  .command('ci [path]')
+  .description('Emit GitHub Actions annotations and step summary')
+  .option('--min-score <n>', 'Exit with code 1 if overall score exceeds this threshold', '0')
+  .action(async (targetPath: string | undefined, options: { minScore: string }) => {
+    const resolvedPath = resolve(targetPath ?? '.')
+    const config = await loadConfig(resolvedPath)
+    const files = analyzeProject(resolvedPath, config)
+    const report = buildReport(resolvedPath, files)
+    emitCIAnnotations(report)
+    printCISummary(report)
+    const minScore = Number(options.minScore)
+    if (minScore > 0 && report.totalScore > minScore) {
+      process.exit(1)
     }
   })
 
