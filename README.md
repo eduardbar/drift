@@ -120,6 +120,7 @@ npx @eduardbar/drift scan ./src --fix
 | `large-function` | error | Functions over 50 lines — AI avoids splitting logic |
 | `duplicate-function-name` | error | Near-identical function names — AI regenerates instead of reusing |
 | `high-complexity` | error | Cyclomatic complexity > 10 — AI generates correct code, not simple code |
+| `circular-dependency` | error | Circular import chains between modules |
 | `debug-leftover` | warning | `console.log`, `TODO`, `FIXME`, `HACK` comments |
 | `dead-code` | warning | Unused imports — AI imports more than it uses |
 | `any-abuse` | warning | Explicit `any` type — AI defaults to `any` when it can't infer |

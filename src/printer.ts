@@ -78,6 +78,11 @@ function formatFixSuggestion(issue: DriftIssue): string[] {
       'Remove it from package.json: npm uninstall <pkg>',
       'Or verify it is used transitively and document why it is kept',
     ],
+    'circular-dependency': [
+      'Introduce an abstraction (interface or shared module) that both files depend on',
+      'Move shared logic to a third file that neither of the cyclic modules imports',
+      'Use dependency injection to break the compile-time dependency',
+    ],
   }
   return suggestions[issue.rule] ?? ['Review and fix manually']
 }

@@ -16,6 +16,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   - `unused-dependency` (warning, weight 6): packages listed in `dependencies` in `package.json` that are never imported in source code.
 - `analyzeProject()` now builds a cross-file import graph before per-file analysis, enabling project-level rules without additional dependencies.
 - Fix suggestions for all three new rules in `src/printer.ts`.
+- **Phase 3 (partial): structural architecture analysis**:
+  - `circular-dependency` (error, weight 14): detects circular import chains using DFS cycle detection. Reports the full cycle path as `A → B → C → A`.
 
 ---
 

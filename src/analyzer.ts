@@ -34,6 +34,8 @@ const RULE_WEIGHTS: Record<string, { severity: DriftIssue['severity']; weight: n
   'unused-export':            { severity: 'warning', weight: 8  },
   'dead-file':                { severity: 'warning', weight: 10 },
   'unused-dependency':        { severity: 'warning', weight: 6  },
+  // Phase 3: architectural boundaries
+  'circular-dependency':      { severity: 'error',   weight: 14 },
 }
 
 type FunctionLike = FunctionDeclaration | ArrowFunction | FunctionExpression | MethodDeclaration
@@ -640,6 +642,7 @@ export function analyzeProject(targetPath: string): FileReport[] {
   const allImportedPaths = new Set<string>()   // absolute paths of files that are imported
   const allImportedNames = new Map<string, Set<string>>() // file path → set of imported names
   const allLiteralImports = new Set<string>()  // raw module specifiers (for unused-dependency)
+  const importGraph = new Map<string, Set<string>>() // Phase 3: filePath → Set of imported filePaths
 
   for (const sf of sourceFiles) {
     const sfPath = sf.getFilePath()
@@ -652,6 +655,10 @@ export function analyzeProject(targetPath: string): FileReport[] {
       if (resolved) {
         const resolvedPath = resolved.getFilePath()
         allImportedPaths.add(resolvedPath)
+
+        // Phase 3: populate directed import graph
+        if (!importGraph.has(sfPath)) importGraph.set(sfPath, new Set())
+        importGraph.get(sfPath)!.add(resolvedPath)
 
         // Collect named imports { A, B } and default imports
         const named = decl.getNamedImports().map(n => n.getName())
@@ -811,6 +818,72 @@ export function analyzeProject(targetPath: string): FileReport[] {
         score: calculateScore(pkgIssues),
       })
     }
+  }
+
+  // Phase 3: circular-dependency — DFS cycle detection
+  function findCycles(graph: Map<string, Set<string>>): Array<string[]> {
+    const visited = new Set<string>()
+    const inStack = new Set<string>()
+    const cycles: Array<string[]> = []
+
+    function dfs(node: string, stack: string[]): void {
+      visited.add(node)
+      inStack.add(node)
+      stack.push(node)
+
+      for (const neighbor of graph.get(node) ?? []) {
+        if (!visited.has(neighbor)) {
+          dfs(neighbor, stack)
+        } else if (inStack.has(neighbor)) {
+          // Found a cycle — extract the cycle portion from the stack
+          const cycleStart = stack.indexOf(neighbor)
+          cycles.push(stack.slice(cycleStart))
+        }
+      }
+
+      stack.pop()
+      inStack.delete(node)
+    }
+
+    for (const node of graph.keys()) {
+      if (!visited.has(node)) {
+        dfs(node, [])
+      }
+    }
+
+    return cycles
+  }
+
+  const cycles = findCycles(importGraph)
+
+  // De-duplicate: each unique cycle (regardless of starting node) reported once per file
+  const reportedCycleKeys = new Set<string>()
+
+  for (const cycle of cycles) {
+    const cycleKey = [...cycle].sort().join('|')
+    if (reportedCycleKeys.has(cycleKey)) continue
+    reportedCycleKeys.add(cycleKey)
+
+    // Report on the first file in the cycle
+    const firstFile = cycle[0]
+    const report = reportByPath.get(firstFile)
+    if (!report) continue
+
+    const cycleDisplay = cycle
+      .map(p => path.basename(p))
+      .concat(path.basename(cycle[0])) // close the loop visually: A → B → C → A
+      .join(' → ')
+
+    const issue: DriftIssue = {
+      rule: 'circular-dependency',
+      severity: RULE_WEIGHTS['circular-dependency'].severity,
+      message: `Circular dependency detected: ${cycleDisplay}`,
+      line: 1,
+      column: 1,
+      snippet: cycleDisplay,
+    }
+    report.issues.push(issue)
+    report.score = calculateScore(report.issues)
   }
 
   return reports
