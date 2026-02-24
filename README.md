@@ -151,6 +151,11 @@ npx @eduardbar/drift scan ./src --fix
 | `magic-number` | info | Numeric literals used directly in logic — extract to named constants |
 | `layer-violation` | error | Layer imports a layer it's not allowed to (requires `drift.config.ts`) |
 | `cross-boundary-import` | warning | Module imports from another module outside allowed boundaries (requires `drift.config.ts`) |
+| `over-commented` | info | Functions where comments exceed 40% of lines — AI over-documents the obvious |
+| `hardcoded-config` | warning | Hardcoded URLs, IPs, or connection strings — AI skips environment variables |
+| `inconsistent-error-handling` | warning | Mixed `try/catch` and `.catch()` in the same file — AI combines styles randomly |
+| `unnecessary-abstraction` | warning | Single-method interfaces or abstract classes with no reuse — AI over-engineers |
+| `naming-inconsistency` | warning | Mixed camelCase and snake_case in the same scope — AI forgets project conventions |
 
 ---
 

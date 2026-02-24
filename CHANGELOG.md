@@ -9,6 +9,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **Phase 5: AI authorship heuristics** — 5 new rules that detect patterns AI code generators produce
+  - `over-commented` (info, weight 4): functions where comment density ≥ 40% — AI over-documents the obvious
+  - `hardcoded-config` (warning, weight 10): hardcoded URLs, IPs, or connection strings instead of env vars
+  - `inconsistent-error-handling` (warning, weight 8): mixed `try/catch` and `.catch()` patterns in the same file
+  - `unnecessary-abstraction` (warning, weight 7): single-method interfaces or abstract classes never reused
+  - `naming-inconsistency` (warning, weight 6): mixed camelCase and snake_case identifiers in the same scope
+
 ---
 
 ## [0.4.0] — 2026-02-23

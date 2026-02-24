@@ -93,6 +93,26 @@ function formatFixSuggestion(issue: DriftIssue): string[] {
       'Or add the module to allowedExternalImports in drift.config.ts if this is intentional',
       'Consider using dependency injection or an event bus to decouple the modules',
     ],
+    'over-commented': [
+      'Remove comments that restate what the code already expresses clearly',
+      'Keep only comments that explain WHY, not WHAT — prefer self-documenting names',
+    ],
+    'hardcoded-config': [
+      'Move the value to an environment variable: process.env.YOUR_VAR',
+      'Or extract it to a config file / constants module imported at the top',
+    ],
+    'inconsistent-error-handling': [
+      'Pick one style (async/await + try/catch is preferred) and apply it consistently',
+      'Avoid mixing .then()/.catch() with await in the same file',
+    ],
+    'unnecessary-abstraction': [
+      'Inline the abstraction if it has only one implementation and is never reused',
+      'Or document why the extension point exists (e.g., future plugin system)',
+    ],
+    'naming-inconsistency': [
+      'Pick one naming convention (camelCase for variables/functions, PascalCase for types)',
+      'Rename snake_case identifiers to camelCase to match TypeScript conventions',
+    ],
   }
   return suggestions[issue.rule] ?? ['Review and fix manually']
 }
