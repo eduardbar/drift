@@ -18,6 +18,16 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.7.0] - 2026-02-24
+
+### Added
+- `eslint-plugin-drift` — separate npm package exposing all 26 drift rules as ESLint 9 flat config rules
+- Each rule wraps drift's AST engine via `analyzeFile()` with a shared ts-morph `Project` instance
+- Per-file result cache (max 100 entries) to prevent redundant analysis in watch mode
+- `recommended` config array enabling all 26 rules at their canonical drift severity
+
+---
+
 ## [0.5.0] — 2026-02-24
 
 ### Added

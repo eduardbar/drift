@@ -1,0 +1,47 @@
+{
+  "name": "eslint-plugin-drift",
+  "version": "0.1.0",
+  "description": "ESLint plugin that exposes drift's technical debt rules for ESLint 9 flat config",
+  "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "eslint",
+    "eslintplugin",
+    "eslint-plugin",
+    "drift",
+    "technical-debt",
+    "ai",
+    "typescript"
+  ],
+  "author": "eduardbar",
+  "license": "MIT",
+  "homepage": "https://github.com/eduardbar/drift#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eduardbar/drift.git"
+  },
+  "peerDependencies": {
+    "eslint": ">=9.0.0"
+  },
+  "dependencies": {
+    "@eduardbar/drift": "^0.7.0",
+    "ts-morph": "^27.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.0",
+    "eslint": "^9.0.0",
+    "typescript": "^5.9.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  }
+}

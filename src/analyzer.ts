@@ -13,7 +13,7 @@ import {
 import type { DriftIssue, FileReport, DriftConfig, LayerDefinition, ModuleBoundary } from './types.js'
 
 // Rules and their drift score weight
-const RULE_WEIGHTS: Record<string, { severity: DriftIssue['severity']; weight: number }> = {
+export const RULE_WEIGHTS: Record<string, { severity: DriftIssue['severity']; weight: number }> = {
   'large-file':               { severity: 'error',   weight: 20 },
   'large-function':           { severity: 'error',   weight: 15 },
   'debug-leftover':           { severity: 'warning', weight: 10 },

@@ -1,4 +1,4 @@
-export { analyzeProject, analyzeFile } from './analyzer.js'
+export { analyzeProject, analyzeFile, RULE_WEIGHTS } from './analyzer.js'
 export { buildReport, formatMarkdown } from './reporter.js'
 export { computeDiff } from './diff.js'
-export type { DriftReport, FileReport, DriftIssue, DriftDiff, FileDiff } from './types.js'
+export type { DriftReport, FileReport, DriftIssue, DriftDiff, FileDiff, DriftConfig } from './types.js'
