@@ -118,12 +118,19 @@ npx @eduardbar/drift scan ./src --fix
 |------|----------|-----------------|
 | `large-file` | error | Files over 300 lines — AI dumps everything into one place |
 | `large-function` | error | Functions over 50 lines — AI avoids splitting logic |
+| `duplicate-function-name` | error | Near-identical function names — AI regenerates instead of reusing |
+| `high-complexity` | error | Cyclomatic complexity > 10 — AI generates correct code, not simple code |
 | `debug-leftover` | warning | `console.log`, `TODO`, `FIXME`, `HACK` comments |
 | `dead-code` | warning | Unused imports — AI imports more than it uses |
-| `duplicate-function-name` | error | Near-identical function names — AI regenerates instead of reusing |
 | `any-abuse` | warning | Explicit `any` type — AI defaults to `any` when it can't infer |
 | `catch-swallow` | warning | Empty catch blocks — AI makes code "not throw" |
+| `comment-contradiction` | warning | Comments that restate what the code already says — AI documents the obvious |
+| `deep-nesting` | warning | Nesting depth > 3 — if inside for inside if inside try = unreadable |
+| `too-many-params` | warning | Functions with more than 4 parameters — AI avoids options objects |
+| `high-coupling` | warning | Files importing from more than 10 modules — AI imports broadly |
+| `promise-style-mix` | warning | `async/await` and `.then()` mixed in the same file |
 | `no-return-type` | info | Missing explicit return types on functions |
+| `magic-number` | info | Numeric literals used directly in logic — extract to named constants |
 
 ---
 
@@ -157,7 +164,7 @@ Exit code `1` if score exceeds `--min-score`. Exit code `0` otherwise.
 ```
 src/
 ├── types.ts      — DriftIssue, FileReport, DriftReport interfaces
-├── analyzer.ts   — AST analysis with ts-morph, 8 detection rules
+├── analyzer.ts   — AST analysis with ts-morph, 15 detection rules
 ├── reporter.ts   — buildReport() + Markdown formatter
 ├── printer.ts    — Console output with color (kleur)
 ├── index.ts      — Public API re-exports

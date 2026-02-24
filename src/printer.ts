@@ -35,6 +35,37 @@ function formatFixSuggestion(issue: DriftIssue): string[] {
       'Consolidate with existing function',
       'Or rename to clarify different behavior',
     ],
+    'high-complexity': [
+      'Extract each branch into a named function',
+      'Use early returns to reduce nesting and branching',
+      'Consider a strategy pattern or lookup table for switch-heavy logic',
+    ],
+    'deep-nesting': [
+      'Invert conditions and return early instead of nesting',
+      'Extract inner blocks into separate functions',
+      'Flatten promise chains with async/await',
+    ],
+    'too-many-params': [
+      'Group related params into an options object: foo({ a, b, c, d, e })',
+      'Consider if this function is doing too many things',
+    ],
+    'high-coupling': [
+      'Group related imports into a single module',
+      'Consider if this file has too many responsibilities',
+      'Extract a sub-module that encapsulates some of these dependencies',
+    ],
+    'promise-style-mix': [
+      'Pick one style and use it consistently: async/await is preferred',
+      'Convert .then()/.catch() chains to async/await',
+    ],
+    'magic-number': [
+      'Extract to a named constant: const MAX_RETRIES = 3',
+      'Use an enum for related numeric values',
+    ],
+    'comment-contradiction': [
+      'Remove the comment — the code already says what it does',
+      'Replace with a comment explaining WHY, not what: // retry because upstream is flaky',
+    ],
   }
   return suggestions[issue.rule] ?? ['Review and fix manually']
 }
