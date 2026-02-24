@@ -9,6 +9,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+---
+
+## [0.4.0] — 2026-02-23
+
 ### Added
 - **Phase 2: cross-file dead code detection** — three new rules that require project-level import graph analysis (ESLint cannot do this by design — issue wontfix #371):
   - `unused-export` (warning, weight 8): named exports that are never imported anywhere in the project.
