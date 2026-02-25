@@ -7,6 +7,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.9.1] — 2026-02-25
+
+### Fixed
+- `drift trend`: `analyzeSingleCommit` now analyses the full project snapshot at each commit instead of only the files changed in the diff. Uses `git ls-tree -r <hash> --name-only` to enumerate all tracked `.ts/.tsx` files, writes them to a temp directory via `git show <hash>:<file>`, runs `analyzeProject` on the snapshot, then cleans up. Score in each `TrendDataPoint` now reflects the total project health, not just the files touched in that commit.
+- `drift trend`: added sampling to `analyzeHistoricalCommits` — selects at most 10 commits distributed evenly across the period (configurable via `maxSamples`). Prevents timeouts on repos with 100+ commits.
+- `drift trend` / `drift blame`: propagate `DriftConfig` through the full call chain (`analyzeTrend` → `analyzeHistoricalCommits` → `analyzeSingleCommit` → `analyzeProject`) so custom rule configs are respected in historical analysis.
+
+---
+
 ## [Unreleased]
 
 ---

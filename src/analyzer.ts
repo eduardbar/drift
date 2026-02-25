@@ -1523,49 +1523,85 @@ async function analyzeFileAtCommit(
 }
 
 /**
- * Analyse all TypeScript files changed in a single commit.
+ * Analyse ALL TypeScript files in the project snapshot at a given commit.
+ * Uses `git ls-tree` to enumerate every file in the tree, writes them to a
+ * temp directory, then runs `analyzeProject` on that full snapshot so that
+ * the resulting `averageScore` reflects the complete project health rather
+ * than only the files touched in that diff.
  */
 async function analyzeSingleCommit(
   commitHash: string,
   targetPath: string,
+  config?: DriftConfig,
 ): Promise<HistoricalAnalysis> {
-  // --name-only lists changed files; format gives metadata
-  const raw = execGit(
-    `git show --name-only --format="%H|%ai|%an|%s" ${commitHash}`,
+  // 1. Commit metadata
+  const meta = execGit(
+    `git show --no-patch --format="%H|%aI|%an|%s" ${commitHash}`,
     targetPath,
   )
-
-  const lines = raw.split('\n')
-  // First non-empty line is the metadata line
-  const metaLine = lines[0] ?? ''
-  const [hash, dateStr, author, ...msgParts] = metaLine.split('|')
+  const [hash, dateStr, author, ...msgParts] = meta.split('|')
   const message = msgParts.join('|').trim()
   const commitDate = new Date(dateStr ?? '')
 
-  // Collect changed .ts/.tsx files (lines after the empty separator)
-  const changedFiles: string[] = []
-  let pastSeparator = false
-  for (const line of lines.slice(1)) {
-    if (!pastSeparator && line.trim() === '') { pastSeparator = true; continue }
-    if (pastSeparator && (line.endsWith('.ts') || line.endsWith('.tsx'))) {
-      changedFiles.push(path.join(targetPath, line.trim()))
+  // 2. All .ts/.tsx files tracked at this commit (no diffs, full tree)
+  const allFiles = execGit(
+    `git ls-tree -r ${commitHash} --name-only`,
+    targetPath,
+  )
+    .split('\n')
+    .filter(
+      f =>
+        (f.endsWith('.ts') || f.endsWith('.tsx')) &&
+        !f.endsWith('.d.ts') &&
+        !f.includes('node_modules') &&
+        !f.startsWith('dist/'),
+    )
+
+  if (allFiles.length === 0) {
+    return {
+      commitHash: hash ?? commitHash,
+      commitDate,
+      author: author ?? '',
+      message,
+      files: [],
+      totalScore: 0,
+      averageScore: 0,
     }
   }
 
-  const fileReports = await Promise.all(
-    changedFiles.map(f => analyzeFileAtCommit(f, hash ?? commitHash, targetPath).catch(() => null)),
-  )
+  // 3. Write snapshot to temp directory
+  const tmpDir = path.join(os.tmpdir(), `drift-${(hash ?? commitHash).slice(0, 8)}`)
+  fs.mkdirSync(tmpDir, { recursive: true })
 
-  const validReports = fileReports.filter((r): r is FileReport => r !== null)
-  const totalScore = validReports.reduce((s, r) => s + r.score, 0)
-  const averageScore = validReports.length > 0 ? totalScore / validReports.length : 0
+  for (const relPath of allFiles) {
+    try {
+      const content = execGit(`git show ${commitHash}:${relPath}`, targetPath)
+      const destPath = path.join(tmpDir, relPath)
+      fs.mkdirSync(path.dirname(destPath), { recursive: true })
+      fs.writeFileSync(destPath, content, 'utf-8')
+    } catch {
+      // skip files that can't be read (binary, deleted in partial clone, etc.)
+    }
+  }
+
+  // 4. Analyse the full project snapshot
+  const fileReports = analyzeProject(tmpDir, config)
+  const totalScore = fileReports.reduce((sum, r) => sum + r.score, 0)
+  const averageScore = fileReports.length > 0 ? totalScore / fileReports.length : 0
+
+  // 5. Cleanup
+  try {
+    fs.rmSync(tmpDir, { recursive: true, force: true })
+  } catch {
+    // non-fatal — temp dirs are cleaned by the OS eventually
+  }
 
   return {
     commitHash: hash ?? commitHash,
     commitDate,
     author: author ?? '',
     message,
-    files: validReports,
+    files: fileReports,
     totalScore,
     averageScore,
   }
@@ -1579,6 +1615,8 @@ async function analyzeHistoricalCommits(
   sinceDate: Date,
   targetPath: string,
   maxCommits: number,
+  config?: DriftConfig,
+  maxSamples: number = 10,
 ): Promise<HistoricalAnalysis[]> {
   assertGitRepo(targetPath)
 
@@ -1591,8 +1629,17 @@ async function analyzeHistoricalCommits(
   if (!raw) return []
 
   const hashes = raw.split('\n').filter(Boolean)
+
+  // Sample: distribute evenly across the range
+  // E.g. 122 commits, maxSamples=10 → pick index 0, 13, 26, 39, 52, 65, 78, 91, 104, 121
+  const sampled = hashes.length <= maxSamples
+    ? hashes
+    : Array.from({ length: maxSamples }, (_, i) =>
+        hashes[Math.floor(i * (hashes.length - 1) / (maxSamples - 1))]
+      )
+
   const analyses = await Promise.all(
-    hashes.map(h => analyzeSingleCommit(h, targetPath).catch(() => null)),
+    sampled.map(h => analyzeSingleCommit(h, targetPath, config).catch(() => null)),
   )
 
   return analyses
@@ -1678,7 +1725,7 @@ export class TrendAnalyzer {
       ? new Date(options.since)
       : new Date(Date.now() - days * 24 * 60 * 60 * 1000)
 
-    const historicalAnalyses = await analyzeHistoricalCommits(sinceDate, this.projectPath, 100)
+    const historicalAnalyses = await analyzeHistoricalCommits(sinceDate, this.projectPath, 100, this.config, 10)
 
     const trendPoints: TrendDataPoint[] = historicalAnalyses.map(h => ({
       date: h.commitDate,
