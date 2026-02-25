@@ -5,7 +5,7 @@ import { resolve } from 'node:path'
 import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 const { version: VERSION } = require('../package.json') as { version: string }
-import { analyzeProject } from './analyzer.js'
+import { analyzeProject, analyzeFile, TrendAnalyzer, BlameAnalyzer } from './analyzer.js'
 import { buildReport, formatMarkdown, formatAIOutput } from './reporter.js'
 import { printConsole, printDiff } from './printer.js'
 import { loadConfig } from './config.js'
@@ -14,7 +14,6 @@ import { computeDiff } from './diff.js'
 import { generateHtmlReport } from './report.js'
 import { generateBadge } from './badge.js'
 import { emitCIAnnotations, printCISummary } from './ci.js'
-import { TrendAnalyzer, BlameAnalyzer } from './analyzer.js'
 
 const program = new Command()
 
@@ -177,7 +176,7 @@ program
     process.stderr.write(`\nAnalyzing trend in ${resolvedPath}...\n`)
     
     const config = await loadConfig(resolvedPath)
-    const analyzer = new TrendAnalyzer(resolvedPath, config)
+    const analyzer = new TrendAnalyzer(resolvedPath, analyzeProject, config)
     
     const trendData = await analyzer.analyzeTrend({
       period: period as 'week' | 'month' | 'quarter' | 'year',
@@ -198,7 +197,7 @@ program
     process.stderr.write(`\nAnalyzing blame in ${resolvedPath}...\n`)
     
     const config = await loadConfig(resolvedPath)
-    const analyzer = new BlameAnalyzer(resolvedPath, config)
+    const analyzer = new BlameAnalyzer(resolvedPath, analyzeProject, analyzeFile, config)
     
     const blameData = await analyzer.analyzeBlame({
       target: target as 'file' | 'rule' | 'overall' | undefined,

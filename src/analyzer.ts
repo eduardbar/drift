@@ -1,25 +1,50 @@
 import * as fs from 'node:fs'
-import * as crypto from 'node:crypto'
 import * as path from 'node:path'
-import * as os from 'node:os'
-import { execSync } from 'node:child_process'
-import {
-  Project,
-  SourceFile,
-  SyntaxKind,
-  Node,
-  FunctionDeclaration,
-  ArrowFunction,
-  FunctionExpression,
-  MethodDeclaration,
-} from 'ts-morph'
-import type {
-  DriftIssue, FileReport, DriftConfig, LayerDefinition, ModuleBoundary,
-  HistoricalAnalysis, TrendDataPoint, BlameAttribution, DriftTrendReport, DriftBlameReport,
-} from './types.js'
-import { buildReport } from './reporter.js'
+import { Project } from 'ts-morph'
+import type { DriftIssue, FileReport, DriftConfig, LayerDefinition, ModuleBoundary } from './types.js'
 
-// Rules and their drift score weight
+// Rules
+import { isFileIgnored } from './rules/shared.js'
+import {
+  detectLargeFile,
+  detectLargeFunctions,
+  detectDebugLeftovers,
+  detectDeadCode,
+  detectDuplicateFunctionNames,
+  detectAnyAbuse,
+  detectCatchSwallow,
+  detectMissingReturnTypes,
+} from './rules/phase0-basic.js'
+import {
+  detectHighComplexity,
+  detectDeepNesting,
+  detectTooManyParams,
+  detectHighCoupling,
+  detectPromiseStyleMix,
+  detectMagicNumbers,
+  detectCommentContradiction,
+} from './rules/phase1-complexity.js'
+import {
+  detectOverCommented,
+  detectHardcodedConfig,
+  detectInconsistentErrorHandling,
+  detectUnnecessaryAbstraction,
+  detectNamingInconsistency,
+} from './rules/phase5-ai.js'
+import {
+  collectFunctions,
+  fingerprintFunction,
+  calculateScore,
+} from './rules/phase8-semantic.js'
+
+// Git analyzers (re-exported as part of the public API)
+export { TrendAnalyzer } from './git/trend.js'
+export { BlameAnalyzer } from './git/blame.js'
+
+// ---------------------------------------------------------------------------
+// Rule weights — single source of truth for severities and drift score weights
+// ---------------------------------------------------------------------------
+
 export const RULE_WEIGHTS: Record<string, { severity: DriftIssue['severity']; weight: number }> = {
   'large-file':               { severity: 'error',   weight: 20 },
   'large-function':           { severity: 'error',   weight: 15 },
@@ -56,954 +81,11 @@ export const RULE_WEIGHTS: Record<string, { severity: DriftIssue['severity']; we
   'semantic-duplication':          { severity: 'warning', weight: 12 },
 }
 
-type FunctionLike = FunctionDeclaration | ArrowFunction | FunctionExpression | MethodDeclaration
-
-function hasIgnoreComment(file: SourceFile, line: number): boolean {
-  const lines = file.getFullText().split('\n')
-  const currentLine = lines[line - 1] ?? ''
-  const prevLine = lines[line - 2] ?? ''
-
-  if (/\/\/\s*drift-ignore\b/.test(currentLine)) return true
-  if (/\/\/\s*drift-ignore\b/.test(prevLine)) return true
-  return false
-}
-
-function isFileIgnored(file: SourceFile): boolean {
-  const firstLines = file.getFullText().split('\n').slice(0, 10).join('\n')
-  return /\/\/\s*drift-ignore-file\b/.test(firstLines)
-}
-
-function getSnippet(node: Node, file: SourceFile): string {
-  const startLine = node.getStartLineNumber()
-  const lines = file.getFullText().split('\n')
-  return lines
-    .slice(Math.max(0, startLine - 1), startLine + 1)
-    .join('\n')
-    .trim()
-    .slice(0, 120)
-}
-
-function getFunctionLikeLines(node: FunctionLike): number {
-  return node.getEndLineNumber() - node.getStartLineNumber()
-}
-
 // ---------------------------------------------------------------------------
-// Existing rules
+// Per-file analysis
 // ---------------------------------------------------------------------------
 
-function detectLargeFile(file: SourceFile): DriftIssue[] {
-  const lineCount = file.getEndLineNumber()
-  if (lineCount > 300) {
-    return [
-      {
-        rule: 'large-file',
-        severity: 'error',
-        message: `File has ${lineCount} lines (threshold: 300). Large files are the #1 sign of AI-generated structural drift.`,
-        line: 1,
-        column: 1,
-        snippet: `// ${lineCount} lines total`,
-      },
-    ]
-  }
-  return []
-}
-
-function detectLargeFunctions(file: SourceFile): DriftIssue[] {
-  const issues: DriftIssue[] = []
-  const fns: FunctionLike[] = [
-    ...file.getFunctions(),
-    ...file.getDescendantsOfKind(SyntaxKind.ArrowFunction),
-    ...file.getDescendantsOfKind(SyntaxKind.FunctionExpression),
-    ...file.getClasses().flatMap((c) => c.getMethods()),
-  ]
-
-  for (const fn of fns) {
-    const lines = getFunctionLikeLines(fn)
-    const startLine = fn.getStartLineNumber()
-    if (lines > 50) {
-      if (hasIgnoreComment(file, startLine)) continue
-      issues.push({
-        rule: 'large-function',
-        severity: 'error',
-        message: `Function spans ${lines} lines (threshold: 50). AI tends to dump logic into single functions.`,
-        line: startLine,
-        column: fn.getStartLinePos(),
-        snippet: getSnippet(fn, file),
-      })
-    }
-  }
-  return issues
-}
-
-function detectDebugLeftovers(file: SourceFile): DriftIssue[] {
-  const issues: DriftIssue[] = []
-
-  for (const call of file.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-    const expr = call.getExpression().getText()
-    const line = call.getStartLineNumber()
-    if (/^console\.(log|warn|error|debug|info)\b/.test(expr)) {
-      if (hasIgnoreComment(file, line)) continue
-      issues.push({
-        rule: 'debug-leftover',
-        severity: 'warning',
-        message: `console.${expr.split('.')[1]} left in production code.`,
-        line,
-        column: call.getStartLinePos(),
-        snippet: getSnippet(call, file),
-      })
-    }
-  }
-
-  const lines = file.getFullText().split('\n')
-  lines.forEach((lineContent, i) => {
-    if (/\/\/\s*(TODO|FIXME|HACK|XXX|TEMP)\b/i.test(lineContent)) {
-      if (hasIgnoreComment(file, i + 1)) return
-      issues.push({
-        rule: 'debug-leftover',
-        severity: 'warning',
-        message: `Unresolved marker found: ${lineContent.trim().slice(0, 60)}`,
-        line: i + 1,
-        column: 1,
-        snippet: lineContent.trim().slice(0, 120),
-      })
-    }
-  })
-
-  return issues
-}
-
-function detectDeadCode(file: SourceFile): DriftIssue[] {
-  const issues: DriftIssue[] = []
-
-  for (const imp of file.getImportDeclarations()) {
-    for (const named of imp.getNamedImports()) {
-      const name = named.getName()
-      const refs = file.getDescendantsOfKind(SyntaxKind.Identifier).filter(
-        (id) => id.getText() === name && id !== named.getNameNode()
-      )
-      if (refs.length === 0) {
-        issues.push({
-          rule: 'dead-code',
-          severity: 'warning',
-          message: `Unused import '${name}'. AI often imports more than it uses.`,
-          line: imp.getStartLineNumber(),
-          column: imp.getStartLinePos(),
-          snippet: getSnippet(imp, file),
-        })
-      }
-    }
-  }
-
-  return issues
-}
-
-function detectDuplicateFunctionNames(file: SourceFile): DriftIssue[] {
-  const issues: DriftIssue[] = []
-  const seen = new Map<string, number>()
-
-  const fns = file.getFunctions()
-  for (const fn of fns) {
-    const name = fn.getName()
-    if (!name) continue
-    const normalized = name.toLowerCase().replace(/[_-]/g, '')
-    if (seen.has(normalized)) {
-      issues.push({
-        rule: 'duplicate-function-name',
-        severity: 'error',
-        message: `Function '${name}' looks like a duplicate of a previously defined function. AI often generates near-identical helpers.`,
-        line: fn.getStartLineNumber(),
-        column: fn.getStartLinePos(),
-        snippet: getSnippet(fn, file),
-      })
-    } else {
-      seen.set(normalized, fn.getStartLineNumber())
-    }
-  }
-  return issues
-}
-
-function detectAnyAbuse(file: SourceFile): DriftIssue[] {
-  const issues: DriftIssue[] = []
-  for (const node of file.getDescendantsOfKind(SyntaxKind.AnyKeyword)) {
-    issues.push({
-      rule: 'any-abuse',
-      severity: 'warning',
-      message: `Explicit 'any' type detected. AI defaults to 'any' when it can't infer types properly.`,
-      line: node.getStartLineNumber(),
-      column: node.getStartLinePos(),
-      snippet: getSnippet(node, file),
-    })
-  }
-  return issues
-}
-
-function detectCatchSwallow(file: SourceFile): DriftIssue[] {
-  const issues: DriftIssue[] = []
-  for (const tryCatch of file.getDescendantsOfKind(SyntaxKind.TryStatement)) {
-    const catchClause = tryCatch.getCatchClause()
-    if (!catchClause) continue
-    const block = catchClause.getBlock()
-    const stmts = block.getStatements()
-    if (stmts.length === 0) {
-      issues.push({
-        rule: 'catch-swallow',
-        severity: 'warning',
-        message: `Empty catch block silently swallows errors. Classic AI pattern to make code "not throw".`,
-        line: catchClause.getStartLineNumber(),
-        column: catchClause.getStartLinePos(),
-        snippet: getSnippet(catchClause, file),
-      })
-    }
-  }
-  return issues
-}
-
-function detectMissingReturnTypes(file: SourceFile): DriftIssue[] {
-  const issues: DriftIssue[] = []
-  for (const fn of file.getFunctions()) {
-    if (!fn.getReturnTypeNode()) {
-      issues.push({
-        rule: 'no-return-type',
-        severity: 'info',
-        message: `Function '${fn.getName() ?? 'anonymous'}' has no explicit return type.`,
-        line: fn.getStartLineNumber(),
-        column: fn.getStartLinePos(),
-        snippet: getSnippet(fn, file),
-      })
-    }
-  }
-  return issues
-}
-
-// ---------------------------------------------------------------------------
-// Phase 1: complexity detection rules
-// ---------------------------------------------------------------------------
-
-/**
- * Cyclomatic complexity: count decision points in a function.
- * Each if/else if/ternary/?:/for/while/do/case/catch/&&/|| adds 1.
- * Threshold: > 10 is considered high complexity.
- */
-function getCyclomaticComplexity(fn: FunctionLike): number {
-  let complexity = 1 // base path
-
-  const incrementKinds = [
-    SyntaxKind.IfStatement,
-    SyntaxKind.ForStatement,
-    SyntaxKind.ForInStatement,
-    SyntaxKind.ForOfStatement,
-    SyntaxKind.WhileStatement,
-    SyntaxKind.DoStatement,
-    SyntaxKind.CaseClause,
-    SyntaxKind.CatchClause,
-    SyntaxKind.ConditionalExpression,  // ternary
-    SyntaxKind.AmpersandAmpersandToken,
-    SyntaxKind.BarBarToken,
-    SyntaxKind.QuestionQuestionToken,  // ??
-  ]
-
-  for (const kind of incrementKinds) {
-    complexity += fn.getDescendantsOfKind(kind).length
-  }
-
-  return complexity
-}
-
-function detectHighComplexity(file: SourceFile): DriftIssue[] {
-  const issues: DriftIssue[] = []
-  const fns: FunctionLike[] = [
-    ...file.getFunctions(),
-    ...file.getDescendantsOfKind(SyntaxKind.ArrowFunction),
-    ...file.getDescendantsOfKind(SyntaxKind.FunctionExpression),
-    ...file.getClasses().flatMap((c) => c.getMethods()),
-  ]
-
-  for (const fn of fns) {
-    const complexity = getCyclomaticComplexity(fn)
-    if (complexity > 10) {
-      const startLine = fn.getStartLineNumber()
-      if (hasIgnoreComment(file, startLine)) continue
-      issues.push({
-        rule: 'high-complexity',
-        severity: 'error',
-        message: `Cyclomatic complexity is ${complexity} (threshold: 10). AI generates correct code, not simple code.`,
-        line: startLine,
-        column: fn.getStartLinePos(),
-        snippet: getSnippet(fn, file),
-      })
-    }
-  }
-  return issues
-}
-
-/**
- * Deep nesting: count the maximum nesting depth of control flow inside a function.
- * Counts: if, for, while, do, try, switch.
- * Threshold: > 3 levels.
- */
-function getMaxNestingDepth(fn: FunctionLike): number {
-  const nestingKinds = new Set([
-    SyntaxKind.IfStatement,
-    SyntaxKind.ForStatement,
-    SyntaxKind.ForInStatement,
-    SyntaxKind.ForOfStatement,
-    SyntaxKind.WhileStatement,
-    SyntaxKind.DoStatement,
-    SyntaxKind.TryStatement,
-    SyntaxKind.SwitchStatement,
-  ])
-
-  let maxDepth = 0
-
-  function walk(node: Node, depth: number): void {
-    if (nestingKinds.has(node.getKind())) {
-      depth++
-      if (depth > maxDepth) maxDepth = depth
-    }
-    for (const child of node.getChildren()) {
-      walk(child, depth)
-    }
-  }
-
-  walk(fn, 0)
-  return maxDepth
-}
-
-function detectDeepNesting(file: SourceFile): DriftIssue[] {
-  const issues: DriftIssue[] = []
-  const fns: FunctionLike[] = [
-    ...file.getFunctions(),
-    ...file.getDescendantsOfKind(SyntaxKind.ArrowFunction),
-    ...file.getDescendantsOfKind(SyntaxKind.FunctionExpression),
-    ...file.getClasses().flatMap((c) => c.getMethods()),
-  ]
-
-  for (const fn of fns) {
-    const depth = getMaxNestingDepth(fn)
-    if (depth > 3) {
-      const startLine = fn.getStartLineNumber()
-      if (hasIgnoreComment(file, startLine)) continue
-      issues.push({
-        rule: 'deep-nesting',
-        severity: 'warning',
-        message: `Maximum nesting depth is ${depth} (threshold: 3). Deep nesting is the #1 readability killer.`,
-        line: startLine,
-        column: fn.getStartLinePos(),
-        snippet: getSnippet(fn, file),
-      })
-    }
-  }
-  return issues
-}
-
-/**
- * Too many parameters: functions with more than 4 parameters.
- * AI avoids refactoring parameters into objects/options bags.
- */
-function detectTooManyParams(file: SourceFile): DriftIssue[] {
-  const issues: DriftIssue[] = []
-  const fns: FunctionLike[] = [
-    ...file.getFunctions(),
-    ...file.getDescendantsOfKind(SyntaxKind.ArrowFunction),
-    ...file.getDescendantsOfKind(SyntaxKind.FunctionExpression),
-    ...file.getClasses().flatMap((c) => c.getMethods()),
-  ]
-
-  for (const fn of fns) {
-    const paramCount = fn.getParameters().length
-    if (paramCount > 4) {
-      const startLine = fn.getStartLineNumber()
-      if (hasIgnoreComment(file, startLine)) continue
-      issues.push({
-        rule: 'too-many-params',
-        severity: 'warning',
-        message: `Function has ${paramCount} parameters (threshold: 4). AI avoids refactoring into options objects.`,
-        line: startLine,
-        column: fn.getStartLinePos(),
-        snippet: getSnippet(fn, file),
-      })
-    }
-  }
-  return issues
-}
-
-/**
- * High coupling: files with more than 10 distinct import sources.
- * AI imports broadly without considering module cohesion.
- */
-function detectHighCoupling(file: SourceFile): DriftIssue[] {
-  const imports = file.getImportDeclarations()
-  const sources = new Set(imports.map((i) => i.getModuleSpecifierValue()))
-
-  if (sources.size > 10) {
-    return [
-      {
-        rule: 'high-coupling',
-        severity: 'warning',
-        message: `File imports from ${sources.size} distinct modules (threshold: 10). High coupling makes refactoring dangerous.`,
-        line: 1,
-        column: 1,
-        snippet: `// ${sources.size} import sources`,
-      },
-    ]
-  }
-  return []
-}
-
-/**
- * Promise style mix: async/await and .then()/.catch() used in the same file.
- * AI generates both styles without consistency.
- */
-function detectPromiseStyleMix(file: SourceFile): DriftIssue[] {
-  const text = file.getFullText()
-
-  // detect .then( or .catch( calls (property access on a promise)
-  const hasThen = file.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression).some((node) => {
-    const name = node.getName()
-    return name === 'then' || name === 'catch'
-  })
-
-  // detect async keyword usage
-  const hasAsync =
-    file.getDescendantsOfKind(SyntaxKind.AsyncKeyword).length > 0 ||
-    /\bawait\b/.test(text)
-
-  if (hasThen && hasAsync) {
-    return [
-      {
-        rule: 'promise-style-mix',
-        severity: 'warning',
-        message: `File mixes async/await with .then()/.catch(). AI generates both styles without picking one.`,
-        line: 1,
-        column: 1,
-        snippet: `// mixed promise styles detected`,
-      },
-    ]
-  }
-  return []
-}
-
-/**
- * Magic numbers: numeric literals used directly in logic outside of named constants.
- * Excludes 0, 1, -1 (universally understood) and array indices in obvious patterns.
- */
-function detectMagicNumbers(file: SourceFile): DriftIssue[] {
-  const issues: DriftIssue[] = []
-  const ALLOWED = new Set([0, 1, -1, 2, 100])
-
-  for (const node of file.getDescendantsOfKind(SyntaxKind.NumericLiteral)) {
-    const value = Number(node.getLiteralValue())
-    if (ALLOWED.has(value)) continue
-
-    // Skip: variable/const initializers at top level (those ARE the named constants)
-    const parent = node.getParent()
-    if (!parent) continue
-    const parentKind = parent.getKind()
-    if (
-      parentKind === SyntaxKind.VariableDeclaration ||
-      parentKind === SyntaxKind.PropertyAssignment ||
-      parentKind === SyntaxKind.EnumMember ||
-      parentKind === SyntaxKind.Parameter
-    ) continue
-
-    const line = node.getStartLineNumber()
-    if (hasIgnoreComment(file, line)) continue
-
-    issues.push({
-      rule: 'magic-number',
-      severity: 'info',
-      message: `Magic number ${value} used directly in logic. Extract to a named constant.`,
-      line,
-      column: node.getStartLinePos(),
-      snippet: getSnippet(node, file),
-    })
-  }
-  return issues
-}
-
-/**
- * Comment contradiction: comments that restate exactly what the code does.
- * Classic AI pattern — documents the obvious instead of the why.
- * Detects: "// increment counter" above counter++, "// return x" above return x, etc.
- */
-function detectCommentContradiction(file: SourceFile): DriftIssue[] {
-  const issues: DriftIssue[] = []
-  const lines = file.getFullText().split('\n')
-
-  // Patterns: comment that is a near-literal restatement of the next line
-  const trivialCommentPatterns = [
-    // "// return ..." above a return statement
-    { comment: /\/\/\s*return\b/i,         code: /^\s*return\b/ },
-    // "// increment ..." or "// increase ..." above x++ or x += 1
-    { comment: /\/\/\s*(increment|increase|add\s+1|plus\s+1)\b/i, code: /\+\+|(\+= ?1)\b/ },
-    // "// decrement ..." above x-- or x -= 1
-    { comment: /\/\/\s*(decrement|decrease|subtract\s+1|minus\s+1)\b/i, code: /--|(-= ?1)\b/ },
-    // "// log ..." above console.log
-    { comment: /\/\/\s*log\b/i,            code: /console\.(log|warn|error)/ },
-    // "// set ... to ..." or "// assign ..." above assignment
-    { comment: /\/\/\s*(set|assign)\b/i,   code: /^\s*\w[\w.[\]]*\s*=(?!=)/ },
-    // "// call ..." above a function call
-    { comment: /\/\/\s*call\b/i,           code: /^\s*\w[\w.]*\(/ },
-    // "// declare ..." or "// define ..." or "// create ..." above const/let/var
-    { comment: /\/\/\s*(declare|define|create|initialize)\b/i, code: /^\s*(const|let|var)\b/ },
-    // "// check if ..." above an if statement
-    { comment: /\/\/\s*check\s+if\b/i,     code: /^\s*if\s*\(/ },
-    // "// loop ..." or "// iterate ..." above for/while
-    { comment: /\/\/\s*(loop|iterate|for each|foreach)\b/i, code: /^\s*(for|while)\b/ },
-    // "// import ..." above an import
-    { comment: /\/\/\s*import\b/i,         code: /^\s*import\b/ },
-  ]
-
-  for (let i = 0; i < lines.length - 1; i++) {
-    const commentLine = lines[i].trim()
-    const nextLine = lines[i + 1]
-
-    for (const { comment, code } of trivialCommentPatterns) {
-      if (comment.test(commentLine) && code.test(nextLine)) {
-        if (hasIgnoreComment(file, i + 1)) continue
-        issues.push({
-          rule: 'comment-contradiction',
-          severity: 'warning',
-          message: `Comment restates what the code already says. AI documents the obvious instead of the why.`,
-          line: i + 1,
-          column: 1,
-          snippet: `${commentLine.slice(0, 60)}\n${nextLine.trim().slice(0, 60)}`,
-        })
-        break // one issue per comment line max
-      }
-    }
-  }
-
-  return issues
-}
-
-// ---------------------------------------------------------------------------
-// Phase 5: AI authorship heuristics
-// ---------------------------------------------------------------------------
-
-function detectOverCommented(file: SourceFile): DriftIssue[] {
-  const issues: DriftIssue[] = []
-
-  for (const fn of file.getFunctions()) {
-    const body = fn.getBody()
-    if (!body) continue
-
-    const bodyText = body.getText()
-    const lines = bodyText.split('\n')
-    const totalLines = lines.length
-
-    if (totalLines < 6) continue
-
-    let commentLines = 0
-    for (const line of lines) {
-      const trimmed = line.trim()
-      if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*') || trimmed.startsWith('*/')) {
-        commentLines++
-      }
-    }
-
-    const ratio = commentLines / totalLines
-    if (ratio >= 0.4) {
-      issues.push({
-        rule: 'over-commented',
-        severity: 'info',
-        message: `Function has ${Math.round(ratio * 100)}% comment density (${commentLines}/${totalLines} lines). AI documents the obvious instead of the why.`,
-        line: fn.getStartLineNumber(),
-        column: fn.getStartLinePos(),
-        snippet: fn.getName() ? `function ${fn.getName()}` : '(anonymous function)',
-      })
-    }
-  }
-
-  for (const cls of file.getClasses()) {
-    for (const method of cls.getMethods()) {
-      const body = method.getBody()
-      if (!body) continue
-
-      const bodyText = body.getText()
-      const lines = bodyText.split('\n')
-      const totalLines = lines.length
-
-      if (totalLines < 6) continue
-
-      let commentLines = 0
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*') || trimmed.startsWith('*/')) {
-          commentLines++
-        }
-      }
-
-      const ratio = commentLines / totalLines
-      if (ratio >= 0.4) {
-        issues.push({
-          rule: 'over-commented',
-          severity: 'info',
-          message: `Method '${method.getName()}' has ${Math.round(ratio * 100)}% comment density (${commentLines}/${totalLines} lines). AI documents the obvious instead of the why.`,
-          line: method.getStartLineNumber(),
-          column: method.getStartLinePos(),
-          snippet: `${cls.getName()}.${method.getName()}`,
-        })
-      }
-    }
-  }
-
-  return issues
-}
-
-function detectHardcodedConfig(file: SourceFile): DriftIssue[] {
-  const issues: DriftIssue[] = []
-
-  const CONFIG_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
-    { pattern: /^https?:\/\//i,                          label: 'HTTP/HTTPS URL' },
-    { pattern: /^wss?:\/\//i,                            label: 'WebSocket URL' },
-    { pattern: /^mongodb(\+srv)?:\/\//i,                 label: 'MongoDB connection string' },
-    { pattern: /^postgres(?:ql)?:\/\//i,                 label: 'PostgreSQL connection string' },
-    { pattern: /^mysql:\/\//i,                           label: 'MySQL connection string' },
-    { pattern: /^redis:\/\//i,                           label: 'Redis connection string' },
-    { pattern: /^amqps?:\/\//i,                          label: 'AMQP connection string' },
-    { pattern: /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/,  label: 'IP address' },
-    { pattern: /^:[0-9]{2,5}$/,                          label: 'Port number in string' },
-    { pattern: /^\/[a-z]/i,                              label: 'Absolute file path' },
-    { pattern: /localhost(:[0-9]+)?/i,                   label: 'localhost reference' },
-  ]
-
-  const filePath = file.getFilePath().replace(/\\/g, '/')
-  if (filePath.includes('.test.') || filePath.includes('.spec.') || filePath.includes('__tests__')) {
-    return issues
-  }
-
-  for (const node of file.getDescendantsOfKind(SyntaxKind.StringLiteral)) {
-    const value = node.getLiteralValue()
-    if (!value || value.length < 4) continue
-
-    const parent = node.getParent()
-    if (!parent) continue
-    const parentKind = parent.getKindName()
-    if (
-      parentKind === 'ImportDeclaration' ||
-      parentKind === 'ExportDeclaration' ||
-      (parentKind === 'CallExpression' && parent.getText().startsWith('import('))
-    ) continue
-
-    for (const { pattern, label } of CONFIG_PATTERNS) {
-      if (pattern.test(value)) {
-        issues.push({
-          rule: 'hardcoded-config',
-          severity: 'warning',
-          message: `Hardcoded ${label} detected. AI skips environment variables — extract to process.env or a config module.`,
-          line: node.getStartLineNumber(),
-          column: node.getStartLinePos(),
-          snippet: value.length > 60 ? value.slice(0, 60) + '...' : value,
-        })
-        break
-      }
-    }
-  }
-
-  return issues
-}
-
-function detectInconsistentErrorHandling(file: SourceFile): DriftIssue[] {
-  const issues: DriftIssue[] = []
-
-  let hasTryCatch = false
-  let hasDotCatch = false
-  let hasThenErrorHandler = false
-  let firstLine = 0
-
-  // Detectar try/catch
-  const tryCatches = file.getDescendantsOfKind(SyntaxKind.TryStatement)
-  if (tryCatches.length > 0) {
-    hasTryCatch = true
-    firstLine = firstLine || tryCatches[0].getStartLineNumber()
-  }
-
-  // Detectar .catch(handler) en call expressions
-  for (const call of file.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-    const expr = call.getExpression()
-    if (expr.getKindName() === 'PropertyAccessExpression') {
-      const propAccess = expr.asKindOrThrow(SyntaxKind.PropertyAccessExpression)
-      const propName = propAccess.getName()
-      if (propName === 'catch') {
-        // Verificar que tiene al menos un argumento (handler real, no .catch() vacío)
-        if (call.getArguments().length > 0) {
-          hasDotCatch = true
-          if (!firstLine) firstLine = call.getStartLineNumber()
-        }
-      }
-      // Detectar .then(onFulfilled, onRejected) — segundo argumento = error handler
-      if (propName === 'then' && call.getArguments().length >= 2) {
-        hasThenErrorHandler = true
-        if (!firstLine) firstLine = call.getStartLineNumber()
-      }
-    }
-  }
-
-  const stylesUsed = [hasTryCatch, hasDotCatch, hasThenErrorHandler].filter(Boolean).length
-
-  if (stylesUsed >= 2) {
-    const styles: string[] = []
-    if (hasTryCatch) styles.push('try/catch')
-    if (hasDotCatch) styles.push('.catch()')
-    if (hasThenErrorHandler) styles.push('.then(_, handler)')
-
-    issues.push({
-      rule: 'inconsistent-error-handling',
-      severity: 'warning',
-      message: `Mixed error handling styles: ${styles.join(', ')}. AI uses whatever pattern it saw last — pick one and stick to it.`,
-      line: firstLine || 1,
-      column: 1,
-      snippet: styles.join(' + '),
-    })
-  }
-
-  return issues
-}
-
-function detectUnnecessaryAbstraction(file: SourceFile): DriftIssue[] {
-  const issues: DriftIssue[] = []
-  const fileText = file.getFullText()
-
-  // Interfaces con un solo método
-  for (const iface of file.getInterfaces()) {
-    const methods = iface.getMethods()
-    const properties = iface.getProperties()
-
-    // Solo reportar si tiene exactamente 1 método y 0 propiedades (abstracción pura de comportamiento)
-    if (methods.length !== 1 || properties.length !== 0) continue
-
-    const ifaceName = iface.getName()
-
-    // Contar cuántas veces aparece el nombre en el archivo (excluyendo la declaración misma)
-    const usageCount = (fileText.match(new RegExp(`\\b${ifaceName}\\b`, 'g')) ?? []).length
-    // La declaración misma cuenta como 1 uso, implementaciones cuentan como 1 cada una
-    // Si usageCount <= 2 (declaración + 1 uso), es candidata a innecesaria
-    if (usageCount <= 2) {
-      issues.push({
-        rule: 'unnecessary-abstraction',
-        severity: 'warning',
-        message: `Interface '${ifaceName}' has 1 method and is used only once. AI creates abstractions preemptively — YAGNI.`,
-        line: iface.getStartLineNumber(),
-        column: iface.getStartLinePos(),
-        snippet: `interface ${ifaceName} { ${methods[0].getName()}(...) }`,
-      })
-    }
-  }
-
-  // Clases abstractas con un solo método abstracto y sin implementaciones en el archivo
-  for (const cls of file.getClasses()) {
-    if (!cls.isAbstract()) continue
-
-    const abstractMethods = cls.getMethods().filter(m => m.isAbstract())
-    const concreteMethods = cls.getMethods().filter(m => !m.isAbstract())
-
-    if (abstractMethods.length !== 1 || concreteMethods.length !== 0) continue
-
-    const clsName = cls.getName() ?? ''
-    const usageCount = (fileText.match(new RegExp(`\\b${clsName}\\b`, 'g')) ?? []).length
-
-    if (usageCount <= 2) {
-      issues.push({
-        rule: 'unnecessary-abstraction',
-        severity: 'warning',
-        message: `Abstract class '${clsName}' has 1 abstract method and is extended nowhere in this file. AI over-engineers single-use code.`,
-        line: cls.getStartLineNumber(),
-        column: cls.getStartLinePos(),
-        snippet: `abstract class ${clsName}`,
-      })
-    }
-  }
-
-  return issues
-}
-
-function detectNamingInconsistency(file: SourceFile): DriftIssue[] {
-  const issues: DriftIssue[] = []
-
-  const isCamelCase = (name: string) => /^[a-z][a-zA-Z0-9]*$/.test(name) && /[A-Z]/.test(name)
-  const isSnakeCase = (name: string) => /^[a-z][a-z0-9]*(_[a-z0-9]+)+$/.test(name)
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function checkFunction(fn: any): void {
-    const vars = fn.getVariableDeclarations()
-    if (vars.length < 3) return  // muy pocas vars para ser significativo
-
-    let camelCount = 0
-    let snakeCount = 0
-    const snakeExamples: string[] = []
-    const camelExamples: string[] = []
-
-    for (const v of vars) {
-      const name = v.getName()
-      if (isCamelCase(name)) {
-        camelCount++
-        if (camelExamples.length < 2) camelExamples.push(name)
-      } else if (isSnakeCase(name)) {
-        snakeCount++
-        if (snakeExamples.length < 2) snakeExamples.push(name)
-      }
-    }
-
-    if (camelCount >= 1 && snakeCount >= 1) {
-      issues.push({
-        rule: 'naming-inconsistency',
-        severity: 'warning',
-        message: `Mixed naming conventions: camelCase (${camelExamples.join(', ')}) and snake_case (${snakeExamples.join(', ')}) in the same scope. AI mixes conventions from different training examples.`,
-        line: fn.getStartLineNumber(),
-        column: fn.getStartLinePos(),
-        snippet: `camelCase: ${camelExamples[0]} / snake_case: ${snakeExamples[0]}`,
-      })
-    }
-  }
-
-  for (const fn of file.getFunctions()) {
-    checkFunction(fn)
-  }
-
-  for (const cls of file.getClasses()) {
-    for (const method of cls.getMethods()) {
-      checkFunction(method)
-    }
-  }
-
-  return issues
-}
-
-// ---------------------------------------------------------------------------
-// Score
-// ---------------------------------------------------------------------------
-
-function calculateScore(issues: DriftIssue[]): number {
-  let raw = 0
-  for (const issue of issues) {
-    raw += RULE_WEIGHTS[issue.rule]?.weight ?? 5
-  }
-  return Math.min(100, raw)
-}
-
-// ---------------------------------------------------------------------------
-// Phase 8: Semantic duplication — AST fingerprinting helpers
-// ---------------------------------------------------------------------------
-
-type FunctionLikeNode = FunctionDeclaration | ArrowFunction | FunctionExpression | MethodDeclaration
-
-/** Normalize a function body to a canonical string (Type-2 clone detection).
- *  Variable names, parameter names, and numeric/string literals are replaced
- *  with canonical tokens so that two functions with identical logic but
- *  different identifiers produce the same fingerprint.
- */
-function normalizeFunctionBody(fn: FunctionLikeNode): string {
-  // Build a substitution map: localName → canonical token
-  const subst = new Map<string, string>()
-
-  // Map parameters first
-  for (const [i, param] of fn.getParameters().entries()) {
-    const name = param.getName()
-    if (name && name !== '_') subst.set(name, `P${i}`)
-  }
-
-  // Map locally declared variables (VariableDeclaration)
-  let varIdx = 0
-  fn.forEachDescendant(node => {
-    if (node.getKind() === SyntaxKind.VariableDeclaration) {
-      const nameNode = (node as import('ts-morph').VariableDeclaration).getNameNode()
-      // Support destructuring — getNameNode() may be a BindingPattern
-      if (nameNode.getKind() === SyntaxKind.Identifier) {
-        const name = nameNode.getText()
-        if (!subst.has(name)) subst.set(name, `V${varIdx++}`)
-      }
-    }
-  })
-
-  function serializeNode(node: Node): string {
-    const kind = node.getKindName()
-
-    switch (node.getKind()) {
-      case SyntaxKind.Identifier: {
-        const text = node.getText()
-        return subst.get(text) ?? text  // external refs (Math, console) kept as-is
-      }
-      case SyntaxKind.NumericLiteral:
-        return 'NL'
-      case SyntaxKind.StringLiteral:
-      case SyntaxKind.NoSubstitutionTemplateLiteral:
-        return 'SL'
-      case SyntaxKind.TrueKeyword:
-        return 'TRUE'
-      case SyntaxKind.FalseKeyword:
-        return 'FALSE'
-      case SyntaxKind.NullKeyword:
-        return 'NULL'
-    }
-
-    const children = node.getChildren()
-    if (children.length === 0) return kind
-
-    const childStr = children.map(serializeNode).join('|')
-    return `${kind}(${childStr})`
-  }
-
-  const body = fn.getBody()
-  if (!body) return ''
-  return serializeNode(body)
-}
-
-/** Return a SHA-256 fingerprint for a function body (normalized). */
-function fingerprintFunction(fn: FunctionLikeNode): string {
-  const normalized = normalizeFunctionBody(fn)
-  return crypto.createHash('sha256').update(normalized).digest('hex')
-}
-
-/** Return all function-like nodes from a SourceFile that are worth comparing:
- *  - At least MIN_LINES lines in their body
- *  - Not test helpers (describe/it/test/beforeEach/afterEach)
- */
-const MIN_LINES = 8
-
-function collectFunctions(sf: SourceFile): Array<{ fn: FunctionLikeNode; name: string; line: number; col: number }> {
-  const results: Array<{ fn: FunctionLikeNode; name: string; line: number; col: number }> = []
-
-  const kinds = [
-    SyntaxKind.FunctionDeclaration,
-    SyntaxKind.FunctionExpression,
-    SyntaxKind.ArrowFunction,
-    SyntaxKind.MethodDeclaration,
-  ] as const
-
-  for (const kind of kinds) {
-    for (const node of sf.getDescendantsOfKind(kind)) {
-      const body = (node as FunctionLikeNode).getBody()
-      if (!body) continue
-
-      const start = body.getStartLineNumber()
-      const end = body.getEndLineNumber()
-      if (end - start + 1 < MIN_LINES) continue
-
-      // Skip test-framework helpers
-      const name = node.getKind() === SyntaxKind.FunctionDeclaration
-        ? (node as FunctionDeclaration).getName() ?? '<anonymous>'
-        : node.getKind() === SyntaxKind.MethodDeclaration
-          ? (node as MethodDeclaration).getName()
-          : '<anonymous>'
-
-      if (['describe', 'it', 'test', 'beforeEach', 'afterEach', 'beforeAll', 'afterAll'].includes(name)) continue
-
-      const pos = node.getStart()
-      const lineInfo = sf.getLineAndColumnAtPos(pos)
-
-      results.push({ fn: node as FunctionLikeNode, name, line: lineInfo.line, col: lineInfo.column })
-    }
-  }
-
-  return results
-}
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
-export function analyzeFile(file: SourceFile): FileReport {
+export function analyzeFile(file: import('ts-morph').SourceFile): FileReport {
   if (isFileIgnored(file)) {
     return {
       path: file.getFilePath(),
@@ -1027,7 +109,6 @@ export function analyzeFile(file: SourceFile): FileReport {
     ...detectTooManyParams(file),
     ...detectHighCoupling(file),
     ...detectPromiseStyleMix(file),
-    // Stubs now implemented
     ...detectMagicNumbers(file),
     ...detectCommentContradiction(file),
     // Phase 5: AI authorship heuristics
@@ -1041,9 +122,13 @@ export function analyzeFile(file: SourceFile): FileReport {
   return {
     path: file.getFilePath(),
     issues,
-    score: calculateScore(issues),
+    score: calculateScore(issues, RULE_WEIGHTS),
   }
 }
+
+// ---------------------------------------------------------------------------
+// Project-level analysis (phases 2, 3, 8 require the full file set)
+// ---------------------------------------------------------------------------
 
 export function analyzeProject(targetPath: string, config?: DriftConfig): FileReport[] {
   const project = new Project({
@@ -1072,11 +157,11 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
   const reportByPath = new Map<string, FileReport>()
   for (const r of reports) reportByPath.set(r.path, r)
 
-  // Phase 2: cross-file analysis — build import graph first
-  const allImportedPaths = new Set<string>()   // absolute paths of files that are imported
-  const allImportedNames = new Map<string, Set<string>>() // file path → set of imported names
-  const allLiteralImports = new Set<string>()  // raw module specifiers (for unused-dependency)
-  const importGraph = new Map<string, Set<string>>() // Phase 3: filePath → Set of imported filePaths
+  // ── Phase 2 setup: build import graph ──────────────────────────────────────
+  const allImportedPaths = new Set<string>()
+  const allImportedNames = new Map<string, Set<string>>()
+  const allLiteralImports = new Set<string>()
+  const importGraph = new Map<string, Set<string>>()
 
   for (const sf of sourceFiles) {
     const sfPath = sf.getFilePath()
@@ -1084,17 +169,14 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
       const moduleSpecifier = decl.getModuleSpecifierValue()
       allLiteralImports.add(moduleSpecifier)
 
-      // Resolve to absolute path for dead-file / unused-export
       const resolved = decl.getModuleSpecifierSourceFile()
       if (resolved) {
         const resolvedPath = resolved.getFilePath()
         allImportedPaths.add(resolvedPath)
 
-        // Phase 3: populate directed import graph
         if (!importGraph.has(sfPath)) importGraph.set(sfPath, new Set())
         importGraph.get(sfPath)!.add(resolvedPath)
 
-        // Collect named imports { A, B } and default imports
         const named = decl.getNamedImports().map(n => n.getName())
         const def = decl.getDefaultImport()?.getText()
         const ns = decl.getNamespaceImport()?.getText()
@@ -1105,12 +187,10 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
         const nameSet = allImportedNames.get(resolvedPath)!
         for (const n of named) nameSet.add(n)
         if (def) nameSet.add('default')
-        if (ns) nameSet.add('*') // namespace import — counts all exports as used
+        if (ns) nameSet.add('*')
       }
     }
 
-    // Also register re-exports: export { X, Y } from './module'
-    // These count as "using" X and Y from the source module
     for (const exportDecl of sf.getExportDeclarations()) {
       const reExportedModule = exportDecl.getModuleSpecifierSourceFile()
       if (!reExportedModule) continue
@@ -1125,7 +205,6 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
 
       const namedExports = exportDecl.getNamedExports()
       if (namedExports.length === 0) {
-        // export * from './module' — namespace re-export, all names used
         nameSet.add('*')
       } else {
         for (const ne of namedExports) nameSet.add(ne.getName())
@@ -1133,14 +212,12 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
     }
   }
 
-  // Detect unused-export and dead-file per source file
+  // ── Phase 2: dead-file + unused-export + unused-dependency ─────────────────
   for (const sf of sourceFiles) {
     const sfPath = sf.getFilePath()
     const report = reportByPath.get(sfPath)
     if (!report) continue
 
-    // dead-file: file is never imported by anyone
-    // Exclude entry-point candidates: index.ts, main.ts, cli.ts, app.ts, bin files
     const basename = path.basename(sfPath)
     const isBinFile = sfPath.replace(/\\/g, '/').includes('/bin/')
     const isEntryPoint = /^(index|main|cli|app)\.(ts|tsx|js|jsx)$/.test(basename) || isBinFile
@@ -1154,11 +231,9 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
         snippet: basename,
       }
       report.issues.push(issue)
-      report.score = calculateScore(report.issues)
+      report.score = calculateScore(report.issues, RULE_WEIGHTS)
     }
 
-    // unused-export: named exports not imported anywhere
-    // Skip barrel files (index.ts) — their entire surface is the public API
     const isBarrel = /^index\.(ts|tsx|js|jsx)$/.test(basename)
     const importedNamesForFile = allImportedNames.get(sfPath)
     const hasNamespaceImport = importedNamesForFile?.has('*') ?? false
@@ -1177,19 +252,17 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
               snippet: namedExport.getText().slice(0, 80),
             }
             report.issues.push(issue)
-            report.score = calculateScore(report.issues)
+            report.score = calculateScore(report.issues, RULE_WEIGHTS)
           }
         }
       }
 
-      // Also check inline export declarations (export function foo, export const bar)
       for (const exportSymbol of sf.getExportedDeclarations()) {
         const [exportName, declarations] = [exportSymbol[0], exportSymbol[1]]
         if (exportName === 'default') continue
         if (importedNamesForFile?.has(exportName)) continue
 
         for (const decl of declarations) {
-          // Skip if this is a re-export from another file
           if (decl.getSourceFile().getFilePath() !== sfPath) continue
 
           const line = decl.getStartLineNumber()
@@ -1202,14 +275,14 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
             snippet: decl.getText().split('\n')[0].slice(0, 80),
           }
           report.issues.push(issue)
-          report.score = calculateScore(report.issues)
-          break // one issue per export name is enough
+          report.score = calculateScore(report.issues, RULE_WEIGHTS)
+          break
         }
       }
     }
   }
 
-  // Detect unused-dependency: packages in package.json never imported
+  // unused-dependency
   const pkgPath = path.join(targetPath, 'package.json')
   if (fs.existsSync(pkgPath)) {
     let pkg: Record<string, unknown>
@@ -1219,17 +292,10 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
       pkg = {}
     }
 
-    const deps = {
-      ...((pkg.dependencies as Record<string, string>) ?? {}),
-    }
-
+    const deps = { ...((pkg.dependencies as Record<string, string>) ?? {}) }
     const unusedDeps: string[] = []
     for (const depName of Object.keys(deps)) {
-      // Skip type-only packages (@types/*)
       if (depName.startsWith('@types/')) continue
-
-      // A dependency is "used" if any import specifier starts with the package name
-      // (handles sub-paths like 'lodash/merge', 'date-fns/format', etc.)
       const isUsed = [...allLiteralImports].some(
         imp => imp === depName || imp.startsWith(depName + '/')
       )
@@ -1245,16 +311,15 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
         column: 1,
         snippet: `"${dep}"`,
       }))
-
       reports.push({
         path: pkgPath,
         issues: pkgIssues,
-        score: calculateScore(pkgIssues),
+        score: calculateScore(pkgIssues, RULE_WEIGHTS),
       })
     }
   }
 
-  // Phase 3: circular-dependency — DFS cycle detection
+  // ── Phase 3: circular-dependency ────────────────────────────────────────────
   function findCycles(graph: Map<string, Set<string>>): Array<string[]> {
     const visited = new Set<string>()
     const inStack = new Set<string>()
@@ -1269,7 +334,6 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
         if (!visited.has(neighbor)) {
           dfs(neighbor, stack)
         } else if (inStack.has(neighbor)) {
-          // Found a cycle — extract the cycle portion from the stack
           const cycleStart = stack.indexOf(neighbor)
           cycles.push(stack.slice(cycleStart))
         }
@@ -1280,17 +344,13 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
     }
 
     for (const node of graph.keys()) {
-      if (!visited.has(node)) {
-        dfs(node, [])
-      }
+      if (!visited.has(node)) dfs(node, [])
     }
 
     return cycles
   }
 
   const cycles = findCycles(importGraph)
-
-  // De-duplicate: each unique cycle (regardless of starting node) reported once per file
   const reportedCycleKeys = new Set<string>()
 
   for (const cycle of cycles) {
@@ -1298,14 +358,13 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
     if (reportedCycleKeys.has(cycleKey)) continue
     reportedCycleKeys.add(cycleKey)
 
-    // Report on the first file in the cycle
     const firstFile = cycle[0]
     const report = reportByPath.get(firstFile)
     if (!report) continue
 
     const cycleDisplay = cycle
       .map(p => path.basename(p))
-      .concat(path.basename(cycle[0])) // close the loop visually: A → B → C → A
+      .concat(path.basename(cycle[0]))
       .join(' → ')
 
     const issue: DriftIssue = {
@@ -1317,10 +376,10 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
       snippet: cycleDisplay,
     }
     report.issues.push(issue)
-    report.score = calculateScore(report.issues)
+    report.score = calculateScore(report.issues, RULE_WEIGHTS)
   }
 
-  // ── Phase 3b: layer-violation ──────────────────────────────────────────
+  // ── Phase 3b: layer-violation ────────────────────────────────────────────────
   if (config?.layers && config.layers.length > 0) {
     const { layers } = config
 
@@ -1367,7 +426,7 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
     }
   }
 
-  // ── Phase 3c: cross-boundary-import ────────────────────────────────────
+  // ── Phase 3c: cross-boundary-import ─────────────────────────────────────────
   if (config?.modules && config.modules.length > 0) {
     const { modules } = config
 
@@ -1410,8 +469,7 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
     }
   }
 
-  // ── Phase 8: semantic-duplication ────────────────────────────────────────
-  // Build a fingerprint → [{filePath, fnName, line, col}] map across all files
+  // ── Phase 8: semantic-duplication ───────────────────────────────────────────
   const fingerprintMap = new Map<string, Array<{ filePath: string; name: string; line: number; col: number }>>()
 
   for (const sf of sourceFiles) {
@@ -1423,7 +481,6 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
     }
   }
 
-  // For each fingerprint with 2+ functions: report each as a duplicate of the others
   for (const [, entries] of fingerprintMap) {
     if (entries.length < 2) continue
 
@@ -1431,7 +488,6 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
       const report = reportByPath.get(entry.filePath)
       if (!report) continue
 
-      // Build the "duplicated in" list (all other locations)
       const others = entries
         .filter(e => e !== entry)
         .map(e => {
@@ -1454,542 +510,4 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
   }
 
   return reports
-}
-
-// ---------------------------------------------------------------------------
-// Git helpers
-// ---------------------------------------------------------------------------
-
-/** Analyse a file given its absolute path string (wraps analyzeFile). */
-function analyzeFilePath(filePath: string): FileReport {
-  const proj = new Project({
-    skipAddingFilesFromTsConfig: true,
-    compilerOptions: { allowJs: true },
-  })
-  const sf = proj.addSourceFileAtPath(filePath)
-  return analyzeFile(sf)
-}
-
-/**
- * Execute a git command synchronously and return stdout.
- * Throws a descriptive error if the command fails or git is not available.
- */
-function execGit(cmd: string, cwd: string): string {
-  try {
-    return execSync(cmd, { cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim()
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    throw new Error(`Git command failed: ${cmd}\n${msg}`)
-  }
-}
-
-/**
- * Verify the given directory is a git repository.
- * Throws if git is not available or the directory is not a repo.
- */
-function assertGitRepo(cwd: string): void {
-  try {
-    execGit('git rev-parse --is-inside-work-tree', cwd)
-  } catch {
-    throw new Error(`Directory is not a git repository: ${cwd}`)
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Historical analysis helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Analyse a single file as it existed at a given commit hash.
- * Writes the blob to a temp file, runs analyzeFile, then cleans up.
- */
-async function analyzeFileAtCommit(
-  filePath: string,
-  commitHash: string,
-  projectRoot: string,
-): Promise<FileReport> {
-  const relPath = path.relative(projectRoot, filePath).replace(/\\/g, '/')
-  const blob = execGit(`git show ${commitHash}:${relPath}`, projectRoot)
-
-  const tmpFile = path.join(os.tmpdir(), `drift-${crypto.randomBytes(8).toString('hex')}.ts`)
-  try {
-    fs.writeFileSync(tmpFile, blob, 'utf8')
-    const report = analyzeFilePath(tmpFile)
-    // Replace temp path with original for readable output
-    return { ...report, path: filePath }
-  } finally {
-    try { fs.unlinkSync(tmpFile) } catch { /* ignore cleanup errors */ }
-  }
-}
-
-/**
- * Analyse ALL TypeScript files in the project snapshot at a given commit.
- * Uses `git ls-tree` to enumerate every file in the tree, writes them to a
- * temp directory, then runs `analyzeProject` on that full snapshot so that
- * the resulting `averageScore` reflects the complete project health rather
- * than only the files touched in that diff.
- */
-async function analyzeSingleCommit(
-  commitHash: string,
-  targetPath: string,
-  config?: DriftConfig,
-): Promise<HistoricalAnalysis> {
-  // 1. Commit metadata
-  const meta = execGit(
-    `git show --no-patch --format="%H|%aI|%an|%s" ${commitHash}`,
-    targetPath,
-  )
-  const [hash, dateStr, author, ...msgParts] = meta.split('|')
-  const message = msgParts.join('|').trim()
-  const commitDate = new Date(dateStr ?? '')
-
-  // 2. All .ts/.tsx files tracked at this commit (no diffs, full tree)
-  const allFiles = execGit(
-    `git ls-tree -r ${commitHash} --name-only`,
-    targetPath,
-  )
-    .split('\n')
-    .filter(
-      f =>
-        (f.endsWith('.ts') || f.endsWith('.tsx')) &&
-        !f.endsWith('.d.ts') &&
-        !f.includes('node_modules') &&
-        !f.startsWith('dist/'),
-    )
-
-  if (allFiles.length === 0) {
-    return {
-      commitHash: hash ?? commitHash,
-      commitDate,
-      author: author ?? '',
-      message,
-      files: [],
-      totalScore: 0,
-      averageScore: 0,
-    }
-  }
-
-  // 3. Write snapshot to temp directory
-  const tmpDir = path.join(os.tmpdir(), `drift-${(hash ?? commitHash).slice(0, 8)}`)
-  fs.mkdirSync(tmpDir, { recursive: true })
-
-  for (const relPath of allFiles) {
-    try {
-      const content = execGit(`git show ${commitHash}:${relPath}`, targetPath)
-      const destPath = path.join(tmpDir, relPath)
-      fs.mkdirSync(path.dirname(destPath), { recursive: true })
-      fs.writeFileSync(destPath, content, 'utf-8')
-    } catch {
-      // skip files that can't be read (binary, deleted in partial clone, etc.)
-    }
-  }
-
-  // 4. Analyse the full project snapshot
-  const fileReports = analyzeProject(tmpDir, config)
-  const totalScore = fileReports.reduce((sum, r) => sum + r.score, 0)
-  const averageScore = fileReports.length > 0 ? totalScore / fileReports.length : 0
-
-  // 5. Cleanup
-  try {
-    fs.rmSync(tmpDir, { recursive: true, force: true })
-  } catch {
-    // non-fatal — temp dirs are cleaned by the OS eventually
-  }
-
-  return {
-    commitHash: hash ?? commitHash,
-    commitDate,
-    author: author ?? '',
-    message,
-    files: fileReports,
-    totalScore,
-    averageScore,
-  }
-}
-
-/**
- * Run historical analysis over all commits since a given date.
- * Returns results ordered chronologically (oldest first).
- */
-async function analyzeHistoricalCommits(
-  sinceDate: Date,
-  targetPath: string,
-  maxCommits: number,
-  config?: DriftConfig,
-  maxSamples: number = 10,
-): Promise<HistoricalAnalysis[]> {
-  assertGitRepo(targetPath)
-
-  const isoDate = sinceDate.toISOString()
-  const raw = execGit(
-    `git log --since="${isoDate}" --format="%H" --max-count=${maxCommits}`,
-    targetPath,
-  )
-
-  if (!raw) return []
-
-  const hashes = raw.split('\n').filter(Boolean)
-
-  // Sample: distribute evenly across the range
-  // E.g. 122 commits, maxSamples=10 → pick index 0, 13, 26, 39, 52, 65, 78, 91, 104, 121
-  const sampled = hashes.length <= maxSamples
-    ? hashes
-    : Array.from({ length: maxSamples }, (_, i) =>
-        hashes[Math.floor(i * (hashes.length - 1) / (maxSamples - 1))]
-      )
-
-  const analyses = await Promise.all(
-    sampled.map(h => analyzeSingleCommit(h, targetPath, config).catch(() => null)),
-  )
-
-  return analyses
-    .filter((a): a is HistoricalAnalysis => a !== null)
-    .sort((a, b) => a.commitDate.getTime() - b.commitDate.getTime())
-}
-
-// ---------------------------------------------------------------------------
-// TrendAnalyzer
-// ---------------------------------------------------------------------------
-
-export class TrendAnalyzer {
-  private readonly projectPath: string
-  private readonly config: DriftConfig | undefined
-
-  constructor(projectPath: string, config?: DriftConfig) {
-    this.projectPath = projectPath
-    this.config = config
-  }
-
-  // --- Static utility methods -----------------------------------------------
-
-  static calculateMovingAverage(data: TrendDataPoint[], windowSize: number): number[] {
-    return data.map((_, i) => {
-      const start = Math.max(0, i - windowSize + 1)
-      const window = data.slice(start, i + 1)
-      return window.reduce((s, p) => s + p.score, 0) / window.length
-    })
-  }
-
-  static linearRegression(data: TrendDataPoint[]): { slope: number; intercept: number; r2: number } {
-    const n = data.length
-    if (n < 2) return { slope: 0, intercept: data[0]?.score ?? 0, r2: 0 }
-
-    const xs = data.map((_, i) => i)
-    const ys = data.map(p => p.score)
-
-    const xMean = xs.reduce((s, x) => s + x, 0) / n
-    const yMean = ys.reduce((s, y) => s + y, 0) / n
-
-    const ssXX = xs.reduce((s, x) => s + (x - xMean) ** 2, 0)
-    const ssXY = xs.reduce((s, x, i) => s + (x - xMean) * (ys[i]! - yMean), 0)
-    const ssYY = ys.reduce((s, y) => s + (y - yMean) ** 2, 0)
-
-    const slope = ssXX === 0 ? 0 : ssXY / ssXX
-    const intercept = yMean - slope * xMean
-    const r2 = ssYY === 0 ? 1 : (ssXY ** 2) / (ssXX * ssYY)
-
-    return { slope, intercept, r2 }
-  }
-
-  /** Generate a simple horizontal ASCII bar chart (one bar per data point). */
-  static generateTrendChart(data: TrendDataPoint[]): string {
-    if (data.length === 0) return '(no data)'
-
-    const maxScore = Math.max(...data.map(p => p.score), 1)
-    const chartWidth = 40
-
-    const lines = data.map(p => {
-      const barLen = Math.round((p.score / maxScore) * chartWidth)
-      const bar = '█'.repeat(barLen)
-      const dateStr = p.date.toISOString().slice(0, 10)
-      return `${dateStr} │${bar.padEnd(chartWidth)} ${p.score.toFixed(1)}`
-    })
-
-    return lines.join('\n')
-  }
-
-  // --- Instance method -------------------------------------------------------
-
-  async analyzeTrend(options: {
-    period?: 'week' | 'month' | 'quarter' | 'year'
-    since?: string
-    until?: string
-  }): Promise<DriftTrendReport> {
-    assertGitRepo(this.projectPath)
-
-    const periodDays: Record<string, number> = {
-      week: 7, month: 30, quarter: 90, year: 365,
-    }
-    const days = periodDays[options.period ?? 'month'] ?? 30
-    const sinceDate = options.since
-      ? new Date(options.since)
-      : new Date(Date.now() - days * 24 * 60 * 60 * 1000)
-
-    const historicalAnalyses = await analyzeHistoricalCommits(sinceDate, this.projectPath, 100, this.config, 10)
-
-    const trendPoints: TrendDataPoint[] = historicalAnalyses.map(h => ({
-      date: h.commitDate,
-      score: h.averageScore,
-      fileCount: h.files.length,
-      avgIssuesPerFile: h.files.length > 0
-        ? h.files.reduce((s, f) => s + f.issues.length, 0) / h.files.length
-        : 0,
-    }))
-
-    const regression = TrendAnalyzer.linearRegression(trendPoints)
-
-    // Current state report
-    const currentFiles = analyzeProject(this.projectPath, this.config)
-    const baseReport = buildReport(this.projectPath, currentFiles)
-
-    return {
-      ...baseReport,
-      trend: trendPoints,
-      regression,
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// BlameAnalyzer
-// ---------------------------------------------------------------------------
-
-interface GitBlameEntry {
-  hash: string
-  author: string
-  email: string
-  line: string
-}
-
-function parseGitBlame(blameOutput: string): GitBlameEntry[] {
-  const entries: GitBlameEntry[] = []
-  const lines = blameOutput.split('\n')
-  let i = 0
-
-  while (i < lines.length) {
-    const headerLine = lines[i]
-    if (!headerLine || headerLine.trim() === '') { i++; continue }
-
-    // Porcelain blame format: first line is "<hash> <orig-line> <final-line> [<num-lines>]"
-    const headerMatch = headerLine.match(/^([0-9a-f]{40})\s/)
-    if (!headerMatch) { i++; continue }
-
-    const hash = headerMatch[1]!
-    let author = ''
-    let email = ''
-    let codeLine = ''
-    i++
-
-    while (i < lines.length && !lines[i]!.match(/^[0-9a-f]{40}\s/)) {
-      const l = lines[i]!
-      if (l.startsWith('author ')) author = l.slice(7).trim()
-      else if (l.startsWith('author-mail ')) email = l.slice(12).replace(/[<>]/g, '').trim()
-      else if (l.startsWith('\t')) codeLine = l.slice(1)
-      i++
-    }
-
-    entries.push({ hash, author, email, line: codeLine })
-  }
-
-  return entries
-}
-
-export class BlameAnalyzer {
-  private readonly projectPath: string
-  private readonly config: DriftConfig | undefined
-
-  constructor(projectPath: string, config?: DriftConfig) {
-    this.projectPath = projectPath
-    this.config = config
-  }
-
-  /** Blame a single file: returns per-author attribution. */
-  static async analyzeFileBlame(filePath: string): Promise<BlameAttribution[]> {
-    const dir = path.dirname(filePath)
-    assertGitRepo(dir)
-
-    const blameOutput = execGit(`git blame --porcelain "${filePath}"`, dir)
-    const entries = parseGitBlame(blameOutput)
-
-    // Analyse issues in the file
-    const report = analyzeFilePath(filePath)
-
-    // Map line numbers of issues to authors
-    const issuesByLine = new Map<number, number>()
-    for (const issue of report.issues) {
-      issuesByLine.set(issue.line, (issuesByLine.get(issue.line) ?? 0) + 1)
-    }
-
-    // Aggregate by author
-    const byAuthor = new Map<string, BlameAttribution>()
-    entries.forEach((entry, idx) => {
-      const key = entry.email || entry.author
-      if (!byAuthor.has(key)) {
-        byAuthor.set(key, {
-          author: entry.author,
-          email: entry.email,
-          commits: 0,
-          linesChanged: 0,
-          issuesIntroduced: 0,
-          avgScoreImpact: 0,
-        })
-      }
-      const attr = byAuthor.get(key)!
-      attr.linesChanged++
-      const lineNum = idx + 1
-      if (issuesByLine.has(lineNum)) {
-        attr.issuesIntroduced += issuesByLine.get(lineNum)!
-      }
-    })
-
-    // Count unique commits per author
-    const commitsByAuthor = new Map<string, Set<string>>()
-    for (const entry of entries) {
-      const key = entry.email || entry.author
-      if (!commitsByAuthor.has(key)) commitsByAuthor.set(key, new Set())
-      commitsByAuthor.get(key)!.add(entry.hash)
-    }
-
-    const total = entries.length || 1
-    const results: BlameAttribution[] = []
-    for (const [key, attr] of byAuthor) {
-      attr.commits = commitsByAuthor.get(key)?.size ?? 0
-      attr.avgScoreImpact = (attr.linesChanged / total) * report.score
-      results.push(attr)
-    }
-
-    return results.sort((a, b) => b.issuesIntroduced - a.issuesIntroduced)
-  }
-
-  /** Blame for a specific rule across all files in targetPath. */
-  static async analyzeRuleBlame(rule: string, targetPath: string): Promise<BlameAttribution[]> {
-    assertGitRepo(targetPath)
-
-    const tsFiles = fs
-      .readdirSync(targetPath, { recursive: true, encoding: 'utf8' })
-      .filter((f): f is string => (f.endsWith('.ts') || f.endsWith('.tsx')) && !f.includes('node_modules'))
-      .map(f => path.join(targetPath, f))
-
-    const combined = new Map<string, BlameAttribution>()
-
-    for (const file of tsFiles) {
-      const report = analyzeFilePath(file)
-      const ruleIssues = report.issues.filter(i => i.rule === rule)
-      if (ruleIssues.length === 0) continue
-
-      let blameEntries: GitBlameEntry[] = []
-      try {
-        const blameOutput = execGit(`git blame --porcelain "${file}"`, targetPath)
-        blameEntries = parseGitBlame(blameOutput)
-      } catch { continue }
-
-      for (const issue of ruleIssues) {
-        const entry = blameEntries[issue.line - 1]
-        if (!entry) continue
-        const key = entry.email || entry.author
-        if (!combined.has(key)) {
-          combined.set(key, {
-            author: entry.author,
-            email: entry.email,
-            commits: 0,
-            linesChanged: 0,
-            issuesIntroduced: 0,
-            avgScoreImpact: 0,
-          })
-        }
-        const attr = combined.get(key)!
-        attr.issuesIntroduced++
-        attr.avgScoreImpact += RULE_WEIGHTS[rule]?.weight ?? 5
-      }
-    }
-
-    return Array.from(combined.values()).sort((a, b) => b.issuesIntroduced - a.issuesIntroduced)
-  }
-
-  /** Overall blame across all files and rules. */
-  static async analyzeOverallBlame(targetPath: string): Promise<BlameAttribution[]> {
-    assertGitRepo(targetPath)
-
-    const tsFiles = fs
-      .readdirSync(targetPath, { recursive: true, encoding: 'utf8' })
-      .filter((f): f is string => (f.endsWith('.ts') || f.endsWith('.tsx')) && !f.includes('node_modules'))
-      .map(f => path.join(targetPath, f))
-
-    const combined = new Map<string, BlameAttribution>()
-    const commitsByAuthor = new Map<string, Set<string>>()
-
-    for (const file of tsFiles) {
-      let blameEntries: GitBlameEntry[] = []
-      try {
-        const blameOutput = execGit(`git blame --porcelain "${file}"`, targetPath)
-        blameEntries = parseGitBlame(blameOutput)
-      } catch { continue }
-
-      const report = analyzeFilePath(file)
-      const issuesByLine = new Map<number, number>()
-      for (const issue of report.issues) {
-        issuesByLine.set(issue.line, (issuesByLine.get(issue.line) ?? 0) + 1)
-      }
-
-      blameEntries.forEach((entry, idx) => {
-        const key = entry.email || entry.author
-        if (!combined.has(key)) {
-          combined.set(key, {
-            author: entry.author,
-            email: entry.email,
-            commits: 0,
-            linesChanged: 0,
-            issuesIntroduced: 0,
-            avgScoreImpact: 0,
-          })
-          commitsByAuthor.set(key, new Set())
-        }
-        const attr = combined.get(key)!
-        attr.linesChanged++
-        commitsByAuthor.get(key)!.add(entry.hash)
-        const lineNum = idx + 1
-        if (issuesByLine.has(lineNum)) {
-          attr.issuesIntroduced += issuesByLine.get(lineNum)!
-          attr.avgScoreImpact += report.score * (1 / (blameEntries.length || 1))
-        }
-      })
-    }
-
-    for (const [key, attr] of combined) {
-      attr.commits = commitsByAuthor.get(key)?.size ?? 0
-    }
-
-    return Array.from(combined.values()).sort((a, b) => b.issuesIntroduced - a.issuesIntroduced)
-  }
-
-  // --- Instance method -------------------------------------------------------
-
-  async analyzeBlame(options: {
-    target?: 'file' | 'rule' | 'overall'
-    top?: number
-    filePath?: string
-    rule?: string
-  }): Promise<DriftBlameReport> {
-    assertGitRepo(this.projectPath)
-
-    let blame: BlameAttribution[] = []
-    const mode = options.target ?? 'overall'
-
-    if (mode === 'file' && options.filePath) {
-      blame = await BlameAnalyzer.analyzeFileBlame(options.filePath)
-    } else if (mode === 'rule' && options.rule) {
-      blame = await BlameAnalyzer.analyzeRuleBlame(options.rule, this.projectPath)
-    } else {
-      blame = await BlameAnalyzer.analyzeOverallBlame(this.projectPath)
-    }
-
-    if (options.top) {
-      blame = blame.slice(0, options.top)
-    }
-
-    const currentFiles = analyzeProject(this.projectPath, this.config)
-    const baseReport = buildReport(this.projectPath, currentFiles)
-
-    return { ...baseReport, blame }
-  }
 }

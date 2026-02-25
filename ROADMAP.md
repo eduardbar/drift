@@ -42,165 +42,208 @@ drift's goal is to be the tool that sits between ESLint and SonarQube — lightw
 
 ---
 
-## What's already done
+## Completed phases ✅
 
-- AST analysis with ts-morph — 10 detection rules
-- Score 0–100 per file and project
-- `--json`, `--ai` (LLM-optimized output), `--fix` (inline suggestions)
-- `--min-score` for CI (exit 1 if score exceeds threshold)
-- `drift-ignore` per line and per file
-- Windows / Linux / macOS compatible via `npx`
+### Phase 0 — Basic rules `v0.1.0` ✅
 
----
+Foundation: AST analysis with ts-morph, score 0–100, `--json`, `--ai`, `--fix`, `--min-score`, `drift-ignore` per line and per file, Windows / Linux / macOS compatible via `npx`.
 
-## What's next
+**Rules shipped:**
 
-Ordered by real developer pain — most common complaint first.
-
----
-
-### 1. Complexity detection
-
-> *"AI generates a nuclear option for a problem that needed a screwdriver."*  
-> — Hacker News
-
-> *"One of my devs implemented a batching process. He presented extremely robust, high-quality code. The problem was that it was MASSIVE overkill."*  
-> — Hacker News, r/ExperiencedDevs
-
-ESLint has a `complexity` rule. It measures cyclomatic complexity — the number of branches. That's not the same as cognitive complexity — how hard it is to *understand*. Biome has `noExcessiveCognitiveComplexity`. Neither gives you a score.
-
-**Planned rules:**
-- `high-complexity` — cyclomatic complexity > 10 per function
-- `deep-nesting` — nesting depth > 3 levels (if inside if inside for inside try = unreadable)
-- `too-many-params` — functions with more than 4 parameters (AI doesn't refactor into objects)
-- `high-coupling` — files importing more than 10 distinct modules
-- `promise-style-mix` — `async/await` and `.then()` mixed in the same file
-
-**Why this matters:** Complexity is the #1 reason codebases become write-only. AI generates correct code. Not simple code.
+| Rule | Severity | Weight |
+|------|----------|--------|
+| `large-file` | error | 20 |
+| `large-function` | error | 15 |
+| `duplicate-function-name` | error | 18 |
+| `debug-leftover` | warning | 10 |
+| `dead-code` | warning | 8 |
+| `any-abuse` | warning | 8 |
+| `catch-swallow` | warning | 10 |
+| `no-return-type` | info | 5 |
 
 ---
 
-### 2. Cross-file dead code detection
+### Phase 1 — Complexity detection `v0.2.0` ✅
 
-> *"After integrating Knip I removed around 3,500 lines of dead code at once."*  
-> — dev.to
+ESLint measures cyclomatic complexity per branch. drift measures cognitive load — how hard code is to *understand*. AI generates correct code, not simple code.
 
-> *"ESLint's architecture works on a file-by-file basis and was never intended to provide linting based on project-wide usage stats."*  
-> — typescript-eslint issue #371, marked **wontfix**
+**Rules shipped:**
 
-ESLint detects unused variables *inside a file*. It cannot detect unused exports, unused files, or dead modules across the project. This is a fundamental architectural limitation — not a missing rule.
-
-**Planned features:**
-- `unused-export` — exported symbol never imported anywhere in the project
-- `dead-file` — file never imported by anything
-- `unused-dependency` — package in `package.json` with zero imports in the codebase
-
-**Why this matters:** Dead code is cognitive overhead. Every unused export is a trap for the next developer. ESLint will never fix this — the `wontfix` label is permanent.
+| Rule | Severity | Weight |
+|------|----------|--------|
+| `high-complexity` | error | 15 |
+| `deep-nesting` | warning | 12 |
+| `too-many-params` | warning | 8 |
+| `high-coupling` | warning | 10 |
+| `promise-style-mix` | warning | 7 |
+| `magic-number` | info | 3 |
+| `comment-contradiction` | warning | 12 |
 
 ---
 
-### 3. Architectural boundary detection
+### Phase 2 — Cross-file dead code `v0.3.0` ✅
 
-> *"AI coding tools keep breaking architecture — so I built a guard layer."*  
-> — Reddit, r/javascript
+ESLint detects unused variables inside a file. It cannot detect unused exports, dead files, or dead modules across a project — this is a fundamental architectural limitation (typescript-eslint issue #371, marked `wontfix`). drift builds a full import graph.
 
-This is the largest unaddressed gap in the ecosystem. ESLint can validate import paths with `no-restricted-imports`. It cannot tell you if your UI layer is importing directly from your database layer, or if your domain logic has dependencies on your HTTP framework.
+**Rules shipped:**
 
-**Planned rules:**
-- `circular-dependency` — module A depends on B which depends on A
-- `layer-violation` — import from a prohibited architectural layer
-- `cross-boundary-import` — module outside its domain importing from another domain
+| Rule | Severity | What it detects |
+|------|----------|-----------------|
+| `unused-export` | warning | Exported symbol never imported anywhere in the project |
+| `dead-file` | warning | File never imported by anything |
+| `unused-dependency` | warning | Package in `package.json` with zero imports in the codebase |
 
-Zero config by default — drift infers what it can from the import graph. For teams that want explicit enforcement:
+---
 
-```ts
-// drift.config.ts — optional
-export default {
-  boundaries: {
-    layers: ['ui', 'domain', 'infrastructure'],
-    rules: [{ from: 'ui', allow: ['domain'] }]
-  }
-}
+### Phase 3 — Architectural boundaries `v0.4.0` ✅
+
+Architecture violations are invisible until they're catastrophic. ESLint can validate import paths with `no-restricted-imports`. It cannot tell you if your UI layer is importing directly from your database layer, or if your domain logic has dependencies on your HTTP framework. AI generates code that works today and breaks your architecture silently.
+
+**Rules shipped:**
+
+| Rule | Severity | What it detects |
+|------|----------|-----------------|
+| `circular-dependency` | error | Module A depends on B which depends on A |
+| `layer-violation` | error | Import from a prohibited architectural layer |
+| `cross-boundary-import` | warning | Module outside its domain importing from another domain |
+
+---
+
+### Phase 5 — AI authorship heuristics `v0.6.0` ✅
+
+Patterns that are statistically more common in AI-generated code than human-written code. These don't fail tests. ESLint doesn't catch them. They accumulate until the codebase is unmaintainable.
+
+**Rules shipped:**
+
+| Rule | Severity | What it detects |
+|------|----------|-----------------|
+| `hardcoded-config` | warning | URLs, tokens, or env-specific paths hardcoded in logic |
+| `inconsistent-error-handling` | warning | Different error handling patterns in equivalent functions |
+| `unnecessary-abstraction` | warning | Class or interface used in exactly one place |
+| `naming-inconsistency` | warning | Mixed naming conventions in the same module |
+| `over-commented` | info | Comments that describe exactly what the code already says |
+
+---
+
+### Phase 8 — Semantic duplication `v0.7.0` ✅
+
+AI doesn't reuse — it regenerates. The same logic appears in 4 different forms across the same file. Text-comparison is what grep does. drift uses AST fingerprinting for Type-2 clone detection: structurally equivalent code regardless of variable names.
+
+**Rules shipped:**
+
+| Rule | Severity | What it detects |
+|------|----------|-----------------|
+| `semantic-duplication` | warning | Code blocks with equivalent logic via AST fingerprinting |
+
+---
+
+### Phase 4 — Historical analysis `v0.9.0` ✅
+
+A score of 45 means nothing without context. A score that went from 80 to 45 over 4 sprints means your team is actually improving. No database. No server. Git is the source of truth.
+
+**Commands shipped:**
+- `drift trend` — linear regression over project history with uniform sampling of 10 points
+- `drift blame` — debt attribution by author via git blame
+
+**v0.9.1 fix:** Full project snapshot per commit, uniform 10-point sampling for consistent trend lines.
+
+---
+
+## Current state — February 2026
+
+- **26 rules active** across 9 detection categories
+- **Self-scan score: 14/100 (LOW)**
+- Published on npm as `@eduardbar/drift` — MIT, always free
+- Cross-platform: Windows / Linux / macOS via `npx`
+
+---
+
+## Path to v1.0.0
+
+The following items are required before calling this v1.0.0.
+
+---
+
+### Unit test suite
+
+**Status:** pending  
+**Target:** vitest suite covering all 26 rules
+
+Every rule needs at minimum: one test with a fixture that triggers the rule, one test with a fixture that doesn't. No rule ships without a test from v1.0.0 onward.
+
+---
+
+### Modular refactor
+
+**Status:** pending  
+**Target:** split `analyzer.ts` (currently ~1995 lines) into `src/rules/*` and `src/git/*`
+
+One file per rule. The monolithic analyzer is unsustainable as a contribution surface and a maintenance liability. This is a blocker for external contributors.
+
+```
+src/
+├── rules/
+│   ├── large-file.ts
+│   ├── large-function.ts
+│   ├── high-complexity.ts
+│   └── ...
+├── git/
+│   ├── trend.ts
+│   └── blame.ts
+├── analyzer.ts   ← orchestrator only, no rule logic
+└── ...
 ```
 
-**Why this matters:** Architecture violations are invisible until they're catastrophic. AI generates code that works today and breaks your architecture silently.
+---
+
+### JavaScript / JSX support
+
+**Status:** pending  
+**Target:** ts-morph can parse JS — extend scan to `.js` and `.jsx` files
+
+TypeScript-only limits the addressable market. JS projects have the same debt patterns. Zero new rules required — same detection, wider reach.
 
 ---
 
-### 4. Historical drift (`drift diff` / `drift trend`)
+### VS Code extension
 
-> *"Zero visibility on whether we're actually improving."*  
-> — Reddit, r/devsecops
+**Status:** pending  
+**Target:** extension that shows inline warnings directly in the editor
 
-The current score matters. The trend matters more. Is your codebase getting better or worse sprint over sprint? Nobody knows — because no tool measures it in a way that's easy to track.
-
-**Planned commands:**
-- `drift diff HEAD~N` — what got worse between two commits
-- `drift trend --commits 30` — ASCII chart of score evolution over time  
-- `drift blame` — which commits introduced the most debt
-
-No database. No server. Git is the source of truth.
-
-**Why this matters:** A score of 45 means nothing without context. A score that went from 80 to 45 over 4 sprints means your team is actually improving.
+The CLI is the canonical tool. The extension is an integration path for developers who want drift's signal without leaving their editor. Inline decorations for errors, warnings, inline fix suggestions on hover.
 
 ---
 
-### 5. AI authorship heuristics
+### `drift fix` — automated corrections
 
-> *"Companies will try to overcome AI-generated technical debt by throwing more AI at the problem."*  
-> — Hacker News
+**Status:** pending  
+**Target:** automatic application of simple fixes for low-effort rules
 
-> *"When 95% of code is projected to be AI-generated by 2030 but 45% of it fails basic security tests, we're building a house of cards."*  
-> — Reddit, r/vibecoding
-
-The hardest and most differentiated item on this list. Patterns that are statistically more common in AI-generated code than human-written code.
-
-**Planned rules:**
-- `over-commented` — comments that describe exactly what the code already says (AI documents the obvious)
-- `unnecessary-abstraction` — class or interface used in exactly one place (AI loves creating things it doesn't use)
-- `hardcoded-config` — strings that look like URLs, tokens, or environment-specific paths hardcoded in logic
-- `inconsistent-error-handling` — different error handling patterns in equivalent functions across the same file
-
-**Why this matters:** These patterns don't fail tests. ESLint doesn't catch them. They accumulate until the codebase is unmaintainable.
+Starting scope: `debug-leftover` (remove console statements), `magic-number` (extract to named constant). No AST rewriting for complex rules — only deterministic single-line fixes.
 
 ---
 
-### 6. Static HTML report + README badge
+### Interactive HTML report
 
-> *"It's all disconnected — different dashboards, zero visibility."*  
-> — Reddit, r/devsecops
+**Status:** pending  
+**Target:** `drift report` command generates a self-contained `drift-report.html`
 
-No server. No account. No cloud.
-
-**Planned features:**
-- `drift report` — single self-contained `drift-report.html`, open in any browser
-- `drift badge` — `badge.svg` with the current score for your README  
-- `drift ci` — GitHub Actions annotations on the exact lines with issues (inline in the PR diff)
+No server. No account. Open in any browser. Filterable by rule, severity, and file. Shareable as a single file artifact in CI.
 
 ---
 
-### 7. ESLint plugin
+## v1.0.0 milestone
 
-Meet developers where they already are.
+v1.0.0 ships when **all of the following are true:**
 
-- `eslint-plugin-drift` — exposes drift's rules as standard ESLint rules
-- Compatible with ESLint 9 flat config
-- The CLI remains canonical — the plugin is an integration path for teams already deep in ESLint
+1. **All 26 rules have unit tests** — vitest suite passes with zero failures
+2. **`analyzer.ts` is split** — `src/rules/*` structure in place, one file per rule
+3. **JS/JSX support is live** — `.js` and `.jsx` files are analyzed with the same ruleset
+4. **`drift fix` is live** — at minimum `debug-leftover` and `magic-number` auto-fix
+5. **Interactive HTML report is live** — `drift report` produces a working `drift-report.html`
+6. **Self-scan score stays ≤ 20** — drift eats its own dog food before calling itself v1.0.0
 
-**Why this matters:** Not everyone will install a new CLI. An ESLint plugin removes all friction and puts drift's rules into a toolchain devs already trust.
-
----
-
-### 8. Pattern inconsistency detection
-
-> *"8x increase in duplicated code blocks with AI tools."*  
-> — GitClear
-
-AI doesn't reuse — it regenerates. The same logic appears in 4 different forms across the same file.
-
-**Planned rules:**
-- `semantic-duplication` — code blocks with equivalent logic detected via AST fingerprinting (not text comparison — that's what grep does)
-- `naming-inconsistency` — mixed naming conventions in the same module (camelCase + snake_case + PascalCase for the same concept)
+Items not required for v1.0.0: VS Code extension (post-1.0 roadmap), ESLint plugin (post-1.0 roadmap).
 
 ---
 
