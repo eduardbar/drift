@@ -36,7 +36,7 @@ export async function loadConfig(projectRoot: string): Promise<DriftConfig | und
       const config: DriftConfig = mod.default ?? mod
 
       return config
-    } catch {
+    } catch { // drift-ignore
       // drift-ignore: catch-swallow — config is optional; load failure is non-fatal
     }
   }

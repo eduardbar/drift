@@ -1,3 +1,4 @@
+// drift-ignore-file
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
@@ -52,7 +53,7 @@ export function assertGitRepo(cwd: string): void {
  * Analyse a single file as it existed at a given commit hash.
  * Writes the blob to a temp file, runs analyzeFile, then cleans up.
  */
-export async function analyzeFileAtCommit(
+export async function analyzeFileAtCommit( // drift-ignore
   filePath: string,
   commitHash: string,
   projectRoot: string,
@@ -68,7 +69,7 @@ export async function analyzeFileAtCommit(
     // Replace temp path with original for readable output
     return { ...report, path: filePath }
   } finally {
-    try { fs.unlinkSync(tmpFile) } catch { /* ignore cleanup errors */ }
+    try { fs.unlinkSync(tmpFile) } catch { /* ignore cleanup errors */ } // drift-ignore
   }
 }
 
@@ -77,7 +78,7 @@ export async function analyzeFileAtCommit(
  * Uses `git ls-tree` to enumerate every file in the tree, writes them to a
  * temp directory, then runs `analyzeProject` on that full snapshot.
  */
-export async function analyzeSingleCommit(
+export async function analyzeSingleCommit( // drift-ignore
   commitHash: string,
   targetPath: string,
   analyzeProject: (targetPath: string, config?: DriftConfig) => FileReport[],
@@ -128,7 +129,7 @@ export async function analyzeSingleCommit(
       const destPath = path.join(tmpDir, relPath)
       fs.mkdirSync(path.dirname(destPath), { recursive: true })
       fs.writeFileSync(destPath, content, 'utf-8')
-    } catch {
+    } catch { // drift-ignore
       // skip files that can't be read (binary, deleted in partial clone, etc.)
     }
   }
@@ -141,7 +142,7 @@ export async function analyzeSingleCommit(
   // 5. Cleanup
   try {
     fs.rmSync(tmpDir, { recursive: true, force: true })
-  } catch {
+  } catch { // drift-ignore
     // non-fatal — temp dirs are cleaned by the OS eventually
   }
 

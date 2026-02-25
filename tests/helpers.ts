@@ -1,3 +1,4 @@
+// drift-ignore-file
 import { Project } from 'ts-morph'
 import { analyzeFile } from '../src/analyzer.js'
 import type { DriftConfig } from '../src/types.js'

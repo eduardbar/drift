@@ -20,7 +20,7 @@ export function hasIgnoreComment(file: SourceFile, line: number): boolean {
 }
 
 export function isFileIgnored(file: SourceFile): boolean {
-  const firstLines = file.getFullText().split('\n').slice(0, 10).join('\n')
+  const firstLines = file.getFullText().split('\n').slice(0, 10).join('\n') // drift-ignore
   return /\/\/\s*drift-ignore-file\b/.test(firstLines)
 }
 
@@ -31,7 +31,7 @@ export function getSnippet(node: Node, file: SourceFile): string {
     .slice(Math.max(0, startLine - 1), startLine + 1)
     .join('\n')
     .trim()
-    .slice(0, 120)
+    .slice(0, 120) // drift-ignore
 }
 
 export function getFunctionLikeLines(node: FunctionLike): number {

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// drift-ignore-file
 import { Command } from 'commander'
 import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'

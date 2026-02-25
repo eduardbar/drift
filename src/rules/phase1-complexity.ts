@@ -7,7 +7,7 @@ import { hasIgnoreComment, getSnippet, type FunctionLike } from './shared.js'
  * Each if/else if/ternary/?:/for/while/do/case/catch/&&/|| adds 1.
  * Threshold: > 10 is considered high complexity.
  */
-export function getCyclomaticComplexity(fn: FunctionLike): number {
+function getCyclomaticComplexity(fn: FunctionLike): number {
   let complexity = 1 // base path
 
   const incrementKinds = [
@@ -64,7 +64,7 @@ export function detectHighComplexity(file: SourceFile): DriftIssue[] {
  * Counts: if, for, while, do, try, switch.
  * Threshold: > 3 levels.
  */
-export function getMaxNestingDepth(fn: FunctionLike): number {
+function getMaxNestingDepth(fn: FunctionLike): number {
   const nestingKinds = new Set([
     SyntaxKind.IfStatement,
     SyntaxKind.ForStatement,

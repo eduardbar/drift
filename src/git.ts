@@ -86,7 +86,7 @@ export function cleanupTempDir(tempDir: string): void {
 /**
  * Get the short hash of a git ref for display purposes.
  */
-export function resolveRefHash(projectPath: string, ref: string): string {
+function resolveRefHash(projectPath: string, ref: string): string {
   try {
     return execSync(
       `git rev-parse --short ${ref}`,

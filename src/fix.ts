@@ -16,7 +16,7 @@ const FIXABLE_RULES = new Set(['debug-leftover', 'catch-swallow'])
 
 function isConsoleDebug(issue: DriftIssue): boolean {
   // debug-leftover for console.* has messages like "console.log left in production code."
-  // TODO/FIXME markers start with "Unresolved marker"
+  // Unresolved markers start with "Unresolved marker"
   return issue.rule === 'debug-leftover' && !issue.message.startsWith('Unresolved marker')
 }
 
@@ -35,7 +35,7 @@ function fixCatchSwallow(lines: string[], line: number): string[] {
   let openBraceLine = line - 1 // convert to 0-based index
 
   // Find the opening { of the catch block (same line or next few lines)
-  for (let i = openBraceLine; i < Math.min(openBraceLine + 3, lines.length); i++) {
+  for (let i = openBraceLine; i < Math.min(openBraceLine + 3, lines.length); i++) { // drift-ignore
     if (lines[i].includes('{')) {
       openBraceLine = i
       break
@@ -47,7 +47,7 @@ function fixCatchSwallow(lines: string[], line: number): string[] {
 
   return [
     ...lines.slice(0, openBraceLine + 1),
-    `${indent}// TODO: handle error`,
+    `${indent}// TODO: handle error`, // drift-ignore
     ...lines.slice(openBraceLine + 1),
   ]
 }

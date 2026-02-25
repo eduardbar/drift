@@ -88,18 +88,35 @@ npx @eduardbar/drift scan ./src -o report.md    # exportar Markdown
 
 ## Reglas del analyzer
 
-| Regla | Severidad | Peso | Qué detecta |
-|-------|-----------|------|-------------|
-| `large-file` | error | 20 | Archivos > 300 líneas |
-| `large-function` | error | 15 | Funciones > 50 líneas |
-| `duplicate-function-name` | error | 18 | Nombres de función duplicados (case-insensitive) |
-| `debug-leftover` | warning | 10 | `console.log/warn/error` + `TODO/FIXME/HACK/XXX/TEMP` |
-| `catch-swallow` | warning | 10 | Bloques `catch {}` vacíos |
-| `dead-code` | warning | 8 | Imports nombrados sin usar |
-| `any-abuse` | warning | 8 | Uso explícito de `any` como tipo |
-| `comment-contradiction` | warning | 12 | (reservado — definido en RULE_WEIGHTS) |
-| `no-return-type` | info | 5 | Funciones sin tipo de retorno explícito |
-| `magic-number` | info | 3 | (reservado — definido en RULE_WEIGHTS) |
+| Regla | Severidad | Peso |
+|-------|-----------|------|
+| `large-file` | error | 20 |
+| `large-function` | error | 15 |
+| `duplicate-function-name` | error | 18 |
+| `high-complexity` | error | 15 |
+| `circular-dependency` | error | 14 |
+| `layer-violation` | error | 16 |
+| `comment-contradiction` | warning | 12 |
+| `deep-nesting` | warning | 12 |
+| `semantic-duplication` | warning | 12 |
+| `debug-leftover` | warning | 10 |
+| `catch-swallow` | warning | 10 |
+| `high-coupling` | warning | 10 |
+| `dead-file` | warning | 10 |
+| `hardcoded-config` | warning | 10 |
+| `cross-boundary-import` | warning | 10 |
+| `dead-code` | warning | 8 |
+| `any-abuse` | warning | 8 |
+| `too-many-params` | warning | 8 |
+| `unused-export` | warning | 8 |
+| `inconsistent-error-handling` | warning | 8 |
+| `promise-style-mix` | warning | 7 |
+| `unnecessary-abstraction` | warning | 7 |
+| `naming-inconsistency` | warning | 6 |
+| `unused-dependency` | warning | 6 |
+| `no-return-type` | info | 5 |
+| `over-commented` | info | 4 |
+| `magic-number` | info | 3 |
 
 **Score = suma de pesos capped a 100. Score del proyecto = promedio de archivos.**
 
@@ -199,6 +216,7 @@ Sin esto, Windows no ejecuta el shebang correctamente con ES modules.
 
 | Versión | Cambios principales |
 |---------|---------------------|
+| **1.0.0** | 26 reglas, 131 tests, modular rules, JS/JSX, drift fix/report/diff/ci/badge/trend/blame, VS Code extension |
 | **0.3.0** | `--ai` (LLM-optimized JSON output) + `--fix` (inline suggestions) |
 | **0.2.3** | Fix: bin wrapper para compatibilidad Windows npx |
 | **0.2.2** | Refactor: `formatMarkdown` dividido en helpers + fix CI doble publish |

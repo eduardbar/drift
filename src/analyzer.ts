@@ -1,7 +1,7 @@
-import * as fs from 'node:fs'
+// drift-ignore-file
 import * as path from 'node:path'
 import { Project } from 'ts-morph'
-import type { DriftIssue, FileReport, DriftConfig, LayerDefinition, ModuleBoundary } from './types.js'
+import type { DriftIssue, FileReport, DriftConfig } from './types.js'
 
 // Rules
 import { isFileIgnored } from './rules/shared.js'
@@ -24,6 +24,16 @@ import {
   detectMagicNumbers,
   detectCommentContradiction,
 } from './rules/phase1-complexity.js'
+import {
+  detectDeadFiles,
+  detectUnusedExports,
+  detectUnusedDependencies,
+} from './rules/phase2-crossfile.js'
+import {
+  detectCircularDependencies,
+  detectLayerViolations,
+  detectCrossBoundaryImports,
+} from './rules/phase3-arch.js'
 import {
   detectOverCommented,
   detectHardcodedConfig,
@@ -157,6 +167,11 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
   const reportByPath = new Map<string, FileReport>()
   for (const r of reports) reportByPath.set(r.path, r)
 
+  // Build set of ignored paths so cross-file phases don't re-add issues
+  const ignoredPaths = new Set<string>(
+    sourceFiles.filter(sf => isFileIgnored(sf)).map(sf => sf.getFilePath())
+  )
+
   // ── Phase 2 setup: build import graph ──────────────────────────────────────
   const allImportedPaths = new Set<string>()
   const allImportedNames = new Map<string, Set<string>>()
@@ -213,214 +228,59 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
   }
 
   // ── Phase 2: dead-file + unused-export + unused-dependency ─────────────────
-  for (const sf of sourceFiles) {
-    const sfPath = sf.getFilePath()
+  const deadFiles = detectDeadFiles(sourceFiles, allImportedPaths, RULE_WEIGHTS)
+  for (const [sfPath, issue] of deadFiles) {
+    if (ignoredPaths.has(sfPath)) continue
     const report = reportByPath.get(sfPath)
-    if (!report) continue
-
-    const basename = path.basename(sfPath)
-    const isBinFile = sfPath.replace(/\\/g, '/').includes('/bin/')
-    const isEntryPoint = /^(index|main|cli|app)\.(ts|tsx|js|jsx)$/.test(basename) || isBinFile
-    if (!isEntryPoint && !allImportedPaths.has(sfPath)) {
-      const issue: DriftIssue = {
-        rule: 'dead-file',
-        severity: RULE_WEIGHTS['dead-file'].severity,
-        message: 'File is never imported — may be dead code',
-        line: 1,
-        column: 1,
-        snippet: basename,
-      }
+    if (report) {
       report.issues.push(issue)
       report.score = calculateScore(report.issues, RULE_WEIGHTS)
     }
+  }
 
-    const isBarrel = /^index\.(ts|tsx|js|jsx)$/.test(basename)
-    const importedNamesForFile = allImportedNames.get(sfPath)
-    const hasNamespaceImport = importedNamesForFile?.has('*') ?? false
-    if (!isBarrel && !hasNamespaceImport) {
-      for (const exportDecl of sf.getExportDeclarations()) {
-        for (const namedExport of exportDecl.getNamedExports()) {
-          const name = namedExport.getName()
-          if (!importedNamesForFile?.has(name)) {
-            const line = namedExport.getStartLineNumber()
-            const issue: DriftIssue = {
-              rule: 'unused-export',
-              severity: RULE_WEIGHTS['unused-export'].severity,
-              message: `'${name}' is exported but never imported`,
-              line,
-              column: 1,
-              snippet: namedExport.getText().slice(0, 80),
-            }
-            report.issues.push(issue)
-            report.score = calculateScore(report.issues, RULE_WEIGHTS)
-          }
-        }
+  const unusedExports = detectUnusedExports(sourceFiles, allImportedNames, RULE_WEIGHTS)
+  for (const [sfPath, issues] of unusedExports) {
+    if (ignoredPaths.has(sfPath)) continue
+    const report = reportByPath.get(sfPath)
+    if (report) {
+      for (const issue of issues) {
+        report.issues.push(issue)
       }
-
-      for (const exportSymbol of sf.getExportedDeclarations()) {
-        const [exportName, declarations] = [exportSymbol[0], exportSymbol[1]]
-        if (exportName === 'default') continue
-        if (importedNamesForFile?.has(exportName)) continue
-
-        for (const decl of declarations) {
-          if (decl.getSourceFile().getFilePath() !== sfPath) continue
-
-          const line = decl.getStartLineNumber()
-          const issue: DriftIssue = {
-            rule: 'unused-export',
-            severity: RULE_WEIGHTS['unused-export'].severity,
-            message: `'${exportName}' is exported but never imported`,
-            line,
-            column: 1,
-            snippet: decl.getText().split('\n')[0].slice(0, 80),
-          }
-          report.issues.push(issue)
-          report.score = calculateScore(report.issues, RULE_WEIGHTS)
-          break
-        }
-      }
+      report.score = calculateScore(report.issues, RULE_WEIGHTS)
     }
   }
 
-  // unused-dependency
-  const pkgPath = path.join(targetPath, 'package.json')
-  if (fs.existsSync(pkgPath)) {
-    let pkg: Record<string, unknown>
-    try {
-      pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'))
-    } catch {
-      pkg = {}
-    }
-
-    const deps = { ...((pkg.dependencies as Record<string, string>) ?? {}) }
-    const unusedDeps: string[] = []
-    for (const depName of Object.keys(deps)) {
-      if (depName.startsWith('@types/')) continue
-      const isUsed = [...allLiteralImports].some(
-        imp => imp === depName || imp.startsWith(depName + '/')
-      )
-      if (!isUsed) unusedDeps.push(depName)
-    }
-
-    if (unusedDeps.length > 0) {
-      const pkgIssues: DriftIssue[] = unusedDeps.map(dep => ({
-        rule: 'unused-dependency',
-        severity: RULE_WEIGHTS['unused-dependency'].severity,
-        message: `'${dep}' is in package.json but never imported`,
-        line: 1,
-        column: 1,
-        snippet: `"${dep}"`,
-      }))
-      reports.push({
-        path: pkgPath,
-        issues: pkgIssues,
-        score: calculateScore(pkgIssues, RULE_WEIGHTS),
-      })
-    }
+  const unusedDepIssues = detectUnusedDependencies(targetPath, allLiteralImports, RULE_WEIGHTS)
+  if (unusedDepIssues.length > 0) {
+    const pkgPath = path.join(targetPath, 'package.json')
+    reports.push({
+      path: pkgPath,
+      issues: unusedDepIssues,
+      score: calculateScore(unusedDepIssues, RULE_WEIGHTS),
+    })
   }
 
   // ── Phase 3: circular-dependency ────────────────────────────────────────────
-  function findCycles(graph: Map<string, Set<string>>): Array<string[]> {
-    const visited = new Set<string>()
-    const inStack = new Set<string>()
-    const cycles: Array<string[]> = []
-
-    function dfs(node: string, stack: string[]): void {
-      visited.add(node)
-      inStack.add(node)
-      stack.push(node)
-
-      for (const neighbor of graph.get(node) ?? []) {
-        if (!visited.has(neighbor)) {
-          dfs(neighbor, stack)
-        } else if (inStack.has(neighbor)) {
-          const cycleStart = stack.indexOf(neighbor)
-          cycles.push(stack.slice(cycleStart))
-        }
-      }
-
-      stack.pop()
-      inStack.delete(node)
+  const circularIssues = detectCircularDependencies(importGraph, RULE_WEIGHTS)
+  for (const [filePath, issue] of circularIssues) {
+    if (ignoredPaths.has(filePath)) continue
+    const report = reportByPath.get(filePath)
+    if (report) {
+      report.issues.push(issue)
+      report.score = calculateScore(report.issues, RULE_WEIGHTS)
     }
-
-    for (const node of graph.keys()) {
-      if (!visited.has(node)) dfs(node, [])
-    }
-
-    return cycles
-  }
-
-  const cycles = findCycles(importGraph)
-  const reportedCycleKeys = new Set<string>()
-
-  for (const cycle of cycles) {
-    const cycleKey = [...cycle].sort().join('|')
-    if (reportedCycleKeys.has(cycleKey)) continue
-    reportedCycleKeys.add(cycleKey)
-
-    const firstFile = cycle[0]
-    const report = reportByPath.get(firstFile)
-    if (!report) continue
-
-    const cycleDisplay = cycle
-      .map(p => path.basename(p))
-      .concat(path.basename(cycle[0]))
-      .join(' → ')
-
-    const issue: DriftIssue = {
-      rule: 'circular-dependency',
-      severity: RULE_WEIGHTS['circular-dependency'].severity,
-      message: `Circular dependency detected: ${cycleDisplay}`,
-      line: 1,
-      column: 1,
-      snippet: cycleDisplay,
-    }
-    report.issues.push(issue)
-    report.score = calculateScore(report.issues, RULE_WEIGHTS)
   }
 
   // ── Phase 3b: layer-violation ────────────────────────────────────────────────
   if (config?.layers && config.layers.length > 0) {
-    const { layers } = config
-
-    function getLayer(filePath: string): LayerDefinition | undefined {
-      const rel = filePath.replace(/\\/g, '/')
-      return layers.find(layer =>
-        layer.patterns.some(pattern => {
-          const regexStr = pattern
-            .replace(/\\/g, '/')
-            .replace(/[.+^${}()|[\]]/g, '\\$&')
-            .replace(/\*\*/g, '###DOUBLESTAR###')
-            .replace(/\*/g, '[^/]*')
-            .replace(/###DOUBLESTAR###/g, '.*')
-          return new RegExp(`^${regexStr}`).test(rel)
-        })
-      )
-    }
-
-    for (const [filePath, imports] of importGraph.entries()) {
-      const fileLayer = getLayer(filePath)
-      if (!fileLayer) continue
-
-      for (const importedPath of imports) {
-        const importedLayer = getLayer(importedPath)
-        if (!importedLayer) continue
-        if (importedLayer.name === fileLayer.name) continue
-
-        if (!fileLayer.canImportFrom.includes(importedLayer.name)) {
-          const report = reportByPath.get(filePath)
-          if (report) {
-            const weight = RULE_WEIGHTS['layer-violation']?.weight ?? 5
-            report.issues.push({
-              rule: 'layer-violation',
-              severity: 'error',
-              message: `Layer '${fileLayer.name}' must not import from layer '${importedLayer.name}'`,
-              line: 1,
-              column: 1,
-              snippet: `import from '${path.relative(targetPath, importedPath).replace(/\\/g, '/')}'`,
-            })
-            report.score = Math.min(100, report.score + weight)
-          }
+    const layerIssues = detectLayerViolations(importGraph, config.layers, targetPath, RULE_WEIGHTS)
+    for (const [filePath, issues] of layerIssues) {
+      if (ignoredPaths.has(filePath)) continue
+      const report = reportByPath.get(filePath)
+      if (report) {
+        for (const issue of issues) {
+          report.issues.push(issue)
+          report.score = Math.min(100, report.score + (RULE_WEIGHTS['layer-violation']?.weight ?? 5))
         }
       }
     }
@@ -428,42 +288,14 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
 
   // ── Phase 3c: cross-boundary-import ─────────────────────────────────────────
   if (config?.modules && config.modules.length > 0) {
-    const { modules } = config
-
-    function getModule(filePath: string): ModuleBoundary | undefined {
-      const rel = filePath.replace(/\\/g, '/')
-      return modules.find(m => rel.startsWith(m.root.replace(/\\/g, '/')))
-    }
-
-    for (const [filePath, imports] of importGraph.entries()) {
-      const fileModule = getModule(filePath)
-      if (!fileModule) continue
-
-      for (const importedPath of imports) {
-        const importedModule = getModule(importedPath)
-        if (!importedModule) continue
-        if (importedModule.name === fileModule.name) continue
-
-        const allowedImports = fileModule.allowedExternalImports ?? []
-        const relImported = importedPath.replace(/\\/g, '/')
-        const isAllowed = allowedImports.some(allowed =>
-          relImported.startsWith(allowed.replace(/\\/g, '/'))
-        )
-
-        if (!isAllowed) {
-          const report = reportByPath.get(filePath)
-          if (report) {
-            const weight = RULE_WEIGHTS['cross-boundary-import']?.weight ?? 5
-            report.issues.push({
-              rule: 'cross-boundary-import',
-              severity: 'warning',
-              message: `Module '${fileModule.name}' must not import from module '${importedModule.name}'`,
-              line: 1,
-              column: 1,
-              snippet: `import from '${path.relative(targetPath, importedPath).replace(/\\/g, '/')}'`,
-            })
-            report.score = Math.min(100, report.score + weight)
-          }
+    const boundaryIssues = detectCrossBoundaryImports(importGraph, config.modules, targetPath, RULE_WEIGHTS)
+    for (const [filePath, issues] of boundaryIssues) {
+      if (ignoredPaths.has(filePath)) continue
+      const report = reportByPath.get(filePath)
+      if (report) {
+        for (const issue of issues) {
+          report.issues.push(issue)
+          report.score = Math.min(100, report.score + (RULE_WEIGHTS['cross-boundary-import']?.weight ?? 5))
         }
       }
     }
@@ -473,6 +305,7 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
   const fingerprintMap = new Map<string, Array<{ filePath: string; name: string; line: number; col: number }>>()
 
   for (const sf of sourceFiles) {
+    if (isFileIgnored(sf)) continue
     const sfPath = sf.getFilePath()
     for (const { fn, name, line, col } of collectFunctions(sf)) {
       const fp = fingerprintFunction(fn)

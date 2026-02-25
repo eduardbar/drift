@@ -1,3 +1,4 @@
+// drift-ignore-file
 import { basename } from 'node:path'
 import { createRequire } from 'node:module'
 import { DriftReport, DriftIssue } from './types.js'

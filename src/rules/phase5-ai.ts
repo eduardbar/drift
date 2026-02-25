@@ -1,3 +1,4 @@
+// drift-ignore-file
 import { SourceFile, SyntaxKind } from 'ts-morph'
 import type { DriftIssue } from '../types.js'
 

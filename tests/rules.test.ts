@@ -1,7 +1,8 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import { analyzeCode, getRules, countRule, generateLines, generateFunction } from './helpers.js'
 import { applyFixes } from '../src/fix.js'
-import { writeFileSync, readFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { analyzeProject } from '../src/analyzer.js'
+import { writeFileSync, readFileSync, mkdtempSync, rmSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -909,5 +910,360 @@ describe('drift fix', () => {
 
     const content = readFileSync(filePath, 'utf8')
     expect(content).toBe(original)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// unused-export  (cross-file: export never imported anywhere in the project)
+// ─────────────────────────────────────────────────────────────────────────────
+describe('unused-export', () => {
+  let tmpDir: string
+  beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), 'drift-test-')) })
+  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }) })
+
+  it('detects named export that is never imported in any file', () => {
+    // Only one file — its export is never consumed by anyone
+    writeFileSync(join(tmpDir, 'utils.ts'), `export function helper(): void {}\n`)
+
+    const reports = analyzeProject(tmpDir)
+    const allRules = reports.flatMap(r => r.issues.map(i => i.rule))
+    expect(allRules).toContain('unused-export')
+  })
+
+  it('does not report export that is imported by another file', () => {
+    writeFileSync(join(tmpDir, 'utils.ts'), `export function helper(): void {}\n`)
+    writeFileSync(join(tmpDir, 'main.ts'), `import { helper } from './utils.js'\nhelper()\n`)
+
+    const reports = analyzeProject(tmpDir)
+    const allRules = reports.flatMap(r => r.issues.map(i => i.rule))
+    expect(allRules).not.toContain('unused-export')
+  })
+
+  it('does not report default export (only named exports are checked)', () => {
+    writeFileSync(join(tmpDir, 'service.ts'), `export default function service(): void {}\n`)
+
+    const reports = analyzeProject(tmpDir)
+    const allRules = reports.flatMap(r => r.issues.map(i => i.rule))
+    expect(allRules).not.toContain('unused-export')
+  })
+
+  it('ignores barrel file (index.ts) even if its exports are unused', () => {
+    // index.ts is a barrel — unused-export is skipped for barrels
+    writeFileSync(join(tmpDir, 'index.ts'), `export function publicApi(): void {}\n`)
+
+    const reports = analyzeProject(tmpDir)
+    const allRules = reports.flatMap(r => r.issues.map(i => i.rule))
+    expect(allRules).not.toContain('unused-export')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// dead-file  (cross-file: file never imported by any other file)
+// ─────────────────────────────────────────────────────────────────────────────
+describe('dead-file', () => {
+  let tmpDir: string
+  beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), 'drift-test-')) })
+  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }) })
+
+  it('detects .ts file that is never imported', () => {
+    // orphan.ts is not imported by anyone and is not an entry point
+    writeFileSync(join(tmpDir, 'orphan.ts'), `export const VALUE = 42\n`)
+
+    const reports = analyzeProject(tmpDir)
+    const allRules = reports.flatMap(r => r.issues.map(i => i.rule))
+    expect(allRules).toContain('dead-file')
+  })
+
+  it('does not flag index.ts (entry point)', () => {
+    writeFileSync(join(tmpDir, 'index.ts'), `export const VALUE = 42\n`)
+
+    const reports = analyzeProject(tmpDir)
+    const allRules = reports.flatMap(r => r.issues.map(i => i.rule))
+    expect(allRules).not.toContain('dead-file')
+  })
+
+  it('does not flag a file that is imported by another file', () => {
+    writeFileSync(join(tmpDir, 'utils.ts'), `export function helper(): void {}\n`)
+    writeFileSync(join(tmpDir, 'main.ts'), `import { helper } from './utils.js'\nhelper()\n`)
+
+    const reports = analyzeProject(tmpDir)
+    const utilsReport = reports.find(r => r.path.endsWith('utils.ts'))
+    const deadFileIssues = utilsReport?.issues.filter(i => i.rule === 'dead-file') ?? []
+    expect(deadFileIssues).toHaveLength(0)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// unused-dependency  (package.json dep never imported in any source file)
+// ─────────────────────────────────────────────────────────────────────────────
+describe('unused-dependency', () => {
+  let tmpDir: string
+  beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), 'drift-test-')) })
+  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }) })
+
+  it('detects dependency in package.json that has no matching import', () => {
+    writeFileSync(join(tmpDir, 'package.json'), JSON.stringify({
+      name: 'test-pkg',
+      dependencies: { 'lodash': '^4.0.0' },
+    }))
+    writeFileSync(join(tmpDir, 'index.ts'), `export const x = 1\n`)
+
+    const reports = analyzeProject(tmpDir)
+    const allRules = reports.flatMap(r => r.issues.map(i => i.rule))
+    expect(allRules).toContain('unused-dependency')
+  })
+
+  it('does not report dependency that is actually imported', () => {
+    writeFileSync(join(tmpDir, 'package.json'), JSON.stringify({
+      name: 'test-pkg',
+      dependencies: { 'kleur': '^4.0.0' },
+    }))
+    writeFileSync(join(tmpDir, 'index.ts'), `import kleur from 'kleur'\nconst c = kleur.red('hi')\n`)
+
+    const reports = analyzeProject(tmpDir)
+    const allRules = reports.flatMap(r => r.issues.map(i => i.rule))
+    expect(allRules).not.toContain('unused-dependency')
+  })
+
+  it('ignores @types/ packages (they are dev-only type definitions)', () => {
+    writeFileSync(join(tmpDir, 'package.json'), JSON.stringify({
+      name: 'test-pkg',
+      dependencies: { '@types/node': '^20.0.0' },
+    }))
+    writeFileSync(join(tmpDir, 'index.ts'), `export const x = 1\n`)
+
+    const reports = analyzeProject(tmpDir)
+    const allRules = reports.flatMap(r => r.issues.map(i => i.rule))
+    expect(allRules).not.toContain('unused-dependency')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// circular-dependency  (A → B → A, or longer cycles)
+// ─────────────────────────────────────────────────────────────────────────────
+describe('circular-dependency', () => {
+  let tmpDir: string
+  beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), 'drift-test-')) })
+  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }) })
+
+  it('detects direct cycle: A imports B, B imports A', () => {
+    writeFileSync(join(tmpDir, 'a.ts'), `import { b } from './b.js'\nexport const a = 'a'\n`)
+    writeFileSync(join(tmpDir, 'b.ts'), `import { a } from './a.js'\nexport const b = 'b'\n`)
+
+    const reports = analyzeProject(tmpDir)
+    const allRules = reports.flatMap(r => r.issues.map(i => i.rule))
+    expect(allRules).toContain('circular-dependency')
+  })
+
+  it('detects indirect cycle of 3: A → B → C → A', () => {
+    writeFileSync(join(tmpDir, 'a.ts'), `import { c } from './c.js'\nexport const a = 'a'\n`)
+    writeFileSync(join(tmpDir, 'b.ts'), `import { a } from './a.js'\nexport const b = 'b'\n`)
+    writeFileSync(join(tmpDir, 'c.ts'), `import { b } from './b.js'\nexport const c = 'c'\n`)
+
+    const reports = analyzeProject(tmpDir)
+    const allRules = reports.flatMap(r => r.issues.map(i => i.rule))
+    expect(allRules).toContain('circular-dependency')
+  })
+
+  it('does not flag linear chain A → B → C (no cycle)', () => {
+    writeFileSync(join(tmpDir, 'c.ts'), `export const c = 'c'\n`)
+    writeFileSync(join(tmpDir, 'b.ts'), `import { c } from './c.js'\nexport const b = 'b'\n`)
+    writeFileSync(join(tmpDir, 'a.ts'), `import { b } from './b.js'\nexport const a = 'a'\n`)
+
+    const reports = analyzeProject(tmpDir)
+    const allRules = reports.flatMap(r => r.issues.map(i => i.rule))
+    expect(allRules).not.toContain('circular-dependency')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// layer-violation  (requires config.layers — architectural boundary enforcement)
+// ─────────────────────────────────────────────────────────────────────────────
+describe('layer-violation', () => {
+  let tmpDir: string
+  beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), 'drift-test-')) })
+  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }) })
+
+  it('detects import from a disallowed layer (api → ui is forbidden)', () => {
+    // api layer must NOT import from ui layer
+    mkdirSync(join(tmpDir, 'ui'))
+    mkdirSync(join(tmpDir, 'api'))
+    writeFileSync(join(tmpDir, 'ui', 'Button.ts'), `export function Button(): void {}\n`)
+    writeFileSync(join(tmpDir, 'api', 'fetch.ts'), `import { Button } from '../ui/Button.js'\nexport function fetchData(): void {}\n`)
+
+    const config = {
+      layers: [
+        { name: 'ui',  patterns: [`${tmpDir.replace(/\\/g, '/')}/ui/**`],  canImportFrom: ['api'] },
+        { name: 'api', patterns: [`${tmpDir.replace(/\\/g, '/')}/api/**`], canImportFrom: [] },
+      ],
+    }
+
+    const reports = analyzeProject(tmpDir, config)
+    const allRules = reports.flatMap(r => r.issues.map(i => i.rule))
+    expect(allRules).toContain('layer-violation')
+  })
+
+  it('does not report a permitted layer import (ui → api is allowed)', () => {
+    mkdirSync(join(tmpDir, 'ui'))
+    mkdirSync(join(tmpDir, 'api'))
+    writeFileSync(join(tmpDir, 'api', 'client.ts'), `export function fetchData(): void {}\n`)
+    writeFileSync(join(tmpDir, 'ui', 'view.ts'), `import { fetchData } from '../api/client.js'\nexport function View(): void { fetchData() }\n`)
+
+    const config = {
+      layers: [
+        { name: 'ui',  patterns: [`${tmpDir.replace(/\\/g, '/')}/ui/**`],  canImportFrom: ['api'] },
+        { name: 'api', patterns: [`${tmpDir.replace(/\\/g, '/')}/api/**`], canImportFrom: [] },
+      ],
+    }
+
+    const reports = analyzeProject(tmpDir, config)
+    const allRules = reports.flatMap(r => r.issues.map(i => i.rule))
+    expect(allRules).not.toContain('layer-violation')
+  })
+
+  it('does not crash and reports nothing when no layers config is provided', () => {
+    writeFileSync(join(tmpDir, 'index.ts'), `export const x = 1\n`)
+
+    const reports = analyzeProject(tmpDir, {})
+    const allRules = reports.flatMap(r => r.issues.map(i => i.rule))
+    expect(allRules).not.toContain('layer-violation')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// cross-boundary-import  (requires config.modules — module boundary enforcement)
+// ─────────────────────────────────────────────────────────────────────────────
+describe('cross-boundary-import', () => {
+  let tmpDir: string
+  beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), 'drift-test-')) })
+  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }) })
+
+  it('detects import from a disallowed module boundary', () => {
+    mkdirSync(join(tmpDir, 'moduleA'))
+    mkdirSync(join(tmpDir, 'moduleB'))
+    writeFileSync(join(tmpDir, 'moduleB', 'service.ts'), `export function serviceB(): void {}\n`)
+    writeFileSync(join(tmpDir, 'moduleA', 'app.ts'), `import { serviceB } from '../moduleB/service.js'\nexport function appA(): void { serviceB() }\n`)
+
+    const normalizedTmp = tmpDir.replace(/\\/g, '/')
+    const config = {
+      modules: [
+        { name: 'moduleA', root: `${normalizedTmp}/moduleA`, allowedExternalImports: [] },
+        { name: 'moduleB', root: `${normalizedTmp}/moduleB`, allowedExternalImports: [] },
+      ],
+    }
+
+    const reports = analyzeProject(tmpDir, config)
+    const allRules = reports.flatMap(r => r.issues.map(i => i.rule))
+    expect(allRules).toContain('cross-boundary-import')
+  })
+
+  it('does not report import that is explicitly allowed', () => {
+    mkdirSync(join(tmpDir, 'moduleA'))
+    mkdirSync(join(tmpDir, 'moduleB'))
+    writeFileSync(join(tmpDir, 'moduleB', 'service.ts'), `export function serviceB(): void {}\n`)
+    writeFileSync(join(tmpDir, 'moduleA', 'app.ts'), `import { serviceB } from '../moduleB/service.js'\nexport function appA(): void { serviceB() }\n`)
+
+    const normalizedTmp = tmpDir.replace(/\\/g, '/')
+    const config = {
+      modules: [
+        {
+          name: 'moduleA',
+          root: `${normalizedTmp}/moduleA`,
+          allowedExternalImports: [`${normalizedTmp}/moduleB`],
+        },
+        { name: 'moduleB', root: `${normalizedTmp}/moduleB`, allowedExternalImports: [] },
+      ],
+    }
+
+    const reports = analyzeProject(tmpDir, config)
+    const allRules = reports.flatMap(r => r.issues.map(i => i.rule))
+    expect(allRules).not.toContain('cross-boundary-import')
+  })
+
+  it('does not crash and reports nothing when no modules config is provided', () => {
+    writeFileSync(join(tmpDir, 'index.ts'), `export const x = 1\n`)
+
+    const reports = analyzeProject(tmpDir, {})
+    const allRules = reports.flatMap(r => r.issues.map(i => i.rule))
+    expect(allRules).not.toContain('cross-boundary-import')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// semantic-duplication  (same function body fingerprint in different files)
+// MIN_LINES = 8 lines in the body — functions shorter than that are skipped
+// ─────────────────────────────────────────────────────────────────────────────
+describe('semantic-duplication', () => {
+  let tmpDir: string
+  beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), 'drift-test-')) })
+  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }) })
+
+  // Helper: generate a function body with N statements (>= 8 to pass MIN_LINES filter)
+  function makeFunc(name: string, paramName = 'x'): string {
+    return [
+      `export function ${name}(${paramName}: number): number {`,
+      `  const a = ${paramName} + 1`,
+      `  const b = a * 2`,
+      `  const c = b - 3`,
+      `  const d = c + 4`,
+      `  const e = d * 5`,
+      `  const f = e - 6`,
+      `  const g = f + 7`,
+      `  return g`,
+      `}`,
+    ].join('\n')
+  }
+
+  it('detects two functions with identical logic (same AST fingerprint) in different files', () => {
+    // Same structure, different names and parameter names → same fingerprint
+    writeFileSync(join(tmpDir, 'fileA.ts'), makeFunc('computeA', 'x') + '\n')
+    writeFileSync(join(tmpDir, 'fileB.ts'), makeFunc('computeB', 'n') + '\n')
+
+    const reports = analyzeProject(tmpDir)
+    const allRules = reports.flatMap(r => r.issues.map(i => i.rule))
+    expect(allRules).toContain('semantic-duplication')
+  })
+
+  it('does not flag two functions with structurally different logic', () => {
+    const funcA = [
+      `export function doWork(x: number): number {`,
+      `  const a = x + 1`,
+      `  const b = a * 2`,
+      `  const c = b - 3`,
+      `  const d = c + 4`,
+      `  const e = d * 5`,
+      `  const f = e - 6`,
+      `  const g = f + 7`,
+      `  return g`,
+      `}`,
+    ].join('\n')
+
+    const funcB = [
+      `export function doOther(x: number): number {`,
+      `  const a = x * 10`,
+      `  const b = a + 20`,
+      `  const c = b / 30`,
+      `  const d = c - 40`,
+      `  const e = d + 50`,
+      `  const f = e * 60`,
+      `  const g = f - 70`,
+      `  return g`,
+      `}`,
+    ].join('\n')
+
+    writeFileSync(join(tmpDir, 'fileA.ts'), funcA + '\n')
+    writeFileSync(join(tmpDir, 'fileB.ts'), funcB + '\n')
+
+    const reports = analyzeProject(tmpDir)
+    const allRules = reports.flatMap(r => r.issues.map(i => i.rule))
+    expect(allRules).not.toContain('semantic-duplication')
+  })
+
+  it('does not flag when there is only one function (nothing to compare against)', () => {
+    writeFileSync(join(tmpDir, 'only.ts'), makeFunc('solo', 'x') + '\n')
+
+    const reports = analyzeProject(tmpDir)
+    const allRules = reports.flatMap(r => r.issues.map(i => i.rule))
+    expect(allRules).not.toContain('semantic-duplication')
   })
 })

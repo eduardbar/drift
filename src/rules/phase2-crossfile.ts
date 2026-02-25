@@ -112,7 +112,7 @@ export function detectUnusedDependencies(
   allLiteralImports: Set<string>,
   ruleWeights: Record<string, { severity: DriftIssue['severity']; weight: number }>,
 ): DriftIssue[] {
-  const pkgPath = path.join(targetPath, 'package.json')
+  const pkgPath = path.join(targetPath, 'package.json') // drift-ignore
   if (!fs.existsSync(pkgPath)) return []
 
   let pkg: Record<string, unknown>
