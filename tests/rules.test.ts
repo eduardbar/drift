@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import { analyzeCode, getRules, countRule, generateLines, generateFunction } from './helpers.js'
+import { applyFixes } from '../src/fix.js'
+import { writeFileSync, readFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // large-file  (threshold: > 300 lines)
@@ -804,5 +808,106 @@ describe('JS/JSX support', () => {
     const report = analyzeCode(code, undefined, 'math.js')
     const meaningful = report.issues.filter(i => i.severity !== 'info')
     expect(meaningful).toHaveLength(0)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// drift fix  (applyFixes)
+// ─────────────────────────────────────────────────────────────────────────────
+describe('drift fix', () => {
+  let tmpDir: string
+  let tmpFile: string
+
+  afterEach(() => {
+    if (tmpDir) rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  function createTmp(content: string): string {
+    tmpDir = mkdtempSync(join(tmpdir(), 'drift-fix-test-'))
+    tmpFile = join(tmpDir, 'test.ts')
+    writeFileSync(tmpFile, content, 'utf8')
+    return tmpFile
+  }
+
+  // ── Test 1: debug-leftover console.* — dryRun reports, real run removes line ──
+  it('debug-leftover console.* — dryRun: reports applied:true without writing', async () => {
+    const filePath = createTmp(`const x = 1\nconsole.log('debug')\nconst y = 2\n`)
+    const results = await applyFixes(filePath, undefined, { dryRun: true })
+
+    expect(results).toHaveLength(1)
+    expect(results[0].rule).toBe('debug-leftover')
+    expect(results[0].applied).toBe(true)
+
+    // File must NOT have been modified in dry-run
+    const content = readFileSync(filePath, 'utf8')
+    expect(content).toContain("console.log('debug')")
+  })
+
+  it('debug-leftover console.* — real run: removes the console line', async () => {
+    const filePath = createTmp(`const x = 1\nconsole.log('debug')\nconst y = 2\n`)
+    const results = await applyFixes(filePath, undefined, { dryRun: false })
+
+    expect(results).toHaveLength(1)
+    expect(results[0].applied).toBe(true)
+
+    const content = readFileSync(filePath, 'utf8')
+    expect(content).not.toContain('console.log')
+    expect(content).toContain('const x = 1')
+    expect(content).toContain('const y = 2')
+  })
+
+  // ── Test 2: debug-leftover TODO — NOT auto-fixable ──
+  it('debug-leftover TODO/FIXME — not returned as fixable result', async () => {
+    const filePath = createTmp(`const x = 1\n// TODO: fix this\nconst y = 2\n`)
+    const results = await applyFixes(filePath, undefined, { dryRun: true })
+
+    // TODO markers are not fixable — no results expected
+    expect(results).toHaveLength(0)
+  })
+
+  // ── Test 3: catch-swallow — inserts TODO comment ──
+  it('catch-swallow — dryRun: reports applied:true', async () => {
+    const filePath = createTmp(`function f(): void {\n  try {\n    const x = 1\n  } catch (e) {}\n}\n`)
+    const results = await applyFixes(filePath, undefined, { dryRun: true })
+
+    expect(results).toHaveLength(1)
+    expect(results[0].rule).toBe('catch-swallow')
+    expect(results[0].applied).toBe(true)
+  })
+
+  it('catch-swallow — real run: inserts TODO comment in empty catch', async () => {
+    const filePath = createTmp(`function f(): void {\n  try {\n    const x = 1\n  } catch (e) {}\n}\n`)
+    const results = await applyFixes(filePath, undefined, { dryRun: false })
+
+    expect(results).toHaveLength(1)
+    expect(results[0].applied).toBe(true)
+
+    const content = readFileSync(filePath, 'utf8')
+    expect(content).toContain('// TODO: handle error')
+  })
+
+  // ── Test 4: --rule filter ──
+  it('rule filter — only fixes the specified rule when both issues exist', async () => {
+    const filePath = createTmp(
+      `console.log('debug')\nfunction f(): void {\n  try {\n    const x = 1\n  } catch (e) {}\n}\n`
+    )
+
+    const results = await applyFixes(filePath, undefined, { rule: 'debug-leftover', dryRun: true })
+
+    expect(results).toHaveLength(1)
+    expect(results[0].rule).toBe('debug-leftover')
+    // catch-swallow must NOT appear
+    expect(results.every(r => r.rule === 'debug-leftover')).toBe(true)
+  })
+
+  // ── Test 5: dry-run does not write the file ──
+  it('dryRun: true — file is not modified', async () => {
+    const original = `const a = 1\nconsole.log('test')\nconst b = 2\n`
+    const filePath = createTmp(original)
+
+    await applyFixes(filePath, undefined, { dryRun: true })
+
+    const content = readFileSync(filePath, 'utf8')
+    expect(content).toBe(original)
   })
 })

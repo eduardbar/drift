@@ -14,6 +14,7 @@ import { computeDiff } from './diff.js'
 import { generateHtmlReport } from './report.js'
 import { generateBadge } from './badge.js'
 import { emitCIAnnotations, printCISummary } from './ci.js'
+import { applyFixes, type FixResult } from './fix.js'
 
 const program = new Command()
 
@@ -206,6 +207,54 @@ program
     
     process.stderr.write(`\nBlame analysis complete:\n`)
     process.stdout.write(JSON.stringify(blameData, null, 2) + '\n')
+  })
+
+program
+  .command('fix [path]')
+  .description('Auto-fix safe issues (debug-leftover console.*, catch-swallow)')
+  .option('--rule <rule>', 'Fix only a specific rule')
+  .option('--dry-run', 'Show what would change without writing files')
+  .action(async (targetPath: string | undefined, options: { rule?: string; dryRun?: boolean }) => {
+    const resolvedPath = resolve(targetPath ?? '.')
+    const config = await loadConfig(resolvedPath)
+
+    const results = await applyFixes(resolvedPath, config, {
+      rule: options.rule,
+      dryRun: options.dryRun,
+    })
+
+    if (results.length === 0) {
+      console.log('No fixable issues found.')
+      return
+    }
+
+    const applied = results.filter(r => r.applied)
+
+    if (options.dryRun) {
+      console.log(`\ndrift fix --dry-run: ${results.length} fixable issues found\n`)
+    } else {
+      console.log(`\ndrift fix: ${applied.length} fixes applied\n`)
+    }
+
+    // Group by file for clean output
+    const byFile = new Map<string, FixResult[]>()
+    for (const r of results) {
+      if (!byFile.has(r.file)) byFile.set(r.file, [])
+      byFile.get(r.file)!.push(r)
+    }
+
+    for (const [file, fileResults] of byFile) {
+      const relPath = file.replace(resolvedPath + '/', '').replace(resolvedPath + '\\', '')
+      console.log(`  ${relPath}`)
+      for (const r of fileResults) {
+        const status = r.applied ? (options.dryRun ? 'would fix' : 'fixed') : 'skipped'
+        console.log(`    [${r.rule}] line ${r.line}: ${r.description} — ${status}`)
+      }
+    }
+
+    if (!options.dryRun && applied.length > 0) {
+      console.log(`\n${applied.length} issue(s) fixed. Re-run drift scan to verify.`)
+    }
   })
 
 program.parse()
