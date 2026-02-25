@@ -24,7 +24,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/v{0}', inputs.version) || github.ref }}
+          ref: ${{ github.event_name == 'release' && github.ref || github.event.repository.default_branch }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -34,6 +34,7 @@ jobs:
           cache-dependency-path: packages/vscode-drift/package-lock.json
 
       - name: Verify version matches tag
+        if: github.event_name == 'release'
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TAG_VERSION="${{ inputs.version }}"
