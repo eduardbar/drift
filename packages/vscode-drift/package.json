@@ -113,7 +113,7 @@
     "typescript": "^5.3.0"
   },
   "dependencies": {
-    "@eduardbar/drift": "*",
+    "@eduardbar/drift": "1.0.0",
     "ts-morph": "^23.0.0"
   }
 }

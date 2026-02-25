@@ -4,3 +4,6 @@ dist/
 *.d.ts.map
 drift-report.html
 badge.svg
+
+# drift snapshot history
+drift-history.json
