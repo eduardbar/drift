@@ -540,44 +540,44 @@ describe('over-commented', () => {
 describe('hardcoded-config', () => {
   it('detects postgresql connection string', () => {
     const code = `const DB = 'postgresql://user:pass@localhost:5432/db'`
-    expect(getRules(code, 'src/config.ts')).toContain('hardcoded-config')
+    expect(getRules(code, undefined, 'src/config.ts')).toContain('hardcoded-config')
   })
 
   it('detects mongodb connection string', () => {
     const code = `const MONGO = 'mongodb://localhost:27017/mydb'`
-    expect(getRules(code, 'src/db.ts')).toContain('hardcoded-config')
+    expect(getRules(code, undefined, 'src/db.ts')).toContain('hardcoded-config')
   })
 
   it('detects HTTP URL', () => {
     const code = `const API = 'https://api.example.com/v1'`
-    expect(getRules(code, 'src/api.ts')).toContain('hardcoded-config')
+    expect(getRules(code, undefined, 'src/api.ts')).toContain('hardcoded-config')
   })
 
   it('detects redis connection string', () => {
     const code = `const CACHE = 'redis://localhost:6379'`
-    expect(getRules(code, 'src/cache.ts')).toContain('hardcoded-config')
+    expect(getRules(code, undefined, 'src/cache.ts')).toContain('hardcoded-config')
   })
 
   it('detects IP address', () => {
     const code = `const HOST = '192.168.1.100'`
-    expect(getRules(code, 'src/server.ts')).toContain('hardcoded-config')
+    expect(getRules(code, undefined, 'src/server.ts')).toContain('hardcoded-config')
   })
 
   it('does not detect process.env usage', () => {
     const code = `const DB = process.env.DATABASE_URL`
-    expect(getRules(code, 'src/config.ts')).not.toContain('hardcoded-config')
+    expect(getRules(code, undefined, 'src/config.ts')).not.toContain('hardcoded-config')
   })
 
   it('does not detect hardcoded config in spec files (pattern .spec.)', () => {
     // Only .test. / .spec. / __tests__ are skipped — test.ts (no dot before 'test') is NOT skipped
     const code = `const DB = 'postgresql://user:pass@localhost:5432/db'`
-    expect(getRules(code, 'src/db.spec.ts')).not.toContain('hardcoded-config')
+    expect(getRules(code, undefined, 'src/db.spec.ts')).not.toContain('hardcoded-config')
   })
 
   it('does not flag import paths', () => {
     // Import strings are explicitly skipped
     const code = `import { foo } from './foo'`
-    expect(getRules(code, 'src/bar.ts')).not.toContain('hardcoded-config')
+    expect(getRules(code, undefined, 'src/bar.ts')).not.toContain('hardcoded-config')
   })
 })
 
@@ -637,7 +637,7 @@ interface Fetcher {
 }
 const impl: Fetcher = { fetch: async (url) => url }
 `
-    expect(getRules(code, 'src/service.ts')).toContain('unnecessary-abstraction')
+    expect(getRules(code, undefined, 'src/service.ts')).toContain('unnecessary-abstraction')
   })
 
   it('does not detect interface with multiple methods', () => {
@@ -649,7 +649,7 @@ interface Repository {
 }
 const impl: Repository = { find: (id) => id, save: () => {}, delete: () => {} }
 `
-    expect(getRules(code, 'src/repo.ts')).not.toContain('unnecessary-abstraction')
+    expect(getRules(code, undefined, 'src/repo.ts')).not.toContain('unnecessary-abstraction')
   })
 
   it('does not detect interface with properties', () => {
@@ -660,7 +660,7 @@ interface Config {
 }
 const c: Config = { url: 'x', fetch: async (u) => u }
 `
-    expect(getRules(code, 'src/config.ts')).not.toContain('unnecessary-abstraction')
+    expect(getRules(code, undefined, 'src/config.ts')).not.toContain('unnecessary-abstraction')
   })
 
   it('detects abstract class with 1 abstract method used <= 2 times', () => {
@@ -774,5 +774,35 @@ describe('score calculation', () => {
     ].join('\n')
     const report = analyzeCode(code)
     expect(report.score).toBeLessThanOrEqual(100)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// JS/JSX support
+// ─────────────────────────────────────────────────────────────────────────────
+describe('JS/JSX support', () => {
+  it('detects debug-leftover in .js file', () => {
+    const rules = getRules('console.log("test")', undefined, 'app.js')
+    expect(rules).toContain('debug-leftover')
+  })
+
+  it('detects large-function in .jsx file', () => {
+    const lines = Array(60).fill('  const x = 1').join('\n')
+    const code = `function Component() {\n${lines}\n  return null\n}`
+    const rules = getRules(code, undefined, 'Component.jsx')
+    expect(rules).toContain('large-function')
+  })
+
+  it('detects catch-swallow in .js file', () => {
+    const code = `try { foo() } catch(e) {}`
+    const rules = getRules(code, undefined, 'utils.js')
+    expect(rules).toContain('catch-swallow')
+  })
+
+  it('does not flag pure JS with no issues', () => {
+    const code = `function add(a, b) { return a + b }`
+    const report = analyzeCode(code, undefined, 'math.js')
+    const meaningful = report.issues.filter(i => i.severity !== 'info')
+    expect(meaningful).toHaveLength(0)
   })
 })

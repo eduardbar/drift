@@ -135,25 +135,27 @@ export class BlameAnalyzer {
 
     const tsFiles = fs
       .readdirSync(targetPath, { recursive: true, encoding: 'utf8' })
-      .filter((f): f is string => (f.endsWith('.ts') || f.endsWith('.tsx')) && !f.includes('node_modules'))
+      .filter((f): f is string => (f.endsWith('.ts') || f.endsWith('.tsx') || f.endsWith('.js') || f.endsWith('.jsx')) && !f.includes('node_modules') && !f.endsWith('.d.ts'))
       .map(f => path.join(targetPath, f))
+      
 
     const combined = new Map<string, BlameAttribution>()
+    const commitsByAuthor = new Map<string, Set<string>>()
 
     for (const file of tsFiles) {
-      const report = analyzeFilePath(file, analyzeFileFn)
-      const ruleIssues = report.issues.filter(i => i.rule === rule)
-      if (ruleIssues.length === 0) continue
-
       let blameEntries: GitBlameEntry[] = []
       try {
         const blameOutput = execGit(`git blame --porcelain "${file}"`, targetPath)
         blameEntries = parseGitBlame(blameOutput)
       } catch { continue }
 
-      for (const issue of ruleIssues) {
-        const entry = blameEntries[issue.line - 1]
-        if (!entry) continue
+      const report = analyzeFilePath(file, analyzeFileFn)
+      const issuesByLine = new Map<number, number>()
+      for (const issue of report.issues) {
+        issuesByLine.set(issue.line, (issuesByLine.get(issue.line) ?? 0) + 1)
+      }
+
+      blameEntries.forEach((entry, idx) => {
         const key = entry.email || entry.author
         if (!combined.has(key)) {
           combined.set(key, {
@@ -164,11 +166,21 @@ export class BlameAnalyzer {
             issuesIntroduced: 0,
             avgScoreImpact: 0,
           })
+          commitsByAuthor.set(key, new Set())
         }
         const attr = combined.get(key)!
-        attr.issuesIntroduced++
-        attr.avgScoreImpact += RULE_WEIGHTS[rule]?.weight ?? 5
-      }
+        attr.linesChanged++
+        commitsByAuthor.get(key)!.add(entry.hash)
+        const lineNum = idx + 1
+        if (issuesByLine.has(lineNum)) {
+          attr.issuesIntroduced += issuesByLine.get(lineNum)!
+          attr.avgScoreImpact += report.score * (1 / (blameEntries.length || 1))
+        }
+      })
+    }
+
+    for (const [key, attr] of combined) {
+      attr.commits = commitsByAuthor.get(key)?.size ?? 0
     }
 
     return Array.from(combined.values()).sort((a, b) => b.issuesIntroduced - a.issuesIntroduced)
@@ -183,7 +195,7 @@ export class BlameAnalyzer {
 
     const tsFiles = fs
       .readdirSync(targetPath, { recursive: true, encoding: 'utf8' })
-      .filter((f): f is string => (f.endsWith('.ts') || f.endsWith('.tsx')) && !f.includes('node_modules'))
+      .filter((f): f is string => (f.endsWith('.ts') || f.endsWith('.tsx') || f.endsWith('.js') || f.endsWith('.jsx')) && !f.includes('node_modules') && !f.endsWith('.d.ts'))
       .map(f => path.join(targetPath, f))
 
     const combined = new Map<string, BlameAttribution>()

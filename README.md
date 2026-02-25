@@ -418,7 +418,7 @@ See [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) before participating.
 | [`commander`](https://github.com/tj/commander.js) | CLI commands and flags |
 | [`kleur`](https://github.com/lukeed/kleur) | Terminal colors (zero dependencies) |
 
-**Runtime:** Node.js 18+ · TypeScript 5.x · ES Modules
+**Runtime:** Node.js 18+ · TypeScript 5.x · ES Modules · Supports TypeScript (`.ts`, `.tsx`) and JavaScript (`.js`, `.jsx`) files
 
 ---
 

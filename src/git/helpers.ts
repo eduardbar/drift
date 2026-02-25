@@ -100,7 +100,7 @@ export async function analyzeSingleCommit(
     .split('\n')
     .filter(
       f =>
-        (f.endsWith('.ts') || f.endsWith('.tsx')) &&
+        (f.endsWith('.ts') || f.endsWith('.tsx') || f.endsWith('.js') || f.endsWith('.jsx')) &&
         !f.endsWith('.d.ts') &&
         !f.includes('node_modules') &&
         !f.startsWith('dist/'),

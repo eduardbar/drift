@@ -42,7 +42,7 @@ export function extractFilesAtRef(projectPath: string, ref: string): string {
   const tsFiles = fileList
     .split('\n')
     .map(f => f.trim())
-    .filter(f => f.endsWith('.ts') && !f.endsWith('.d.ts'))
+    .filter(f => (f.endsWith('.ts') || f.endsWith('.tsx') || f.endsWith('.js') || f.endsWith('.jsx')) && !f.endsWith('.d.ts'))
 
   if (tsFiles.length === 0) {
     throw new Error(`No TypeScript files found at ref '${ref}'`)

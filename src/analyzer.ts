@@ -133,7 +133,7 @@ export function analyzeFile(file: import('ts-morph').SourceFile): FileReport {
 export function analyzeProject(targetPath: string, config?: DriftConfig): FileReport[] {
   const project = new Project({
     skipAddingFilesFromTsConfig: true,
-    compilerOptions: { allowJs: true },
+    compilerOptions: { allowJs: true, jsx: 1 },  // 1 = JsxEmit.Preserve
   })
 
   project.addSourceFilesAtPaths([
