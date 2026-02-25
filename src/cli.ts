@@ -16,6 +16,7 @@ import { generateHtmlReport } from './report.js'
 import { generateBadge } from './badge.js'
 import { emitCIAnnotations, printCISummary } from './ci.js'
 import { applyFixes, type FixResult } from './fix.js'
+import { loadHistory, saveSnapshot, printHistory, printSnapshotDiff } from './snapshot.js'
 
 const program = new Command()
 
@@ -256,6 +257,44 @@ program
     if (!options.dryRun && applied.length > 0) {
       console.log(`\n${applied.length} issue(s) fixed. Re-run drift scan to verify.`)
     }
+  })
+
+program
+  .command('snapshot [path]')
+  .description('Record a score snapshot to drift-history.json')
+  .option('-l, --label <label>', 'label for this snapshot (e.g. sprint name, version)')
+  .option('--history', 'show all recorded snapshots')
+  .option('--diff', 'compare current score vs last snapshot')
+  .action(async (
+    targetPath: string | undefined,
+    opts: { label?: string; history?: boolean; diff?: boolean },
+  ) => {
+    const resolvedPath = resolve(targetPath ?? '.')
+
+    if (opts.history) {
+      const history = loadHistory(resolvedPath)
+      printHistory(history)
+      return
+    }
+
+    process.stderr.write(`\nScanning ${resolvedPath}...\n`)
+    const config = await loadConfig(resolvedPath)
+    const files = analyzeProject(resolvedPath, config)
+    process.stderr.write(`  Found ${files.length} TypeScript file(s)\n\n`)
+    const report = buildReport(resolvedPath, files)
+
+    if (opts.diff) {
+      const history = loadHistory(resolvedPath)
+      printSnapshotDiff(history, report.totalScore)
+      return
+    }
+
+    const entry = saveSnapshot(resolvedPath, report, opts.label)
+    const labelStr = entry.label ? ` [${entry.label}]` : ''
+    process.stdout.write(
+      `  Snapshot recorded${labelStr}: score ${entry.score} (${entry.grade}) — ${entry.totalIssues} issues across ${entry.files} files\n`,
+    )
+    process.stdout.write(`  Saved to drift-history.json\n\n`)
   })
 
 program.parse()

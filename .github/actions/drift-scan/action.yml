@@ -1,0 +1,65 @@
+name: 'Drift — Technical Debt Scanner'
+description: 'Scan TypeScript projects for AI-generated technical debt and enforce score thresholds'
+author: 'eduardbar'
+
+branding:
+  icon: 'activity'
+  color: 'purple'
+
+inputs:
+  path:
+    description: 'Path to scan'
+    required: false
+    default: '.'
+  min-score:
+    description: 'Fail if project score exceeds this threshold (0-100)'
+    required: false
+    default: '80'
+  fail-on-threshold:
+    description: 'Whether to fail the action if threshold is exceeded'
+    required: false
+    default: 'true'
+  version:
+    description: 'Version of @eduardbar/drift to use'
+    required: false
+    default: 'latest'
+
+outputs:
+  score:
+    description: 'The overall drift score (0-100)'
+    value: ${{ steps.scan.outputs.score }}
+  grade:
+    description: 'The drift grade (CLEAN / LOW / MODERATE / HIGH / CRITICAL)'
+    value: ${{ steps.scan.outputs.grade }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install drift
+      shell: bash
+      run: npm install -g @eduardbar/drift@${{ inputs.version }}
+
+    - name: Run drift scan
+      id: scan
+      shell: bash
+      run: |
+        TMPFILE=$(mktemp)
+
+        # Run scan — write JSON to tmp, progress to stderr (already separate)
+        drift scan ${{ inputs.path }} --ai > "$TMPFILE" 2>/dev/null || true
+
+        # Extract score and grade from AIOutput JSON
+        SCORE=$(node -e "const d=JSON.parse(require('fs').readFileSync('$TMPFILE','utf8')); console.log(d.summary.score)")
+        GRADE=$(node -e "const d=JSON.parse(require('fs').readFileSync('$TMPFILE','utf8')); console.log(d.summary.grade)")
+
+        rm "$TMPFILE"
+
+        echo "score=$SCORE" >> "$GITHUB_OUTPUT"
+        echo "grade=$GRADE" >> "$GITHUB_OUTPUT"
+
+        echo "Drift Score: $SCORE/100 ($GRADE)"
+
+        if [ "${{ inputs.fail-on-threshold }}" = "true" ] && [ "$SCORE" -gt "${{ inputs.min-score }}" ]; then
+          echo "::error::Drift score $SCORE/100 exceeds threshold of ${{ inputs.min-score }}"
+          exit 1
+        fi
