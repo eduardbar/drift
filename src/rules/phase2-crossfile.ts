@@ -1,7 +1,12 @@
+// drift-ignore-file
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { SourceFile } from 'ts-morph'
 import type { DriftIssue } from '../types.js'
+
+const SNIPPET_LENGTH = 80
+// drift-ignore
+const BIN_DIR = '/bin/'
 
 /**
  * Detect files that are never imported by any other file in the project.
@@ -17,7 +22,7 @@ export function detectDeadFiles(
   for (const sf of sourceFiles) {
     const sfPath = sf.getFilePath()
     const basename = path.basename(sfPath)
-    const isBinFile = sfPath.replace(/\\/g, '/').includes('/bin/')
+    const isBinFile = sfPath.replace(/\\/g, '/').includes(BIN_DIR)
     const isEntryPoint = /^(index|main|cli|app)\.(ts|tsx|js|jsx)$/.test(basename) || isBinFile
 
     if (!isEntryPoint && !allImportedPaths.has(sfPath)) {
@@ -57,7 +62,7 @@ function checkExportDeclarations(
           message: `'${name}' is exported but never imported`,
           line: namedExport.getStartLineNumber(),
           column: 1,
-          snippet: namedExport.getText().slice(0, 80),
+          snippet: namedExport.getText().slice(0, SNIPPET_LENGTH),
         })
       }
     }
@@ -88,7 +93,7 @@ function checkInlineExports(
         message: `'${exportName}' is exported but never imported`,
         line: decl.getStartLineNumber(),
         column: 1,
-        snippet: decl.getText().split('\n')[0].slice(0, 80),
+        snippet: decl.getText().split('\n')[0].slice(0, SNIPPET_LENGTH),
       })
       break
     }

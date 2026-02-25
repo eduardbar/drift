@@ -15,6 +15,30 @@ const TRIVIAL_COMMENT_PATTERNS = [
   { comment: /\/\/\s*import\b/i, code: /^\s*import\b/ },
 ]
 
+const SNIPPET_TRUNCATE = 60
+
+function checkLineForContradiction(
+  commentLine: string,
+  nextLine: string,
+  lineNumber: number,
+  file: SourceFile,
+): DriftIssue | null {
+  for (const { comment, code } of TRIVIAL_COMMENT_PATTERNS) {
+    if (comment.test(commentLine) && code.test(nextLine)) {
+      if (hasIgnoreComment(file, lineNumber)) return null
+      return {
+        rule: 'comment-contradiction',
+        severity: 'warning',
+        message: `Comment restates what the code already says. AI documents the obvious instead of the why.`,
+        line: lineNumber,
+        column: 1,
+        snippet: `${commentLine.slice(0, SNIPPET_TRUNCATE)}\n${nextLine.trim().slice(0, SNIPPET_TRUNCATE)}`,
+      }
+    }
+  }
+  return null
+}
+
 export function detectCommentContradiction(file: SourceFile): DriftIssue[] {
   const issues: DriftIssue[] = []
   const lines = file.getFullText().split('\n')
@@ -22,20 +46,9 @@ export function detectCommentContradiction(file: SourceFile): DriftIssue[] {
   for (let i = 0; i < lines.length - 1; i++) {
     const commentLine = lines[i].trim()
     const nextLine = lines[i + 1]
-
-    for (const { comment, code } of TRIVIAL_COMMENT_PATTERNS) {
-      if (comment.test(commentLine) && code.test(nextLine)) {
-        if (hasIgnoreComment(file, i + 1)) continue
-        issues.push({
-          rule: 'comment-contradiction',
-          severity: 'warning',
-          message: `Comment restates what the code already says. AI documents the obvious instead of the why.`,
-          line: i + 1,
-          column: 1,
-          snippet: `${commentLine.slice(0, 60)}\n${nextLine.trim().slice(0, 60)}`,
-        })
-        break
-      }
+    const issue = checkLineForContradiction(commentLine, nextLine, i + 1, file)
+    if (issue) {
+      issues.push(issue)
     }
   }
 

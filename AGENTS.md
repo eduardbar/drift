@@ -20,6 +20,7 @@ Publicado en npm como `@eduardbar/drift`. MIT.
 | `kleur ^4` | Colores en consola (sin dependencias) |
 | `typescript ^5.9` | Dev — compilación |
 | `@types/node ^25` | Dev — tipos Node.js |
+| `vitest ^4` | Testing |
 
 **Runtime:** Node.js 18+, ES Modules (`"type": "module"`).
 
@@ -32,18 +33,47 @@ drift/
 ├── bin/
 │   └── drift.js          ← wrapper cross-platform (Windows npx fix)
 ├── src/
-│   ├── types.ts          ← interfaces: DriftIssue, FileReport, DriftReport, AIOutput
-│   ├── analyzer.ts       ← motor AST + 10 reglas de detección + drift-ignore
-│   ├── reporter.ts       ← buildReport(), formatMarkdown(), formatAIOutput()
-│   ├── printer.ts        ← salida consola con colores y score bar ASCII
-│   ├── utils.ts          ← scoreToGrade, severityIcon, scoreBar
-│   ├── index.ts          ← re-exports públicos (librería)
-│   └── cli.ts            ← entry point Commander.js
-├── assets/
-│   ├── og.svg / og.png           ← imagen OG original
-│   ├── og-v030-linkedin.svg/png  ← imagen post LinkedIn v0.3.0
-│   └── og-v030-x.svg/png         ← imagen hilo X v0.3.0
+│   ├── analyzer.ts       ← motor AST + 26 reglas + drift-ignore
+│   ├── types.ts         ← interfaces: DriftIssue, FileReport, DriftReport, AIOutput
+│   ├── reporter.ts      ← buildReport(), formatMarkdown(), formatAIOutput()
+│   ├── printer.ts       ← salida consola con colores y score bar ASCII
+│   ├── utils.ts         ← scoreToGrade, severityIcon, scoreBar
+│   ├── index.ts         ← re-exports públicos (librería)
+│   ├── cli.ts           ← entry point Commander.js
+│   ├── config.ts        ← drift.config.ts support
+│   ├── fix.ts           ← drift fix command
+│   ├── ci.ts            ← drift ci command
+│   ├── diff.ts          ← drift diff command
+│   ├── report.ts        ← drift report command
+│   ├── badge.ts         ← drift badge command
+│   ├── snapshot.ts      ← drift snapshot command
+│   ├── git.ts           ← re-exports git analyzers
+│   ├── git/
+│   │   ├── trend.ts     ← drift trend (historial de scores)
+│   │   ├── blame.ts     ← drift blame (atribución de deuda)
+│   │   └── helpers.ts
+│   └── rules/           ← reglas modularizadas por fase
+│       ├── phase0-basic.ts
+│       ├── phase1-complexity.ts
+│       ├── phase2-crossfile.ts    ← dead-file, unused-export, unused-dependency
+│       ├── phase3-arch.ts          ← circular-dependency, layer-violation
+│       ├── phase5-ai.ts
+│       ├── phase8-semantic.ts     ← semantic-duplication
+│       ├── complexity.ts
+│       ├── coupling.ts
+│       ├── nesting.ts
+│       ├── promise.ts
+│       ├── magic.ts
+│       ├── comments.ts
+│       └── shared.ts
+├── packages/
+│   ├── eslint-plugin-drift/       ← ESLint plugin oficial
+│   └── vscode-drift/              ← VS Code extension
 ├── dist/                 ← output tsc (no editar a mano)
+├── assets/
+│   ├── og.svg / og.png
+│   ├── og-v030-linkedin.svg/png
+│   └── og-v030-x.svg/png
 ├── .github/workflows/publish.yml
 ├── package.json
 ├── tsconfig.json
@@ -58,6 +88,8 @@ drift/
 npm run build       # tsc — compila src/ → dist/
 npm run dev         # tsc --watch
 npm start           # node dist/cli.js (desarrollo local)
+npm test            # vitest run
+npm run test:watch # vitest (watch mode)
 ```
 
 **Pre-publicación:** `prepublishOnly` corre `build` automáticamente.
@@ -223,6 +255,16 @@ Sin esto, Windows no ejecuta el shebang correctamente con ES modules.
 | **0.2.1** | `drift-ignore` por línea y por archivo + fix console output propio |
 | **0.2.0** | Score bar ASCII + header hierarchy + DRY utils + file count en CLI |
 | **0.1.x** | Bootstrap: tipos, analyzer (10 reglas), reporter, printer, CLI, CI/CD |
+
+---
+
+## Estado actual (feb 2026)
+
+- **Versión publicada:** `1.0.0`
+- **Branch:** `master`, sincronizado con `origin`
+- **Self-scan score:** 5/100 (LOW)
+- **Top issues:** 51× magic-number, 2× deep-nesting, 2× catch-swallow
+- **26 reglas activas** organizadas en fases
 
 ---
 

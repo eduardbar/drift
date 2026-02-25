@@ -21,6 +21,22 @@ export interface SnapshotHistory {
 
 const HISTORY_FILE = 'drift-history.json'
 
+const HEADER_PAD = {
+  INDEX: 4,
+  DATE: 26,
+  LABEL: 20,
+  SCORE: 8,
+  GRADE: 12,
+  ISSUES: 8,
+  DELTA: 6,
+}
+
+const GRADE_THRESHOLDS = {
+  LOW: 20,
+  MODERATE: 45,
+  HIGH: 70,
+}
+
 export function loadHistory(targetPath: string): SnapshotHistory {
   const filePath = path.join(targetPath, HISTORY_FILE)
   if (fs.existsSync(filePath)) {
@@ -73,11 +89,11 @@ export function printHistory(history: SnapshotHistory): void {
   process.stdout.write('\n')
   process.stdout.write(
     kleur.bold(
-      `  ${'#'.padEnd(4)} ${'Date'.padEnd(26)} ${'Label'.padEnd(20)} ${'Score'.padEnd(8)} ${'Grade'.padEnd(12)} ${'Issues'.padEnd(8)} ${'Delta'}\n`,
+      `  ${'#'.padEnd(HEADER_PAD.INDEX)} ${'Date'.padEnd(HEADER_PAD.DATE)} ${'Label'.padEnd(HEADER_PAD.LABEL)} ${'Score'.padEnd(HEADER_PAD.SCORE)} ${'Grade'.padEnd(HEADER_PAD.GRADE)} ${'Issues'.padEnd(HEADER_PAD.ISSUES)} ${'Delta'}\n`,
     ),
   )
   process.stdout.write(
-    `  ${'─'.repeat(4)} ${'─'.repeat(26)} ${'─'.repeat(20)} ${'─'.repeat(8)} ${'─'.repeat(12)} ${'─'.repeat(8)} ${'─'.repeat(6)}\n`,
+    `  ${'─'.repeat(HEADER_PAD.INDEX)} ${'─'.repeat(HEADER_PAD.DATE)} ${'─'.repeat(HEADER_PAD.LABEL)} ${'─'.repeat(HEADER_PAD.SCORE)} ${'─'.repeat(HEADER_PAD.GRADE)} ${'─'.repeat(HEADER_PAD.ISSUES)} ${'─'.repeat(HEADER_PAD.DELTA)}\n`,
   )
 
   for (let i = 0; i < snapshots.length; i++) {
@@ -94,7 +110,7 @@ export function printHistory(history: SnapshotHistory): void {
     const gradeColored = colorGrade(s.grade, s.score)
 
     process.stdout.write(
-      `  ${String(i + 1).padEnd(4)} ${date.padEnd(26)} ${(s.label || '—').padEnd(20)} ${String(s.score).padEnd(8)} ${gradeColored.padEnd(12)} ${String(s.totalIssues).padEnd(8)} ${deltaStr}\n`,
+      `  ${String(i + 1).padEnd(HEADER_PAD.INDEX)} ${date.padEnd(HEADER_PAD.DATE)} ${(s.label || '—').padEnd(HEADER_PAD.LABEL)} ${String(s.score).padEnd(HEADER_PAD.SCORE)} ${gradeColored.padEnd(HEADER_PAD.GRADE)} ${String(s.totalIssues).padEnd(HEADER_PAD.ISSUES)} ${deltaStr}\n`,
     )
   }
 
@@ -152,8 +168,8 @@ export function printSnapshotDiff(
 
 function colorGrade(grade: string, score: number): string {
   if (score === 0) return kleur.green(grade)
-  if (score < 20) return kleur.green(grade)
-  if (score < 45) return kleur.yellow(grade)
-  if (score < 70) return kleur.red(grade)
+  if (score < GRADE_THRESHOLDS.LOW) return kleur.green(grade)
+  if (score < GRADE_THRESHOLDS.MODERATE) return kleur.yellow(grade)
+  if (score < GRADE_THRESHOLDS.HIGH) return kleur.red(grade)
   return kleur.bold().red(grade)
 }

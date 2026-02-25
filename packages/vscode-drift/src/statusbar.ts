@@ -1,13 +1,21 @@
 import * as vscode from 'vscode'
 import type { FileReport } from '@eduardbar/drift'
 
+const STATUSBAR_PRIORITY = 100
+
+const SCORE_THRESHOLDS = {
+  WARNING: 50,
+  ERROR: 30,
+  WARNING_BG: 60,
+}
+
 export class DriftStatusBarItem {
   private item: vscode.StatusBarItem
 
   constructor() {
-    this.item = vscode.window.createStatusBarItem(
+    this.item = vscode.createStatusBarItem(
       vscode.StatusBarAlignment.Right,
-      100
+      STATUSBAR_PRIORITY
     )
     this.item.command = 'drift.scanWorkspace'
     this.item.tooltip = 'Click to scan workspace'
@@ -27,12 +35,12 @@ export class DriftStatusBarItem {
     const totalIssues = reports.reduce((sum, r) => sum + r.issues.length, 0)
     const hasErrors = reports.some(r => r.issues.some(i => i.severity === 'error'))
 
-    const icon = hasErrors ? '$(error)' : totalScore < 50 ? '$(warning)' : '$(check)'
+    const icon = hasErrors ? '$(error)' : totalScore < SCORE_THRESHOLDS.WARNING ? '$(warning)' : '$(check)'
     this.item.text = `${icon} drift ${totalScore}/100 · ${totalIssues} issues`
 
-    if (hasErrors || totalScore < 30) {
+    if (hasErrors || totalScore < SCORE_THRESHOLDS.ERROR) {
       this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground')
-    } else if (totalScore < 60) {
+    } else if (totalScore < SCORE_THRESHOLDS.WARNING_BG) {
       this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground')
     } else {
       this.item.backgroundColor = undefined

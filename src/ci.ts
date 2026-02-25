@@ -2,6 +2,15 @@ import { writeFileSync } from 'node:fs'
 import { relative } from 'node:path'
 import type { DriftReport } from './types.js'
 
+const GRADE_THRESHOLDS = {
+  A: 80,
+  B: 60,
+  C: 40,
+  D: 20,
+}
+
+const TOP_FILES_LIMIT = 10
+
 function encodeMessage(msg: string): string {
   return msg
     .replace(/%/g, '%25')
@@ -18,10 +27,10 @@ function severityToAnnotation(s: string): 'error' | 'warning' | 'notice' {
 }
 
 function scoreLabel(score: number): string {
-  if (score >= 80) return 'A'
-  if (score >= 60) return 'B'
-  if (score >= 40) return 'C'
-  if (score >= 20) return 'D'
+  if (score >= GRADE_THRESHOLDS.A) return 'A'
+  if (score >= GRADE_THRESHOLDS.B) return 'B'
+  if (score >= GRADE_THRESHOLDS.C) return 'C'
+  if (score >= GRADE_THRESHOLDS.D) return 'D'
   return 'F'
 }
 
@@ -44,14 +53,21 @@ function countIssuesBySeverity(report: DriftReport): { errors: number; warnings:
   let info = 0
 
   for (const file of report.files) {
-    for (const issue of file.issues) {
-      if (issue.severity === 'error') errors++
-      else if (issue.severity === 'warning') warnings++
-      else info++
-    }
+    countFileIssues(file, { errors: () => errors++, warnings: () => warnings++, info: () => info++ })
   }
 
   return { errors, warnings, info }
+}
+
+function countFileIssues(
+  file: { issues: Array<{ severity: string }> },
+  counters: { errors: () => void; warnings: () => void; info: () => void },
+): void {
+  for (const issue of file.issues) {
+    if (issue.severity === 'error') counters.errors()
+    else if (issue.severity === 'warning') counters.warnings()
+    else counters.info()
+  }
 }
 
 export function printCISummary(report: DriftReport): void {
@@ -64,7 +80,7 @@ export function printCISummary(report: DriftReport): void {
 
   const sorted = [...report.files]
     .sort((a, b) => b.issues.length - a.issues.length)
-    .slice(0, 10)
+    .slice(0, TOP_FILES_LIMIT)
 
   const rows = sorted
     .map((f) => {

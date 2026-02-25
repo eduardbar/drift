@@ -2,14 +2,19 @@ import { SourceFile, SyntaxKind } from 'ts-morph'
 import type { DriftIssue } from '../types.js'
 import { hasIgnoreComment, getSnippet, getFunctionLikeLines, type FunctionLike } from './shared.js'
 
+const LARGE_FILE_THRESHOLD = 300
+const LARGE_FUNCTION_THRESHOLD = 50
+const SNIPPET_TRUNCATE_SHORT = 60
+const SNIPPET_TRUNCATE_LONG = 120
+
 export function detectLargeFile(file: SourceFile): DriftIssue[] {
   const lineCount = file.getEndLineNumber()
-  if (lineCount > 300) {
+  if (lineCount > LARGE_FILE_THRESHOLD) {
     return [
       {
         rule: 'large-file',
         severity: 'error',
-        message: `File has ${lineCount} lines (threshold: 300). Large files are the #1 sign of AI-generated structural drift.`,
+        message: `File has ${lineCount} lines (threshold: ${LARGE_FILE_THRESHOLD}). Large files are the #1 sign of AI-generated structural drift.`,
         line: 1,
         column: 1,
         snippet: `// ${lineCount} lines total`,
@@ -31,12 +36,12 @@ export function detectLargeFunctions(file: SourceFile): DriftIssue[] {
   for (const fn of fns) {
     const lines = getFunctionLikeLines(fn)
     const startLine = fn.getStartLineNumber()
-    if (lines > 50) {
+    if (lines > LARGE_FUNCTION_THRESHOLD) {
       if (hasIgnoreComment(file, startLine)) continue
       issues.push({
         rule: 'large-function',
         severity: 'error',
-        message: `Function spans ${lines} lines (threshold: 50). AI tends to dump logic into single functions.`,
+        message: `Function spans ${lines} lines (threshold: ${LARGE_FUNCTION_THRESHOLD}). AI tends to dump logic into single functions.`,
         line: startLine,
         column: fn.getStartLinePos(),
         snippet: getSnippet(fn, file),
@@ -72,10 +77,10 @@ export function detectDebugLeftovers(file: SourceFile): DriftIssue[] {
       issues.push({
         rule: 'debug-leftover',
         severity: 'warning',
-        message: `Unresolved marker found: ${lineContent.trim().slice(0, 60)}`,
+        message: `Unresolved marker found: ${lineContent.trim().slice(0, SNIPPET_TRUNCATE_SHORT)}`,
         line: i + 1,
         column: 1,
-        snippet: lineContent.trim().slice(0, 120),
+        snippet: lineContent.trim().slice(0, SNIPPET_TRUNCATE_LONG),
       })
     }
   })
@@ -156,11 +161,13 @@ export function detectCatchSwallow(file: SourceFile): DriftIssue[] {
     const block = catchClause.getBlock()
     const stmts = block.getStatements()
     if (stmts.length === 0) {
+      const line = catchClause.getStartLineNumber()
+      if (hasIgnoreComment(file, line)) continue
       issues.push({
         rule: 'catch-swallow',
         severity: 'warning',
         message: `Empty catch block silently swallows errors. Classic AI pattern to make code "not throw".`,
-        line: catchClause.getStartLineNumber(),
+        line,
         column: catchClause.getStartLinePos(),
         snippet: getSnippet(catchClause, file),
       })
