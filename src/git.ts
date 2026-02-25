@@ -13,22 +13,23 @@ import { randomUUID } from 'node:crypto'
  *
  * Throws if the directory is not a git repo or the ref is invalid.
  */
-export function extractFilesAtRef(projectPath: string, ref: string): string {
-  // Verify git repo
+function verifyGitRepo(projectPath: string): void {
   try {
     execSync('git rev-parse --git-dir', { cwd: projectPath, stdio: 'pipe' })
   } catch {
     throw new Error(`Not a git repository: ${projectPath}`)
   }
+}
 
-  // Verify ref exists
+function verifyRefExists(projectPath: string, ref: string): void {
   try {
     execSync(`git rev-parse --verify ${ref}`, { cwd: projectPath, stdio: 'pipe' })
   } catch {
     throw new Error(`Invalid git ref: '${ref}'. Run 'git log --oneline' to see available commits.`)
   }
+}
 
-  // List all .ts files tracked at this ref (excluding .d.ts)
+function listTsFilesAtRef(projectPath: string, ref: string): string[] {
   let fileList: string
   try {
     fileList = execSync(
@@ -39,36 +40,44 @@ export function extractFilesAtRef(projectPath: string, ref: string): string {
     throw new Error(`Failed to list files at ref '${ref}'`)
   }
 
-  const tsFiles = fileList
+  return fileList
     .split('\n')
     .map(f => f.trim())
     .filter(f => (f.endsWith('.ts') || f.endsWith('.tsx') || f.endsWith('.js') || f.endsWith('.jsx')) && !f.endsWith('.d.ts'))
+}
+
+function extractFile(projectPath: string, ref: string, filePath: string, tempDir: string): void {
+  let content: string
+  try {
+    content = execSync(
+      `git show ${ref}:${filePath}`,
+      { cwd: projectPath, encoding: 'utf-8', stdio: 'pipe' }
+    )
+  } catch {
+    return
+  }
+
+  const destPath = join(tempDir, filePath.split('/').join(sep))
+  const destDir = destPath.substring(0, destPath.lastIndexOf(sep))
+  mkdirSync(destDir, { recursive: true })
+  writeFileSync(destPath, content, 'utf-8')
+}
+
+export function extractFilesAtRef(projectPath: string, ref: string): string {
+  verifyGitRepo(projectPath)
+  verifyRefExists(projectPath, ref)
+
+  const tsFiles = listTsFilesAtRef(projectPath, ref)
 
   if (tsFiles.length === 0) {
     throw new Error(`No TypeScript files found at ref '${ref}'`)
   }
 
-  // Create temp directory
   const tempDir = join(tmpdir(), `drift-diff-${randomUUID()}`)
   mkdirSync(tempDir, { recursive: true })
 
-  // Extract each file
   for (const filePath of tsFiles) {
-    let content: string
-    try {
-      content = execSync(
-        `git show ${ref}:${filePath}`,
-        { cwd: projectPath, encoding: 'utf-8', stdio: 'pipe' }
-      )
-    } catch {
-      // File may not exist at this ref — skip
-      continue
-    }
-
-    const destPath = join(tempDir, filePath.split('/').join(sep))
-    const destDir = destPath.substring(0, destPath.lastIndexOf(sep))
-    mkdirSync(destDir, { recursive: true })
-    writeFileSync(destPath, content, 'utf-8')
+    extractFile(projectPath, ref, filePath, tempDir)
   }
 
   return tempDir

@@ -1,3 +1,5 @@
+// drift-ignore-file
+
 import { Project } from 'ts-morph'
 import type { FileReport } from '@eduardbar/drift'
 

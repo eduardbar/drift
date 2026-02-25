@@ -39,6 +39,64 @@ export function detectDeadFiles(
  * Detect named exports that are never imported by any other file.
  * Barrel files (index.*) are excluded since their entire surface is the public API.
  */
+function checkExportDeclarations(
+  sf: SourceFile,
+  sfPath: string,
+  importedNamesForFile: Set<string> | undefined,
+  ruleWeights: Record<string, { severity: DriftIssue['severity']; weight: number }>,
+): DriftIssue[] {
+  const issues: DriftIssue[] = []
+
+  for (const exportDecl of sf.getExportDeclarations()) {
+    for (const namedExport of exportDecl.getNamedExports()) {
+      const name = namedExport.getName()
+      if (!importedNamesForFile?.has(name)) {
+        issues.push({
+          rule: 'unused-export',
+          severity: ruleWeights['unused-export'].severity,
+          message: `'${name}' is exported but never imported`,
+          line: namedExport.getStartLineNumber(),
+          column: 1,
+          snippet: namedExport.getText().slice(0, 80),
+        })
+      }
+    }
+  }
+
+  return issues
+}
+
+function checkInlineExports(
+  sf: SourceFile,
+  sfPath: string,
+  importedNamesForFile: Set<string> | undefined,
+  ruleWeights: Record<string, { severity: DriftIssue['severity']; weight: number }>,
+): DriftIssue[] {
+  const issues: DriftIssue[] = []
+
+  for (const exportSymbol of sf.getExportedDeclarations()) {
+    const [exportName, declarations] = [exportSymbol[0], exportSymbol[1]]
+    if (exportName === 'default') continue
+    if (importedNamesForFile?.has(exportName)) continue
+
+    for (const decl of declarations) {
+      if (decl.getSourceFile().getFilePath() !== sfPath) continue
+
+      issues.push({
+        rule: 'unused-export',
+        severity: ruleWeights['unused-export'].severity,
+        message: `'${exportName}' is exported but never imported`,
+        line: decl.getStartLineNumber(),
+        column: 1,
+        snippet: decl.getText().split('\n')[0].slice(0, 80),
+      })
+      break
+    }
+  }
+
+  return issues
+}
+
 export function detectUnusedExports(
   sourceFiles: SourceFile[],
   allImportedNames: Map<string, Set<string>>,
@@ -55,45 +113,10 @@ export function detectUnusedExports(
 
     if (isBarrel || hasNamespaceImport) continue
 
-    const issues: DriftIssue[] = []
-
-    for (const exportDecl of sf.getExportDeclarations()) {
-      for (const namedExport of exportDecl.getNamedExports()) {
-        const name = namedExport.getName()
-        if (!importedNamesForFile?.has(name)) {
-          issues.push({
-            rule: 'unused-export',
-            severity: ruleWeights['unused-export'].severity,
-            message: `'${name}' is exported but never imported`,
-            line: namedExport.getStartLineNumber(),
-            column: 1,
-            snippet: namedExport.getText().slice(0, 80),
-          })
-        }
-      }
-    }
-
-    // Also check inline export declarations (export function foo, export const bar)
-    for (const exportSymbol of sf.getExportedDeclarations()) {
-      const [exportName, declarations] = [exportSymbol[0], exportSymbol[1]]
-      if (exportName === 'default') continue
-      if (importedNamesForFile?.has(exportName)) continue
-
-      for (const decl of declarations) {
-        // Skip if this is a re-export from another file
-        if (decl.getSourceFile().getFilePath() !== sfPath) continue
-
-        issues.push({
-          rule: 'unused-export',
-          severity: ruleWeights['unused-export'].severity,
-          message: `'${exportName}' is exported but never imported`,
-          line: decl.getStartLineNumber(),
-          column: 1,
-          snippet: decl.getText().split('\n')[0].slice(0, 80),
-        })
-        break // one issue per export name is enough
-      }
-    }
+    const issues: DriftIssue[] = [
+      ...checkExportDeclarations(sf, sfPath, importedNamesForFile, ruleWeights),
+      ...checkInlineExports(sf, sfPath, importedNamesForFile, ruleWeights),
+    ]
 
     if (issues.length > 0) {
       result.set(sfPath, issues)

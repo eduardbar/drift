@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { analyzeProject, analyzeFile } from './analyzer.js'
-import type { DriftIssue, DriftConfig } from './types.js'
+import type { DriftIssue, DriftConfig, FileReport } from './types.js'
 import { Project } from 'ts-morph'
 
 export interface FixResult {
@@ -73,30 +73,10 @@ function applyFixToLines(
   return null
 }
 
-export async function applyFixes(
-  targetPath: string,
-  config?: DriftConfig,
-  options?: { rule?: string; dryRun?: boolean }
-): Promise<FixResult[]> {
-  const resolvedPath = resolve(targetPath)
-  const dryRun = options?.dryRun ?? false
-
-  // Determine if target is a file or directory
-  let fileReports
-  const stat = statSync(resolvedPath)
-
-  if (stat.isFile()) {
-    const project = new Project({
-      skipAddingFilesFromTsConfig: true,
-      compilerOptions: { allowJs: true, jsx: 1 },
-    })
-    const sourceFile = project.addSourceFileAtPath(resolvedPath)
-    fileReports = [analyzeFile(sourceFile)]
-  } else {
-    fileReports = analyzeProject(resolvedPath, config)
-  }
-
-  // Collect fixable issues, optionally filtered by rule
+function collectFixableIssues(
+  fileReports: FileReport[],
+  options?: { rule?: string }
+): Map<string, DriftIssue[]> {
   const fixableByFile = new Map<string, DriftIssue[]>()
 
   for (const report of fileReports) {
@@ -111,43 +91,77 @@ export async function applyFixes(
     }
   }
 
+  return fixableByFile
+}
+
+function processFile(
+  filePath: string,
+  issues: DriftIssue[],
+  dryRun: boolean
+): FixResult[] {
+  const content = readFileSync(filePath, 'utf8')
+  let lines = content.split('\n')
+  const results: FixResult[] = []
+
+  const sortedIssues = [...issues].sort((a, b) => b.line - a.line)
+
+  for (const issue of sortedIssues) {
+    const fixResult = applyFixToLines(lines, issue)
+
+    if (fixResult) {
+      results.push({
+        file: filePath,
+        rule: issue.rule,
+        line: issue.line,
+        description: fixResult.description,
+        applied: true,
+      })
+      lines = fixResult.newLines
+    } else {
+      results.push({
+        file: filePath,
+        rule: issue.rule,
+        line: issue.line,
+        description: 'no fix available',
+        applied: false,
+      })
+    }
+  }
+
+  if (!dryRun) {
+    writeFileSync(filePath, lines.join('\n'), 'utf8')
+  }
+
+  return results
+}
+
+export async function applyFixes(
+  targetPath: string,
+  config?: DriftConfig,
+  options?: { rule?: string; dryRun?: boolean }
+): Promise<FixResult[]> {
+  const resolvedPath = resolve(targetPath)
+  const dryRun = options?.dryRun ?? false
+
+  let fileReports
+  const stat = statSync(resolvedPath)
+
+  if (stat.isFile()) {
+    const project = new Project({
+      skipAddingFilesFromTsConfig: true,
+      compilerOptions: { allowJs: true, jsx: 1 },
+    })
+    const sourceFile = project.addSourceFileAtPath(resolvedPath)
+    fileReports = [analyzeFile(sourceFile)]
+  } else {
+    fileReports = analyzeProject(resolvedPath, config)
+  }
+
+  const fixableByFile = collectFixableIssues(fileReports, options)
   const results: FixResult[] = []
 
   for (const [filePath, issues] of fixableByFile) {
-    const content = readFileSync(filePath, 'utf8')
-    let lines = content.split('\n')
-
-    // Sort issues by line descending to avoid line number drift after fixes
-    const sortedIssues = [...issues].sort((a, b) => b.line - a.line)
-
-    // Track line offset caused by deletions (debug-leftover removes lines)
-    // We process top-to-bottom after sorting descending, so no offset needed per issue
-    for (const issue of sortedIssues) {
-      const fixResult = applyFixToLines(lines, issue)
-
-      if (fixResult) {
-        results.push({
-          file: filePath,
-          rule: issue.rule,
-          line: issue.line,
-          description: fixResult.description,
-          applied: true,
-        })
-        lines = fixResult.newLines
-      } else {
-        results.push({
-          file: filePath,
-          rule: issue.rule,
-          line: issue.line,
-          description: 'no fix available',
-          applied: false,
-        })
-      }
-    }
-
-    if (!dryRun) {
-      writeFileSync(filePath, lines.join('\n'), 'utf8')
-    }
+    results.push(...processFile(filePath, issues, dryRun))
   }
 
   return results

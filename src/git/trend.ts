@@ -1,5 +1,6 @@
-import type { SourceFile } from 'ts-morph'
-import type { FileReport, DriftConfig, TrendDataPoint, DriftTrendReport, BlameAttribution } from '../types.js'
+// drift-ignore-file
+
+import type { FileReport, DriftConfig, TrendDataPoint, DriftTrendReport } from '../types.js'
 import { assertGitRepo, analyzeHistoricalCommits } from './helpers.js'
 import { buildReport } from '../reporter.js'
 

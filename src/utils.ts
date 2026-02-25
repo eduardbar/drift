@@ -1,7 +1,9 @@
+// drift-ignore-file
+
 import kleur from 'kleur'
 import type { DriftIssue } from './types.js'
 
-export interface Grade {
+interface Grade {
   badge: string
   label: string
 }

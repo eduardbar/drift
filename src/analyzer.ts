@@ -15,15 +15,12 @@ import {
   detectCatchSwallow,
   detectMissingReturnTypes,
 } from './rules/phase0-basic.js'
-import {
-  detectHighComplexity,
-  detectDeepNesting,
-  detectTooManyParams,
-  detectHighCoupling,
-  detectPromiseStyleMix,
-  detectMagicNumbers,
-  detectCommentContradiction,
-} from './rules/phase1-complexity.js'
+import { detectHighComplexity } from './rules/complexity.js'
+import { detectDeepNesting, detectTooManyParams } from './rules/nesting.js'
+import { detectHighCoupling } from './rules/coupling.js'
+import { detectPromiseStyleMix } from './rules/promise.js'
+import { detectMagicNumbers } from './rules/magic.js'
+import { detectCommentContradiction } from './rules/comments.js'
 import {
   detectDeadFiles,
   detectUnusedExports,

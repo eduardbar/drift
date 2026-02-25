@@ -54,6 +54,14 @@ export function saveSnapshot(
   return entry
 }
 
+function formatDelta(current: SnapshotEntry, prev: SnapshotEntry | null): string {
+  if (!prev) return '—'
+  const delta = current.score - prev.score
+  if (delta > 0) return kleur.red(`+${delta}`)
+  if (delta < 0) return kleur.green(String(delta))
+  return kleur.gray('0')
+}
+
 export function printHistory(history: SnapshotHistory): void {
   const { snapshots } = history
 
@@ -82,19 +90,7 @@ export function printHistory(history: SnapshotHistory): void {
       minute: '2-digit',
     })
 
-    let deltaStr = '—'
-    if (i > 0) {
-      const prev = snapshots[i - 1]
-      const delta = s.score - prev.score
-      if (delta > 0) {
-        deltaStr = kleur.red(`+${delta}`)
-      } else if (delta < 0) {
-        deltaStr = kleur.green(String(delta))
-      } else {
-        deltaStr = kleur.gray('0')
-      }
-    }
-
+    const deltaStr = formatDelta(s, i > 0 ? snapshots[i - 1] : null)
     const gradeColored = colorGrade(s.grade, s.score)
 
     process.stdout.write(

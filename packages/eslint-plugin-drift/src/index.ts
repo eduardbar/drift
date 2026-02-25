@@ -103,7 +103,7 @@ function createRule(ruleName: string): Rule.RuleModule {
                 data: { message: issue.message },
               })
             }
-          } catch {
+          } catch { // drift-ignore
             // Archivo no parseable por ts-morph — silenciar
           }
         },

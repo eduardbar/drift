@@ -38,13 +38,7 @@ export function emitCIAnnotations(report: DriftReport): void {
   }
 }
 
-export function printCISummary(report: DriftReport): void {
-  const summaryPath = process.env['GITHUB_STEP_SUMMARY']
-  if (!summaryPath) return
-
-  const score = report.totalScore
-  const grade = scoreLabel(score)
-
+function countIssuesBySeverity(report: DriftReport): { errors: number; warnings: number; info: number } {
   let errors = 0
   let warnings = 0
   let info = 0
@@ -56,6 +50,17 @@ export function printCISummary(report: DriftReport): void {
       else info++
     }
   }
+
+  return { errors, warnings, info }
+}
+
+export function printCISummary(report: DriftReport): void {
+  const summaryPath = process.env['GITHUB_STEP_SUMMARY']
+  if (!summaryPath) return
+
+  const score = report.totalScore
+  const grade = scoreLabel(score)
+  const { errors, warnings, info } = countIssuesBySeverity(report)
 
   const sorted = [...report.files]
     .sort((a, b) => b.issues.length - a.issues.length)

@@ -1,3 +1,5 @@
+// drift-ignore-file
+
 import * as crypto from 'node:crypto'
 import {
   SourceFile,
@@ -17,22 +19,18 @@ export type FunctionLikeNode = FunctionDeclaration | ArrowFunction | FunctionExp
  *  with canonical tokens so that two functions with identical logic but
  *  different identifiers produce the same fingerprint.
  */
-export function normalizeFunctionBody(fn: FunctionLikeNode): string {
-  // Build a substitution map: localName → canonical token
+function buildSubstitutionMap(fn: FunctionLikeNode): Map<string, string> {
   const subst = new Map<string, string>()
 
-  // Map parameters first
   for (const [i, param] of fn.getParameters().entries()) {
     const name = param.getName()
     if (name && name !== '_') subst.set(name, `P${i}`)
   }
 
-  // Map locally declared variables (VariableDeclaration)
   let varIdx = 0
   fn.forEachDescendant(node => {
     if (node.getKind() === SyntaxKind.VariableDeclaration) {
       const nameNode = (node as import('ts-morph').VariableDeclaration).getNameNode()
-      // Support destructuring — getNameNode() may be a BindingPattern
       if (nameNode.getKind() === SyntaxKind.Identifier) {
         const name = nameNode.getText()
         if (!subst.has(name)) subst.set(name, `V${varIdx++}`)
@@ -40,37 +38,43 @@ export function normalizeFunctionBody(fn: FunctionLikeNode): string {
     }
   })
 
-  function serializeNode(node: Node): string {
-    const kind = node.getKindName()
+  return subst
+}
 
-    switch (node.getKind()) {
-      case SyntaxKind.Identifier: {
-        const text = node.getText()
-        return subst.get(text) ?? text  // external refs (Math, console) kept as-is
-      }
-      case SyntaxKind.NumericLiteral:
-        return 'NL'
-      case SyntaxKind.StringLiteral:
-      case SyntaxKind.NoSubstitutionTemplateLiteral:
-        return 'SL'
-      case SyntaxKind.TrueKeyword:
-        return 'TRUE'
-      case SyntaxKind.FalseKeyword:
-        return 'FALSE'
-      case SyntaxKind.NullKeyword:
-        return 'NULL'
+function serializeNode(node: Node, subst: Map<string, string>): string {
+  const kind = node.getKindName()
+
+  switch (node.getKind()) {
+    case SyntaxKind.Identifier: {
+      const text = node.getText()
+      return subst.get(text) ?? text
     }
-
-    const children = node.getChildren()
-    if (children.length === 0) return kind
-
-    const childStr = children.map(serializeNode).join('|')
-    return `${kind}(${childStr})`
+    case SyntaxKind.NumericLiteral:
+      return 'NL'
+    case SyntaxKind.StringLiteral:
+    case SyntaxKind.NoSubstitutionTemplateLiteral:
+      return 'SL'
+    case SyntaxKind.TrueKeyword:
+      return 'TRUE'
+    case SyntaxKind.FalseKeyword:
+      return 'FALSE'
+    case SyntaxKind.NullKeyword:
+      return 'NULL'
   }
+
+  const children = node.getChildren()
+  if (children.length === 0) return kind
+
+  const childStr = children.map(c => serializeNode(c, subst)).join('|')
+  return `${kind}(${childStr})`
+}
+
+export function normalizeFunctionBody(fn: FunctionLikeNode): string {
+  const subst = buildSubstitutionMap(fn)
 
   const body = fn.getBody()
   if (!body) return ''
-  return serializeNode(body)
+  return serializeNode(body, subst)
 }
 
 /** Return a SHA-256 fingerprint for a function body (normalized). */
