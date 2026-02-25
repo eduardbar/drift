@@ -1,18 +1,63 @@
 {
   "name": "vscode-drift",
   "displayName": "drift — Technical Debt Detector",
-  "description": "Detect silent technical debt in TypeScript/JavaScript files",
-  "version": "0.1.0",
+  "description": "Detect technical debt in TypeScript & JavaScript. AST-based score 0–100: complexity, dead code, coupling, nesting and more.",
+  "version": "0.1.1",
   "engines": {
     "vscode": "^1.85.0"
   },
   "publisher": "eduardbar",
   "license": "MIT",
+  "icon": "images/icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/eduardbar/drift"
   },
-  "categories": ["Linters"],
+  "bugs": {
+    "url": "https://github.com/eduardbar/drift/issues"
+  },
+  "homepage": "https://github.com/eduardbar/drift#readme",
+  "qna": "https://github.com/eduardbar/drift/issues",
+  "categories": ["Linters", "Programming Languages"],
+  "keywords": [
+    "technical debt",
+    "debt",
+    "code quality",
+    "linter",
+    "typescript",
+    "javascript",
+    "complexity",
+    "dead code",
+    "coupling",
+    "nesting",
+    "score",
+    "refactor",
+    "analyzer",
+    "analysis",
+    "anti-patterns",
+    "ast",
+    "cyclomatic",
+    "any",
+    "console.log",
+    "catch",
+    "multi-root ready"
+  ],
+  "galleryBanner": {
+    "color": "#0a0a0f",
+    "theme": "dark"
+  },
+  "badges": [
+    {
+      "url": "https://img.shields.io/visual-studio-marketplace/v/eduardbar.vscode-drift?color=6366f1&label=version",
+      "href": "https://marketplace.visualstudio.com/items?itemName=eduardbar.vscode-drift",
+      "description": "Marketplace Version"
+    },
+    {
+      "url": "https://img.shields.io/visual-studio-marketplace/i/eduardbar.vscode-drift?color=8b5cf6&label=installs",
+      "href": "https://marketplace.visualstudio.com/items?itemName=eduardbar.vscode-drift",
+      "description": "Installs"
+    }
+  ],
   "activationEvents": [
     "onLanguage:typescript",
     "onLanguage:typescriptreact",

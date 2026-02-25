@@ -1,19 +1,22 @@
 # drift — Technical Debt Detector
 
-Detect silent technical debt in TypeScript and JavaScript files, directly in VS Code.
+[![Version](https://img.shields.io/visual-studio-marketplace/v/eduardbar.vscode-drift?color=6366f1&label=version)](https://marketplace.visualstudio.com/items?itemName=eduardbar.vscode-drift)
+[![Installs](https://img.shields.io/visual-studio-marketplace/i/eduardbar.vscode-drift?color=8b5cf6&label=installs)](https://marketplace.visualstudio.com/items?itemName=eduardbar.vscode-drift)
+[![Rating](https://img.shields.io/visual-studio-marketplace/r/eduardbar.vscode-drift?color=6366f1)](https://marketplace.visualstudio.com/items?itemName=eduardbar.vscode-drift)
+[![License: MIT](https://img.shields.io/badge/license-MIT-94a3b8)](https://github.com/eduardbar/drift/blob/master/LICENSE)
 
-drift analyzes your code with a custom AST engine and shows issues as diagnostics (squiggles) in the editor, in the Problems panel, and in a dedicated sidebar panel — with a score from 0 to 100.
+Detect structural technical debt in TypeScript and JavaScript, directly in VS Code. drift uses a custom AST engine to score your files from **0 to 100** and surface issues as inline diagnostics — no config needed.
 
 ## Features
 
 - **Inline diagnostics** — issues appear as red/yellow squiggles, just like TypeScript errors
 - **Problems panel** — all drift issues listed alongside compiler errors
-- **Drift Issues panel** — sidebar view with files sorted by score, click any issue to jump to the line
+- **Drift Issues panel** — sidebar TreeView with files sorted by score, click any issue to jump to the line
 - **Status bar** — `drift 74/100 · 3 issues` always visible, color-coded by severity
 - **On-save analysis** — runs automatically when you save a `.ts`, `.tsx`, `.js`, or `.jsx` file
 - **Workspace scan** — `Drift: Scan Workspace` command to analyze all files at once
 
-## Rules
+## What drift detects
 
 | Rule | Severity | What it detects |
 |---|---|---|
@@ -54,6 +57,8 @@ drift also ships as a standalone CLI with HTML reports, CI integration, git blam
 ```
 npm install -g @eduardbar/drift
 drift scan .
+drift fix .
+drift report . --html
 ```
 
-[github.com/eduardbar/drift](https://github.com/eduardbar/drift)
+[![GitHub](https://img.shields.io/badge/github-eduardbar%2Fdrift-6366f1)](https://github.com/eduardbar/drift)
