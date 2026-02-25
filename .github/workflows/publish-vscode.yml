@@ -3,6 +3,8 @@ name: Publish VS Code Extension
 on:
   release:
     types: [published]
+    tags:
+      - 'vscode-v*'
   workflow_dispatch:
     inputs:
       version:
@@ -39,7 +41,7 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TAG_VERSION="${{ inputs.version }}"
           else
-            TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+            TAG_VERSION="${GITHUB_REF#refs/tags/vscode-v}"
           fi
           PKG_VERSION=$(node -p "require('./package.json').version")
           if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
