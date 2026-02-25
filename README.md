@@ -1,10 +1,8 @@
-![drift — vibe coding debt detector](./assets/og.svg)
+![drift — technical debt detector for AI-generated code](./assets/og.png)
 
 # drift
 
-Detect silent technical debt left by AI-generated code. One command. Zero config.
-
-_Vibe coding ships fast. drift tells you what it left behind._
+Detect technical debt in AI-generated TypeScript code. One command. Zero config.
 
 ![npm](https://img.shields.io/npm/v/@eduardbar/drift?color=6366f1&label=npm)
 ![license](https://img.shields.io/badge/license-MIT-green.svg)
@@ -12,20 +10,73 @@ _Vibe coding ships fast. drift tells you what it left behind._
 ![ts-morph](https://img.shields.io/badge/powered%20by-ts--morph-6366f1.svg)
 ![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)
 
-[Installation](#-installation) • [Usage](#-usage) • [Rules](#-what-it-detects) • [CI Integration](#-ci-integration) • [Score](#-score) • [Contributing](#-contributing)
+[Why](#why) · [Installation](#installation) · [Commands](#commands) · [Rules](#rules) · [Score](#score) · [Configuration](#configuration) · [CI Integration](#ci-integration) · [drift-ignore](#drift-ignore) · [Contributing](#contributing)
 
 ---
 
-## 🎯 Why?
+## Why
 
-You reviewed the AI-generated code today. Huge files, unused functions, empty catch blocks, duplicate helpers, `console.log` everywhere. It ran fine in dev. It will bite you in prod.
+AI coding tools ship code fast. They also leave behind consistent, predictable structural patterns that accumulate silently: files that grow to 600 lines, catch blocks that swallow errors, exports that nothing imports, functions duplicated across three modules because the model regenerated instead of reusing.
 
-drift scans your TypeScript/JavaScript codebase for the specific patterns AI tools leave behind and gives you a score so you know where to look first.
+GitClear's 2024 analysis of 211M lines of code found a **39.9% drop in refactoring activity** and an **8x increase in duplicated code blocks** since AI tools became mainstream. A senior engineer on r/vibecoding put it plainly: _"The code looks reviewed. It isn't. Nobody's reading 400-line files the AI dumped in one shot."_
+
+drift gives you a 0–100 score per file and project so you know what to look at before it reaches production.
+
+**How drift compares to existing tools:**
+
+| Tool | What it does | What it misses |
+|------|--------------|----------------|
+| ESLint | Correctness and style within a single file | Structural patterns, cross-file dead code, architecture violations |
+| SonarQube | Enterprise-grade static analysis | Costs money, requires infrastructure, overwhelming for small teams |
+| drift | Structural debt + AI-specific patterns + cross-file analysis + 0–100 score | Not a linter — does not replace ESLint |
+
+---
+
+## Installation
 
 ```bash
-$ npx @eduardbar/drift scan ./src
+# Run without installing
+npx @eduardbar/drift scan .
 
-  drift  —  vibe coding debt detector
+# Install globally
+npm install -g @eduardbar/drift
+
+# Install as a dev dependency
+npm install --save-dev @eduardbar/drift
+```
+
+---
+
+## Commands
+
+### `drift scan [path]`
+
+Scan a directory and print a scored report to stdout.
+
+```bash
+drift scan .
+drift scan ./src
+drift scan ./src --output report.md
+drift scan ./src --json
+drift scan ./src --ai
+drift scan ./src --fix
+drift scan ./src --min-score 50
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--output <file>` | Write Markdown report to a file instead of stdout |
+| `--json` | Output raw `DriftReport` JSON |
+| `--ai` | Output structured JSON optimized for LLM consumption (Claude, GPT, etc.) |
+| `--fix` | Print inline fix suggestions for each detected issue |
+| `--min-score <n>` | Exit with code 1 if the overall score meets or exceeds this threshold |
+
+**Example output:**
+
+```
+  drift  —  technical debt detector
   ──────────────────────────────────────────────────
 
   Score   █████████████░░░░░░░  67/100  HIGH
@@ -48,156 +99,181 @@ $ npx @eduardbar/drift scan ./src
 
 ---
 
-## 📦 Installation
+### `drift diff [ref]`
+
+Compare the current project state against any git ref. Defaults to `HEAD~1`.
 
 ```bash
-# Run without installing
-npx @eduardbar/drift scan ./src
-
-# Install globally
-npm install -g @eduardbar/drift
-drift scan ./src
-
-# Install as dev dependency
-npm install --save-dev @eduardbar/drift
+drift diff                # HEAD vs HEAD~1
+drift diff HEAD~3         # HEAD vs 3 commits ago
+drift diff main           # HEAD vs branch main
+drift diff abc1234        # HEAD vs a specific commit
+drift diff --json         # Output raw JSON diff
 ```
 
----
-
-## 🚀 Usage
-
-```bash
-# Recommended — no install needed
-npx @eduardbar/drift scan .
-npx @eduardbar/drift scan ./src
-npx @eduardbar/drift scan ./src --output report.md
-npx @eduardbar/drift scan ./src --json
-npx @eduardbar/drift scan ./src --ai
-npx @eduardbar/drift scan ./src --fix
-npx @eduardbar/drift scan ./src --min-score 50
-
-# Install globally if you want the short 'drift' command
-npm install -g @eduardbar/drift
-drift scan .
-```
-
-### Options
+**Options:**
 
 | Flag | Description |
 |------|-------------|
-| `--output <file>` | Write Markdown report to a file |
-| `--json` | Output raw JSON instead of console output |
-| `--ai` | Output AI-optimized JSON for LLM consumption (Claude, GPT, etc.) |
-| `--fix` | Show fix suggestions for each detected issue |
-| `--min-score <n>` | Exit with code 1 if overall score exceeds threshold |
+| `--json` | Output raw JSON diff |
 
-### `drift diff [ref]`
+Shows score delta, issues introduced, and issues resolved since the given ref.
 
-Compare the current state of your project against any git ref:
-
-```bash
-drift diff           # HEAD vs HEAD~1 (default)
-drift diff HEAD~3    # HEAD vs 3 commits ago
-drift diff main      # HEAD vs branch main
-drift diff abc1234   # HEAD vs specific commit
-drift diff --json    # Output raw JSON diff
-```
-
-Shows score delta, new issues introduced, and issues resolved per file.
+---
 
 ### `drift report [path]`
 
-Generate a self-contained `drift-report.html` — open in any browser:
+Generate a self-contained HTML report. No server required — open in any browser.
 
 ```bash
-drift report           # scan current directory
-drift report ./src     # scan specific path
+drift report              # scan current directory
+drift report ./src        # scan specific path
+drift report ./src --output my-report.html
 ```
 
-No server needed. The file embeds all styles and data inline.
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--output <file>` | Output path for the HTML file (default: `drift-report.html`) |
+
+All styles and data are embedded inline in the output file.
+
+---
 
 ### `drift badge [path]`
 
-Generate a `badge.svg` with the current score for your README:
+Generate a `badge.svg` with the current score, compatible with shields.io style.
 
 ```bash
-drift badge            # writes badge.svg to current directory
-drift badge ./src      # scan specific path
+drift badge               # writes badge.svg to current directory
+drift badge ./src
+drift badge ./src --output ./assets/drift-badge.svg
 ```
 
-Drop the generated file in your repo and reference it as a local badge.
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--output <file>` | Output path for the SVG file (default: `badge.svg`) |
+
+Add the badge to your README — see [README Badge](#readme-badge).
+
+---
 
 ### `drift ci [path]`
 
-Emit GitHub Actions annotations and step summary:
+Emit GitHub Actions annotations and a step summary. Designed to run inside a CI workflow.
 
 ```bash
-drift ci               # scan current directory
-drift ci ./src         # scan specific path
-drift ci --min-score 60  # exit code 1 if score exceeds threshold
+drift ci                  # scan current directory
+drift ci ./src
+drift ci ./src --min-score 60
 ```
 
-Outputs inline annotations visible in the PR diff. Use `--min-score` to gate merges.
+**Options:**
 
-### AI Integration
+| Flag | Description |
+|------|-------------|
+| `--min-score <n>` | Exit with code 1 if the overall score meets or exceeds this threshold |
 
-Use `--ai` to get structured output that LLMs can consume:
-
-```bash
-npx @eduardbar/drift scan ./src --ai
-```
-
-Output includes:
-- Priority-ordered issues (by severity and effort)
-- Fix suggestions for each issue
-- Recommended action for quick wins
-
-Use `--fix` to see concrete fix suggestions in terminal:
-
-```bash
-npx @eduardbar/drift scan ./src --fix
-```
+Outputs `::error` and `::warning` annotations visible in the PR diff. Writes a markdown summary to `$GITHUB_STEP_SUMMARY`.
 
 ---
 
-## 🔍 What it detects
+### `drift trend [period]`
 
-| Rule | Severity | What it catches |
-|------|----------|-----------------|
-| `large-file` | error | Files over 300 lines — AI dumps everything into one place |
-| `large-function` | error | Functions over 50 lines — AI avoids splitting logic |
-| `duplicate-function-name` | error | Near-identical function names — AI regenerates instead of reusing |
-| `high-complexity` | error | Cyclomatic complexity > 10 — AI generates correct code, not simple code |
-| `circular-dependency` | error | Circular import chains between modules |
-| `debug-leftover` | warning | `console.log`, `TODO`, `FIXME`, `HACK` comments |
-| `dead-code` | warning | Unused imports — AI imports more than it uses |
-| `any-abuse` | warning | Explicit `any` type — AI defaults to `any` when it can't infer |
-| `catch-swallow` | warning | Empty catch blocks — AI makes code "not throw" |
-| `comment-contradiction` | warning | Comments that restate what the code already says — AI documents the obvious |
-| `deep-nesting` | warning | Nesting depth > 3 — if inside for inside if inside try = unreadable |
-| `too-many-params` | warning | Functions with more than 4 parameters — AI avoids options objects |
-| `high-coupling` | warning | Files importing from more than 10 modules — AI imports broadly |
-| `promise-style-mix` | warning | `async/await` and `.then()` mixed in the same file |
-| `unused-export` | warning | Named exports never imported anywhere in the project — cross-file dead code |
-| `dead-file` | warning | Files never imported by any other file — invisible dead code |
-| `unused-dependency` | warning | Packages in `package.json` never imported in source code |
-| `no-return-type` | info | Missing explicit return types on functions |
-| `magic-number` | info | Numeric literals used directly in logic — extract to named constants |
-| `layer-violation` | error | Layer imports a layer it's not allowed to (requires `drift.config.ts`) |
-| `cross-boundary-import` | warning | Module imports from another module outside allowed boundaries (requires `drift.config.ts`) |
-| `over-commented` | info | Functions where comments exceed 40% of lines — AI over-documents the obvious |
-| `hardcoded-config` | warning | Hardcoded URLs, IPs, or connection strings — AI skips environment variables |
-| `inconsistent-error-handling` | warning | Mixed `try/catch` and `.catch()` in the same file — AI combines styles randomly |
-| `unnecessary-abstraction` | warning | Single-method interfaces or abstract classes with no reuse — AI over-engineers |
-| `naming-inconsistency` | warning | Mixed camelCase and snake_case in the same scope — AI forgets project conventions |
+Show score evolution over time. `period` accepts: `week`, `month`, `quarter`, `year`.
+
+```bash
+drift trend week
+drift trend month
+drift trend quarter --since 2025-01-01
+drift trend year --until 2025-12-31
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--since <date>` | Start date for the trend window (ISO 8601) |
+| `--until <date>` | End date for the trend window (ISO 8601) |
 
 ---
 
-## ⚙️ Configuration (optional)
+### `drift blame [target]`
 
-Architectural rules (`layer-violation`, `cross-boundary-import`) require a `drift.config.ts` at your project root:
+Identify which files, rules, or contributors are responsible for the most debt. `target` accepts: `file`, `rule`, `overall`.
 
-```ts
+```bash
+drift blame file          # top files by score
+drift blame rule          # top rules by frequency
+drift blame overall
+drift blame file --top 10
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--top <n>` | Limit output to top N results (default: 5) |
+
+---
+
+## Rules
+
+26 rules across three severity levels. All run automatically unless marked as requiring configuration.
+
+| Rule | Severity | Weight | What it detects |
+|------|----------|--------|-----------------|
+| `large-file` | error | 20 | Files exceeding 300 lines — AI generates monolithic files instead of splitting responsibility |
+| `large-function` | error | 15 | Functions exceeding 50 lines — AI avoids decomposing logic into smaller units |
+| `duplicate-function-name` | error | 18 | Function names that appear more than once (case-insensitive) — AI regenerates helpers instead of reusing them |
+| `high-complexity` | error | 15 | Cyclomatic complexity above 10 — AI produces correct code, not necessarily simple code |
+| `circular-dependency` | error | 14 | Circular import chains between modules — AI doesn't reason about module topology |
+| `layer-violation` | error | 16 | Imports that cross architectural layers in the wrong direction (e.g., domain importing from infra) — requires `drift.config.ts` |
+| `debug-leftover` | warning | 10 | `console.log`, `console.warn`, `console.error`, and `TODO` / `FIXME` / `HACK` comments — AI leaves scaffolding in place |
+| `dead-code` | warning | 8 | Named imports that are never used in the file — AI imports broadly |
+| `any-abuse` | warning | 8 | Explicit `any` type annotations — AI defaults to `any` when type inference is unclear |
+| `catch-swallow` | warning | 10 | Empty `catch` blocks — AI makes code not throw without handling the error |
+| `comment-contradiction` | warning | 12 | Comments that restate what the surrounding code already expresses — AI over-documents the obvious |
+| `deep-nesting` | warning | 12 | Control flow nested more than 3 levels deep — results in code that is difficult to follow |
+| `too-many-params` | warning | 8 | Functions with more than 4 parameters — AI avoids grouping related arguments into objects |
+| `high-coupling` | warning | 10 | Files importing from more than 10 distinct modules — AI imports broadly without encapsulation |
+| `promise-style-mix` | warning | 7 | `async/await` and `.then()` / `.catch()` used together in the same file — AI combines styles inconsistently |
+| `unused-export` | warning | 8 | Named exports that are never imported anywhere in the project — cross-file dead code ESLint cannot detect |
+| `dead-file` | warning | 10 | Files never imported by any other file in the project — invisible dead code |
+| `unused-dependency` | warning | 6 | Packages listed in `package.json` with no corresponding import in source files |
+| `cross-boundary-import` | warning | 10 | Imports that cross module boundaries outside the allowed list — requires `drift.config.ts` |
+| `hardcoded-config` | warning | 10 | Hardcoded URLs, IP addresses, secrets, or connection strings — AI skips environment variable abstraction |
+| `inconsistent-error-handling` | warning | 8 | Mixed `try/catch` and `.catch()` patterns in the same file — AI combines approaches without a consistent strategy |
+| `unnecessary-abstraction` | warning | 7 | Wrapper functions or helpers that add no logic over what they wrap — AI over-engineers simple calls |
+| `naming-inconsistency` | warning | 6 | Mixed `camelCase` and `snake_case` in the same module — AI forgets project conventions mid-generation |
+| `semantic-duplication` | warning | 12 | Functions with structurally identical logic despite different names — detected via AST fingerprinting, not text comparison |
+| `no-return-type` | info | 5 | Functions missing an explicit return type annotation |
+| `magic-number` | info | 3 | Numeric literals used directly in logic without a named constant |
+
+---
+
+## Score
+
+**Calculation:** For each file, drift sums the weights of all detected issues, capped at 100. The project score is the average across all scanned files.
+
+| Score | Grade | Meaning |
+|-------|-------|---------|
+| 0 | CLEAN | No issues found |
+| 1–19 | LOW | Minor issues — safe to ship |
+| 20–44 | MODERATE | Worth a review before merging |
+| 45–69 | HIGH | Significant structural debt detected |
+| 70–100 | CRITICAL | Review before this goes anywhere near production |
+
+---
+
+## Configuration
+
+drift runs with zero configuration. Architectural rules (`layer-violation`, `cross-boundary-import`) require a `drift.config.ts` (or `.js` / `.json`) at your project root:
+
+```typescript
 import type { DriftConfig } from '@eduardbar/drift'
 
 export default {
@@ -206,117 +282,146 @@ export default {
     { name: 'app',     patterns: ['src/app/**'],     canImportFrom: ['domain'] },
     { name: 'infra',   patterns: ['src/infra/**'],   canImportFrom: ['domain', 'app'] },
   ],
-  modules: [
+  boundaries: [
     { name: 'auth',    root: 'src/modules/auth',    allowedExternalImports: ['src/shared'] },
     { name: 'billing', root: 'src/modules/billing', allowedExternalImports: ['src/shared'] },
   ],
+  exclude: [
+    'src/generated/**',
+    '**/*.spec.ts',
+  ],
+  rules: {
+    'large-file': { threshold: 400 },   // override default 300
+    'magic-number': 'off',              // disable a rule
+  },
 } satisfies DriftConfig
 ```
 
-Without a config file, these two rules are silently skipped. All other rules run automatically with no configuration needed.
+Without a config file, `layer-violation` and `cross-boundary-import` are silently skipped. All other rules run with their defaults.
 
 ---
 
-## ⚙️ CI / GitHub Actions
+## CI Integration
 
-Add drift to your PR workflow to gate on score and get inline annotations:
+### Basic gate with `scan`
 
 ```yaml
-- name: Run drift
-  run: npx @eduardbar/drift ci --min-score 60
+name: Drift
+
+on: [pull_request]
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check debt score
+        run: npx @eduardbar/drift scan ./src --min-score 60
 ```
 
-This will:
-- Emit inline annotations on the exact lines with issues (visible in the PR diff)
-- Write a summary to the GitHub Actions step summary
-- Exit with code 1 if the score exceeds the threshold
+Exit code is `1` if the score meets or exceeds `--min-score`. Exit code `0` otherwise.
 
-If you only need a pass/fail gate without annotations, `scan` works too:
+### Annotations and step summary with `drift ci`
 
 ```yaml
-- name: Check for vibe coding drift
-  run: npx @eduardbar/drift scan ./src --min-score 60
+name: Drift
+
+on: [pull_request]
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Run drift
+        run: npx @eduardbar/drift ci ./src --min-score 60
 ```
 
-Exit code `1` if score exceeds `--min-score`. Exit code `0` otherwise.
+`drift ci` emits `::error` and `::warning` annotations that appear inline in the PR diff and writes a formatted summary to `$GITHUB_STEP_SUMMARY`. Use this when you want visibility beyond a pass/fail exit code.
 
 ---
 
-## 📊 Score
+## drift-ignore
 
-| Score | Grade | Meaning |
-|-------|-------|---------|
-| 0 | CLEAN | No issues found |
-| 1–19 | LOW | Minor issues, safe to ship |
-| 20–44 | MODERATE | Worth a review before merging |
-| 45–69 | HIGH | Significant structural debt detected |
-| 70–100 | CRITICAL | Review before this goes anywhere near production |
+### Suppress a single issue
+
+Add `// drift-ignore` at the end of the flagged line or on the line immediately above it:
+
+```typescript
+console.log(debugPayload) // drift-ignore
+```
+
+```typescript
+// drift-ignore
+const result: any = parse(input)
+```
+
+### Suppress an entire file
+
+Add `// drift-ignore-file` anywhere in the first 10 lines of the file:
+
+```typescript
+// drift-ignore-file
+// This file contains intentional console output — not debug leftovers.
+```
+
+When `drift-ignore-file` is present, `analyzeFile()` returns an empty report with score 0 for that file. Use this for files like loggers or CLI printers where `console.*` calls are intentional.
 
 ---
 
-## 🗂️ Project structure
+## README Badge
 
-```
-src/
-├── types.ts      — DriftIssue, FileReport, DriftReport interfaces
-├── analyzer.ts   — AST analysis with ts-morph, 15 detection rules
-├── reporter.ts   — buildReport() + Markdown formatter
-├── printer.ts    — Console output with color (kleur)
-├── index.ts      — Public API re-exports
-└── cli.ts        — CLI entry point (Commander.js)
-```
-
----
-
-## 🧪 Run on yourself
-
-drift passes its own scan with a MODERATE score — the `console.log` calls in `printer.ts` are intentional CLI output, not debug leftovers. We eat our own dog food.
+Generate a badge from your project score and add it to your README:
 
 ```bash
-git clone https://github.com/eduardbar/drift
-cd drift
-npm install
-npm run build
-node dist/cli.js scan ./src
+drift badge . --output ./assets/drift-badge.svg
 ```
 
-Or without cloning:
+Then reference it in your README:
 
-```bash
-npx @eduardbar/drift scan .
+```markdown
+![drift score](./assets/drift-badge.svg)
 ```
+
+The badge uses shields.io-compatible styling and color-codes automatically by grade: green for LOW, yellow for MODERATE, orange for HIGH, red for CRITICAL.
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
-PRs are welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full guide.
+Open an issue before starting significant work. Check [existing issues](https://github.com/eduardbar/drift/issues) first — use the bug report or feature request templates.
 
-**Adding a new detection rule:**
+**To add a new detection rule:**
 
-1. Fork the repo and create a branch: `git checkout -b feat/rule-name`
-2. Add the rule weight to `RULE_WEIGHTS` in `src/analyzer.ts`
-3. Implement the AST detection logic using ts-morph
-4. Add a `fix_suggestion` for the rule in `src/printer.ts`
+1. Create a branch: `git checkout -b feat/rule-name`
+2. Add `"rule-name": <weight>` to `RULE_WEIGHTS` in `src/analyzer.ts`
+3. Implement AST detection logic using ts-morph in `analyzeFile()`
+4. Add a `fix_suggestion` entry in `src/printer.ts`
 5. Update the rules table in `README.md` and `AGENTS.md`
-6. Open a PR — use the [PR template](./.github/PULL_REQUEST_TEMPLATE.md)
+6. Open a PR using the template in `.github/PULL_REQUEST_TEMPLATE.md`
 
-Before opening an issue, check [existing issues](https://github.com/eduardbar/drift/issues). Use the [bug report](./.github/ISSUE_TEMPLATE/bug_report.md) or [feature request](./.github/ISSUE_TEMPLATE/feature_request.md) templates.
-
-Please read [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) before participating.
+See [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) before participating.
 
 ---
 
-## 🧱 Stack
+## Stack
 
-TypeScript · ts-morph · commander · kleur
+| Package | Role |
+|---------|------|
+| [`ts-morph`](https://github.com/dsherret/ts-morph) | AST traversal and TypeScript analysis |
+| [`commander`](https://github.com/tj/commander.js) | CLI commands and flags |
+| [`kleur`](https://github.com/lukeed/kleur) | Terminal colors (zero dependencies) |
+
+**Runtime:** Node.js 18+ · TypeScript 5.x · ES Modules
 
 ---
 
-## 📄 License
+## License
 
 MIT © [eduardbar](https://github.com/eduardbar)
-
----
-
-_Built with mate by a developer who got tired of reviewing the same AI-generated patterns every week._
