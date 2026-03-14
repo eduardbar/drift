@@ -10,6 +10,8 @@ export interface FixResult {
   line: number
   description: string
   applied: boolean
+  before?: string
+  after?: string
 }
 
 const FIXABLE_RULES = new Set(['debug-leftover', 'catch-swallow'])
@@ -106,15 +108,19 @@ function processFile(
   const sortedIssues = [...issues].sort((a, b) => b.line - a.line)
 
   for (const issue of sortedIssues) {
+    const before = lines[issue.line - 1]?.trim() ?? ''
     const fixResult = applyFixToLines(lines, issue)
 
     if (fixResult) {
+      const after = fixResult.newLines[issue.line - 1]?.trim() ?? ''
       results.push({
         file: filePath,
         rule: issue.rule,
         line: issue.line,
         description: fixResult.description,
         applied: true,
+        before,
+        after,
       })
       lines = fixResult.newLines
     } else {
@@ -138,10 +144,14 @@ function processFile(
 export async function applyFixes(
   targetPath: string,
   config?: DriftConfig,
-  options?: { rule?: string; dryRun?: boolean }
+  options?: { rule?: string; dryRun?: boolean; write?: boolean; preview?: boolean }
 ): Promise<FixResult[]> {
   const resolvedPath = resolve(targetPath)
-  const dryRun = options?.dryRun ?? false
+  const dryRun = options?.write
+    ? false
+    : options?.preview || options?.dryRun
+      ? true
+      : false
 
   let fileReports
   const stat = statSync(resolvedPath)

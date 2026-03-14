@@ -17,6 +17,8 @@ import { generateBadge } from './badge.js'
 import { emitCIAnnotations, printCISummary } from './ci.js'
 import { applyFixes, type FixResult } from './fix.js'
 import { loadHistory, saveSnapshot, printHistory, printSnapshotDiff } from './snapshot.js'
+import { generateReview } from './review.js'
+import { generateArchitectureMap } from './map.js'
 
 const program = new Command()
 
@@ -119,6 +121,45 @@ program
   })
 
 program
+  .command('review')
+  .description('Review drift against a base ref and output PR markdown')
+  .option('--base <ref>', 'Git base ref to compare against', 'origin/main')
+  .option('--json', 'Output structured review JSON')
+  .option('--comment', 'Output markdown comment body')
+  .option('--fail-on <n>', 'Exit with code 1 if score delta is >= n')
+  .action(async (options: { base: string; json?: boolean; comment?: boolean; failOn?: string }) => {
+    try {
+      const review = await generateReview(resolve('.'), options.base)
+
+      if (options.json) {
+        process.stdout.write(JSON.stringify(review, null, 2) + '\n')
+      } else {
+        process.stdout.write((options.comment ? review.markdown : `${review.summary}\n\n${review.markdown}`) + '\n')
+      }
+
+      const failOn = options.failOn ? Number(options.failOn) : undefined
+      if (typeof failOn === 'number' && !Number.isNaN(failOn) && review.totalDelta >= failOn) {
+        process.exit(1)
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      process.stderr.write(`\n  Error: ${message}\n\n`)
+      process.exit(1)
+    }
+  })
+
+program
+  .command('map [path]')
+  .description('Generate architecture.svg with simple layer dependencies')
+  .option('-o, --output <file>', 'Output SVG path (default: architecture.svg)', 'architecture.svg')
+  .action(async (targetPath: string | undefined, options: { output: string }) => {
+    const resolvedPath = resolve(targetPath ?? '.')
+    process.stderr.write(`\nBuilding architecture map for ${resolvedPath}...\n`)
+    const out = generateArchitectureMap(resolvedPath, options.output)
+    process.stderr.write(`  Architecture map saved to ${out}\n\n`)
+  })
+
+program
   .command('report [path]')
   .description('Generate a self-contained HTML report')
   .option('-o, --output <file>', 'Output file path (default: drift-report.html)', 'drift-report.html')
@@ -215,14 +256,20 @@ program
   .command('fix [path]')
   .description('Auto-fix safe issues (debug-leftover console.*, catch-swallow)')
   .option('--rule <rule>', 'Fix only a specific rule')
+  .option('--preview', 'Preview changes without writing files')
+  .option('--write', 'Write fixes to disk')
   .option('--dry-run', 'Show what would change without writing files')
-  .action(async (targetPath: string | undefined, options: { rule?: string; dryRun?: boolean }) => {
+  .action(async (targetPath: string | undefined, options: { rule?: string; dryRun?: boolean; preview?: boolean; write?: boolean }) => {
     const resolvedPath = resolve(targetPath ?? '.')
     const config = await loadConfig(resolvedPath)
+    const previewMode = Boolean(options.preview || options.dryRun)
+    const writeMode = options.write ?? !previewMode
 
     const results = await applyFixes(resolvedPath, config, {
       rule: options.rule,
-      dryRun: options.dryRun,
+      dryRun: previewMode,
+      preview: previewMode,
+      write: writeMode,
     })
 
     if (results.length === 0) {
@@ -232,8 +279,8 @@ program
 
     const applied = results.filter(r => r.applied)
 
-    if (options.dryRun) {
-      console.log(`\ndrift fix --dry-run: ${results.length} fixable issues found\n`)
+    if (previewMode) {
+      console.log(`\ndrift fix --preview: ${results.length} fixable issues found\n`)
     } else {
       console.log(`\ndrift fix: ${applied.length} fixes applied\n`)
     }
@@ -249,12 +296,16 @@ program
       const relPath = file.replace(resolvedPath + '/', '').replace(resolvedPath + '\\', '')
       console.log(`  ${relPath}`)
       for (const r of fileResults) {
-        const status = r.applied ? (options.dryRun ? 'would fix' : 'fixed') : 'skipped'
+        const status = r.applied ? (previewMode ? 'would fix' : 'fixed') : 'skipped'
         console.log(`    [${r.rule}] line ${r.line}: ${r.description} — ${status}`)
+        if (r.before || r.after) {
+          console.log(`      before: ${r.before ?? '(empty)'}`)
+          console.log(`      after : ${r.after ?? '(empty)'}`)
+        }
       }
     }
 
-    if (!options.dryRun && applied.length > 0) {
+    if (!previewMode && applied.length > 0) {
       console.log(`\n${applied.length} issue(s) fixed. Re-run drift scan to verify.`)
     }
   })
