@@ -110,6 +110,16 @@ Prioridad:
 Criterio de done:
 - Historico multi-repo, vistas por equipo y gobierno de calidad con autenticacion basica.
 
+## 6.1) Estrategia de monetizacion (aprobada)
+
+- Fase gratuita: Drift SaaS gratis hasta alcanzar 7.500 usuarios registrados.
+- Trigger de monetizacion: al alcanzar 7.500 usuarios, activar planes pagos para nuevos usuarios y definir politica de migracion para cohortes gratuitas.
+- Objetivo: priorizar adopcion y proof-of-value temprano sin friccion comercial inicial.
+- Guardrails durante fase gratuita:
+  - Limites tecnicos por workspace (runs/mes, retencion de historial, repositorios activos).
+  - Instrumentacion de uso desde el dia 1 para evitar abuso y medir unit economics.
+  - Feature flags de pricing listas antes del trigger para evitar corte abrupto.
+
 ## 7) Fuera de alcance actual
 
 - Soporte multi-lenguaje completo fuera de TypeScript/JS.
