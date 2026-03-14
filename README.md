@@ -10,7 +10,7 @@ Detect technical debt in AI-generated TypeScript code. One command. Zero config.
 ![ts-morph](https://img.shields.io/badge/powered%20by-ts--morph-6366f1.svg)
 ![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)
 
-[Why](#why) · [Installation](#installation) · [Commands](#commands) · [Rules](#rules) · [Score](#score) · [Configuration](#configuration) · [CI Integration](#ci-integration) · [drift-ignore](#drift-ignore) · [Contributing](#contributing)
+[Why](#why) · [Installation](#installation) · [Product Docs](#product-docs) · [Commands](#commands) · [Rules](#rules) · [Score](#score) · [Configuration](#configuration) · [CI Integration](#ci-integration) · [drift-ignore](#drift-ignore) · [Contributing](#contributing)
 
 ---
 
@@ -44,6 +44,13 @@ npm install -g @eduardbar/drift
 # Install as a dev dependency
 npm install --save-dev @eduardbar/drift
 ```
+
+---
+
+## Product Docs
+
+- Product requirements and roadmap: [`docs/PRD.md`](./docs/PRD.md)
+- Contributor/agent workflow guide: [`docs/AGENTS.md`](./docs/AGENTS.md)
 
 ---
 
@@ -118,6 +125,42 @@ drift diff --json         # Output raw JSON diff
 | `--json` | Output raw JSON diff |
 
 Shows score delta, issues introduced, and issues resolved since the given ref.
+
+---
+
+### `drift review`
+
+Review drift against a git base ref and output a PR-ready markdown comment.
+
+```bash
+drift review --base origin/main
+drift review --base main --comment
+drift review --base HEAD~3 --json
+drift review --base origin/main --fail-on 5
+```
+
+| Flag | Description |
+|------|-------------|
+| `--base <ref>` | Git base ref to compare against (default: `origin/main`) |
+| `--json` | Output structured review JSON |
+| `--comment` | Print only the markdown body for PR comments |
+| `--fail-on <n>` | Exit code 1 when score delta is greater than or equal to `n` |
+
+---
+
+### `drift map [path]`
+
+Generate an `architecture.svg` map with inferred layer dependencies.
+
+```bash
+drift map
+drift map ./src
+drift map ./src --output docs/architecture.svg
+```
+
+| Flag | Description |
+|------|-------------|
+| `--output <file>` | Output path for the SVG file (default: `architecture.svg`) |
 
 ---
 
@@ -220,6 +263,24 @@ drift blame file --top 10
 
 ---
 
+### `drift fix [path]`
+
+Auto-fix safe issues with explicit preview/write modes.
+
+```bash
+drift fix ./src --preview
+drift fix ./src --write
+drift fix ./src --dry-run   # alias of --preview
+```
+
+| Flag | Description |
+|------|-------------|
+| `--preview` | Preview before/after without writing files |
+| `--write` | Apply fixes to disk |
+| `--dry-run` | Backward-compatible alias for preview mode |
+
+---
+
 ## Rules
 
 26 rules across three severity levels. All run automatically unless marked as requiring configuration.
@@ -277,6 +338,12 @@ drift runs with zero configuration. Architectural rules (`layer-violation`, `cro
 import type { DriftConfig } from '@eduardbar/drift'
 
 export default {
+  plugins: ['drift-plugin-example'],
+  architectureRules: {
+    controllerNoDb: true,
+    serviceNoHttp: true,
+    maxFunctionLines: 80,
+  },
   layers: [
     { name: 'domain',  patterns: ['src/domain/**'],  canImportFrom: [] },
     { name: 'app',     patterns: ['src/app/**'],     canImportFrom: ['domain'] },
