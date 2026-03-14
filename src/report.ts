@@ -644,6 +644,8 @@ export function generateHtmlReport(report: DriftReport): string {
   const projColor = scoreColor(report.totalScore)
   const projLabel = scoreLabel(report.totalScore)
   const projGrade = scoreGrade(report.totalScore)
+  const quality = report.quality
+  const risk = report.maintenanceRisk
 
   const filesWithIssues = report.files.filter(f => f.issues.length > 0).length
 
@@ -657,6 +659,17 @@ export function generateHtmlReport(report: DriftReport): string {
           <span class="rule-name">${escapeHtml(rule)}</span>
           <span class="rule-count">${count}</span>
         </button>`).join('')
+
+  const hotspotsHtml = risk.hotspots.length === 0
+    ? '<div class="empty-state" style="padding:0.8rem">No hotspots detected.</div>'
+    : risk.hotspots.slice(0, 5).map((hotspot) => `
+      <div class="issue-row" style="grid-template-columns: 62px 1fr;grid-template-rows:auto auto;">
+        <span class="issue-line">R${hotspot.risk}</span>
+        <div class="issue-rule-msg">
+          <span class="issue-rule">hotspot</span>
+          <span class="issue-msg">${escapeHtml(hotspot.file)} (${hotspot.reasons.join(', ')})</span>
+        </div>
+      </div>`).join('')
 
   // ── File sections ──────────────────────────────────────────────────────
   const fileSections = report.files
@@ -770,6 +783,21 @@ export function generateHtmlReport(report: DriftReport): string {
           </div>
         </div>
 
+        <div class="sidebar-block">
+          <div class="sidebar-label">Repo Quality</div>
+          <div style="font-size:1.1rem;font-weight:700;color:${scoreColor(100 - quality.overall)}">${quality.overall}/100</div>
+          <div style="font-size:0.72rem;color:var(--muted)">Architecture ${quality.dimensions.architecture} · Complexity ${quality.dimensions.complexity}</div>
+          <div style="font-size:0.72rem;color:var(--muted)">AI patterns ${quality.dimensions['ai-patterns']} · Testing ${quality.dimensions.testing}</div>
+        </div>
+
+        <div class="sidebar-block">
+          <div class="sidebar-label">Maintenance Risk</div>
+          <div style="font-size:1.1rem;font-weight:700;color:${scoreColor(risk.score)}">${risk.score}/100 (${risk.level.toUpperCase()})</div>
+          <div style="font-size:0.72rem;color:var(--muted)">High complexity: ${risk.signals.highComplexityFiles}</div>
+          <div style="font-size:0.72rem;color:var(--muted)">No tests: ${risk.signals.filesWithoutNearbyTests}</div>
+          <div style="font-size:0.72rem;color:var(--muted)">Frequent changes: ${risk.signals.frequentChangeFiles}</div>
+        </div>
+
         <!-- Severity filters -->
         <div class="sidebar-block">
           <div class="sidebar-label">Severity</div>
@@ -819,6 +847,13 @@ export function generateHtmlReport(report: DriftReport): string {
         <div class="main-header">
           <span id="issue-counter" style="color:var(--muted);font-size:0.75rem">Loading…</span>
         </div>
+        <section class="file-section" open>
+          <summary>
+            <span class="file-name">Risk hotspots</span>
+            <span class="file-score" style="color:${scoreColor(risk.score)}">${risk.score}/100</span>
+          </summary>
+          <div class="issues-list">${hotspotsHtml}</div>
+        </section>
         ${fileSections || noIssues}
       </main>
 

@@ -113,6 +113,26 @@ function formatFixSuggestion(issue: DriftIssue): string[] {
       'Pick one naming convention (camelCase for variables/functions, PascalCase for types)',
       'Rename snake_case identifiers to camelCase to match TypeScript conventions',
     ],
+    'controller-no-db': [
+      'Move DB access to a service/repository and inject it into the controller',
+      'Keep controllers focused on transport and orchestration only',
+    ],
+    'service-no-http': [
+      'Move HTTP concerns to adapters/clients and keep services framework-agnostic',
+      'Inject interfaces for outbound calls instead of calling fetch/express directly',
+    ],
+    'max-function-lines': [
+      'Split the function into smaller units with clear responsibilities',
+      'Extract branch-heavy chunks into dedicated helpers',
+    ],
+    'ai-code-smell': [
+      'Address the listed AI-smell signals in this file before adding more code',
+      'Prioritize consistency: naming, error handling, and abstraction level',
+    ],
+    'plugin-error': [
+      'Fix or remove the failing plugin in drift.config.*',
+      'Validate plugin contract: export { name, rules[] } and detector functions',
+    ],
   }
   return suggestions[issue.rule] ?? ['Review and fix manually']
 }

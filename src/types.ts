@@ -1,3 +1,5 @@
+import type { SourceFile } from 'ts-morph'
+
 export interface DriftIssue {
   rule: string
   severity: 'error' | 'warning' | 'info'
@@ -26,6 +28,39 @@ export interface DriftReport {
     infos: number
     byRule: Record<string, number>
   }
+  quality: RepoQualityScore
+  maintenanceRisk: MaintenanceRiskMetrics
+}
+
+export interface RepoQualityScore {
+  overall: number
+  dimensions: {
+    architecture: number
+    complexity: number
+    'ai-patterns': number
+    testing: number
+  }
+}
+
+export interface RiskHotspot {
+  file: string
+  driftScore: number
+  complexityIssues: number
+  hasNearbyTests: boolean
+  changeFrequency: number
+  risk: number
+  reasons: string[]
+}
+
+export interface MaintenanceRiskMetrics {
+  score: number
+  level: 'low' | 'medium' | 'high' | 'critical'
+  hotspots: RiskHotspot[]
+  signals: {
+    highComplexityFiles: number
+    filesWithoutNearbyTests: number
+    frequentChangeFiles: number
+  }
 }
 
 export interface AIOutput {
@@ -35,8 +70,13 @@ export interface AIOutput {
     total_issues: number
     files_affected: number
     files_clean: number
+    ai_likelihood: number
+    ai_code_smell_score: number
   }
+  files_suspected: Array<{ path: string; ai_likelihood: number; triggers: string[] }>
   priority_order: AIIssue[]
+  maintenance_risk: MaintenanceRiskMetrics
+  quality: RepoQualityScore
   context_for_ai: {
     project_type: string
     scan_path: string
@@ -86,6 +126,40 @@ export interface ModuleBoundary {
 export interface DriftConfig {
   layers?: LayerDefinition[]
   modules?: ModuleBoundary[]
+  plugins?: string[]
+  architectureRules?: {
+    controllerNoDb?: boolean
+    serviceNoHttp?: boolean
+    maxFunctionLines?: number
+  }
+}
+
+export interface PluginRuleContext {
+  projectRoot: string
+  filePath: string
+  config?: DriftConfig
+}
+
+export interface DriftPluginRule {
+  name: string
+  severity?: DriftIssue['severity']
+  weight?: number
+  detect: (file: SourceFile, context: PluginRuleContext) => DriftIssue[]
+}
+
+export interface DriftPlugin {
+  name: string
+  rules: DriftPluginRule[]
+}
+
+export interface LoadedPlugin {
+  id: string
+  plugin: DriftPlugin
+}
+
+export interface PluginLoadError {
+  pluginId: string
+  message: string
 }
 
 // ---------------------------------------------------------------------------
