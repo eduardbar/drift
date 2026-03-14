@@ -288,6 +288,29 @@ drift fix ./src --dry-run   # alias of --preview
 
 ---
 
+### `drift cloud`
+
+Local SaaS foundations backed by `.drift-cloud/store.json`.
+
+```bash
+drift cloud ingest ./src --workspace acme --user u-123 --repo webapp
+drift cloud summary
+drift cloud summary --json
+drift cloud dashboard --output drift-cloud-dashboard.html
+```
+
+**Subcommands:**
+
+| Command | Description |
+|---------|-------------|
+| `drift cloud ingest [path] --workspace <id> --user <id> [--repo <name>] [--store <file>]` | Scans the path and stores one SaaS snapshot |
+| `drift cloud summary [--json] [--store <file>]` | Shows users/workspaces/repos usage and runs per month |
+| `drift cloud dashboard [--output <file>] [--store <file>]` | Generates an HTML dashboard with trends and hotspots |
+
+`drift cloud` ships with a free-until-7,500 strategy and configurable guardrails for the free phase: max runs per workspace per month, max repos per workspace, and retention window.
+
+---
+
 ## Rules
 
 26 rules across three severity levels. All run automatically unless marked as requiring configuration.

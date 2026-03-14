@@ -2,7 +2,7 @@
 // drift-ignore-file
 import { Command } from 'commander'
 import { writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { basename, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { createInterface } from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
@@ -21,6 +21,7 @@ import { applyFixes, type FixResult } from './fix.js'
 import { loadHistory, saveSnapshot, printHistory, printSnapshotDiff } from './snapshot.js'
 import { generateReview } from './review.js'
 import { generateArchitectureMap } from './map.js'
+import { ingestSnapshotFromReport, getSaasSummary, generateSaasDashboardHtml } from './saas.js'
 
 const program = new Command()
 
@@ -375,6 +376,85 @@ program
       `  Snapshot recorded${labelStr}: score ${entry.score} (${entry.grade}) — ${entry.totalIssues} issues across ${entry.files} files\n`,
     )
     process.stdout.write(`  Saved to drift-history.json\n\n`)
+  })
+
+const cloud = program
+  .command('cloud')
+  .description('Local SaaS foundations: ingest, summary, and dashboard')
+
+cloud
+  .command('ingest [path]')
+  .description('Scan path, build report, and store cloud snapshot')
+  .requiredOption('--workspace <id>', 'Workspace id')
+  .requiredOption('--user <id>', 'User id')
+  .option('--repo <name>', 'Repo name (default: basename of scanned path)')
+  .option('--store <file>', 'Store file path (default: .drift-cloud/store.json)')
+  .action(async (targetPath: string | undefined, options: { workspace: string; user: string; repo?: string; store?: string }) => {
+    const resolvedPath = resolve(targetPath ?? '.')
+    process.stderr.write(`\nScanning ${resolvedPath} for cloud ingest...\n`)
+    const config = await loadConfig(resolvedPath)
+    const files = analyzeProject(resolvedPath, config)
+    const report = buildReport(resolvedPath, files)
+
+    const snapshot = ingestSnapshotFromReport(report, {
+      workspaceId: options.workspace,
+      userId: options.user,
+      repoName: options.repo ?? basename(resolvedPath),
+      storeFile: options.store,
+      policy: config?.saas,
+    })
+
+    process.stdout.write(`Ingested snapshot ${snapshot.id}\n`)
+    process.stdout.write(`Workspace: ${snapshot.workspaceId}  Repo: ${snapshot.repoName}\n`)
+    process.stdout.write(`Score: ${snapshot.totalScore}/100  Issues: ${snapshot.totalIssues}\n\n`)
+  })
+
+cloud
+  .command('summary')
+  .description('Show SaaS usage metrics and free threshold status')
+  .option('--json', 'Output raw JSON summary')
+  .option('--store <file>', 'Store file path (default: .drift-cloud/store.json)')
+  .action((options: { json?: boolean; store?: string }) => {
+    const summary = getSaasSummary({ storeFile: options.store })
+
+    if (options.json) {
+      process.stdout.write(JSON.stringify(summary, null, 2) + '\n')
+      return
+    }
+
+    process.stdout.write('\n')
+    process.stdout.write(`Phase: ${summary.phase.toUpperCase()}\n`)
+    process.stdout.write(`Users registered: ${summary.usersRegistered}\n`)
+    process.stdout.write(`Active workspaces (30d): ${summary.workspacesActive}\n`)
+    process.stdout.write(`Active repos (30d): ${summary.reposActive}\n`)
+    process.stdout.write(`Total snapshots: ${summary.totalSnapshots}\n`)
+    process.stdout.write(`Free user threshold: ${summary.policy.freeUserThreshold}\n`)
+    process.stdout.write(`Threshold reached: ${summary.thresholdReached ? 'yes' : 'no'}\n`)
+    process.stdout.write(`Free users remaining: ${summary.freeUsersRemaining}\n`)
+    process.stdout.write('Runs per month:\n')
+
+    const monthly = Object.entries(summary.runsPerMonth).sort(([a], [b]) => a.localeCompare(b))
+    if (monthly.length === 0) {
+      process.stdout.write('  - none\n\n')
+      return
+    }
+
+    for (const [month, runs] of monthly) {
+      process.stdout.write(`  - ${month}: ${runs}\n`)
+    }
+    process.stdout.write('\n')
+  })
+
+cloud
+  .command('dashboard')
+  .description('Generate an HTML dashboard with trends and hotspots')
+  .option('-o, --output <file>', 'Output HTML file', 'drift-cloud-dashboard.html')
+  .option('--store <file>', 'Store file path (default: .drift-cloud/store.json)')
+  .action((options: { output: string; store?: string }) => {
+    const html = generateSaasDashboardHtml({ storeFile: options.store })
+    const outPath = resolve(options.output)
+    writeFileSync(outPath, html, 'utf8')
+    process.stdout.write(`Dashboard saved to ${outPath}\n`)
   })
 
 program.parse()

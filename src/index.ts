@@ -17,3 +17,18 @@ export type {
 } from './types.js'
 export { loadHistory, saveSnapshot } from './snapshot.js'
 export type { SnapshotEntry, SnapshotHistory } from './snapshot.js'
+export {
+  DEFAULT_SAAS_POLICY,
+  defaultSaasStorePath,
+  resolveSaasPolicy,
+  ingestSnapshotFromReport,
+  getSaasSummary,
+  generateSaasDashboardHtml,
+} from './saas.js'
+export type {
+  SaasPolicy,
+  SaasStore,
+  SaasSummary,
+  SaasSnapshot,
+  IngestOptions,
+} from './saas.js'

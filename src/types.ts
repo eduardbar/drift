@@ -132,6 +132,12 @@ export interface DriftConfig {
     serviceNoHttp?: boolean
     maxFunctionLines?: number
   }
+  saas?: {
+    freeUserThreshold?: number
+    maxRunsPerWorkspacePerMonth?: number
+    maxReposPerWorkspace?: number
+    retentionDays?: number
+  }
 }
 
 export interface PluginRuleContext {
