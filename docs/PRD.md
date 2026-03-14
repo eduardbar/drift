@@ -20,7 +20,7 @@ Ser la herramienta de referencia para equipos que usan IA para programar y neces
 
 Detectar patrones de olor tecnico vinculados a codigo IA, estimar probabilidad de origen IA y traducir hallazgos en acciones concretas (fixes, review de PR, reglas de arquitectura y reportes).
 
-## 4) Estado de cumplimiento (v1.1.0)
+## 4) Estado de cumplimiento (actualizado)
 
 ### Entregado
 
@@ -32,15 +32,16 @@ Detectar patrones de olor tecnico vinculados a codigo IA, estimar probabilidad d
 - Metricas de maintenance risk/hotspots.
 - Plugin system MVP (`drift-plugin-*`) con aislamiento de errores.
 - `drift fix` con modos preview/write.
+- Workflow CI para comentario automatico unico y actualizable de `drift review`.
+- `drift map` con marcado de cycle edges y layer violations en el SVG.
+- VSCode quick actions para fixes de bajo riesgo.
+- Confirmacion interactiva para `drift fix --write` (con `--yes` para CI/no-interactive).
 - `drift report` HTML (`drift-report.html`) sin flag extra.
 - Documentacion y tests del release.
 
 ### Parcial
 
-- PR reviewer en CI con comentario automatico unico y actualizable (CLI listo; workflow de comentario aun no estandarizado en todos los flujos).
-- Mapa con visualizacion explicita de ciclos/violaciones (hoy existe mapa basico).
-- VSCode quick actions para aplicar sugerencias simples.
-- Confirmacion interactiva en `drift fix --write` antes de persistir cambios.
+- Consolidacion/hardening de API de plugins para ecosistema externo amplio.
 
 ### Pendiente
 
@@ -56,12 +57,16 @@ Detectar patrones de olor tecnico vinculados a codigo IA, estimar probabilidad d
 - `drift report [path]` genera HTML self-contained (no requiere `--html`).
 - `drift fix --preview` muestra antes/despues y `drift fix --write` aplica reglas soportadas.
 
+### 5.1.b Entregables cerrados en v1.2 (scope tecnico)
+
+- Workflow CI publica/actualiza comentario unico en PR para `drift review`.
+- `drift map` marca visualmente ciclos y violaciones por capa.
+- Extension VSCode expone quick actions para `debug-leftover` y `catch-swallow`.
+- `drift fix --write` pide confirmacion interactiva por defecto y admite `--yes`.
+
 ### 5.2 Objetivos aun abiertos (CI/editor/UX)
 
-- Workflow CI publica y actualiza comentario automatico en PR como salida oficial de `drift review`.
-- Mapa incorpora marcacion visual directa de ciclos y violaciones por capa.
-- Extension VSCode agrega quick actions para fixes de bajo riesgo.
-- Modo `--write` incorpora confirmacion interactiva previa.
+- Hardening del contrato de plugins para compatibilidad de largo plazo (versionado/migraciones).
 
 ## 6) Roadmap actualizado
 
@@ -75,27 +80,27 @@ Done del bloque:
 - Tests de paths principales.
 - Salidas CLI/JSON/AI consistentes para uso local y CI.
 
-### v1.2 (prioridad: completar ciclo CI + visualizacion)
+### v1.2 (completado - cierre de pendientes tecnicos)
 
-Prioridades:
+Prioridades cerradas:
 - Comentario automatico actualizable en PR desde workflow CI.
 - Mejora de `drift map` para destacar ciclos y violaciones.
 - UX de seguridad para `drift fix --write` con confirmacion interactiva.
 
-Criterio de done:
+Done del bloque:
 - Flujo CI reproducible con comentario unico por PR.
 - Visualizaciones verificables en SVG sobre repos medianos.
-- Confirmacion interactiva testeada (aceptar/cancelar) sin side effects.
+- Confirmacion interactiva implementada para write mode.
 
 ### v2 (prioridad: experiencia de editor + extensibilidad)
 
 Prioridades:
-- VSCode quick actions.
 - Consolidacion de API de plugins y hardening de compatibilidad.
+- Reglas de plugin versionadas y validacion de contrato avanzada.
 
 Criterio de done:
-- Extension usable en save sin degradacion fuerte de latencia.
 - Plugins con contrato estable y manejo de errores robusto.
+- Documentacion de versionado para autores de plugins.
 
 ### v3 (prioridad: capa organizacional)
 
