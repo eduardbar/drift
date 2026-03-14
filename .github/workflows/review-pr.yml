@@ -1,0 +1,61 @@
+name: Drift PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  drift-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate drift review markdown
+        run: npx @eduardbar/drift review --base "origin/${{ github.base_ref }}" --comment > drift-review.md
+
+      - name: Post or update PR comment (non-fork only)
+        if: github.event.pull_request.head.repo.fork == false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          COMMENT_BODY="<!-- drift-review -->"
+          COMMENT_BODY+=$'\n'
+          COMMENT_BODY+="$(cat drift-review.md)"
+
+          EXISTING_ID=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --jq '.[] | select(.user.login == "github-actions[bot]") | select(.body | contains("<!-- drift-review -->")) | .id' | sed -n '1p')
+
+          if [ -n "$EXISTING_ID" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$EXISTING_ID" -f "body=$COMMENT_BODY"
+          else
+            gh api -X POST "repos/$REPO/issues/$PR_NUMBER/comments" -f "body=$COMMENT_BODY"
+          fi
+
+      - name: Fallback summary for fork PRs
+        if: github.event.pull_request.head.repo.fork == true
+        run: |
+          {
+            echo "## drift review"
+            echo
+            cat drift-review.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce drift threshold
+        run: npx @eduardbar/drift review --base "origin/${{ github.base_ref }}" --fail-on 5 --comment > /dev/null

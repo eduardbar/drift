@@ -5,6 +5,7 @@ import { analyzeFilePath } from './analyzer'
 import { DriftDiagnosticsProvider } from './diagnostics'
 import { DriftTreeProvider } from './treeview'
 import { DriftStatusBarItem } from './statusbar'
+import { DriftCodeActionProvider } from './code-actions'
 import type { FileReport } from '@eduardbar/drift'
 
 const SUPPORTED_LANGUAGES = ['typescript', 'typescriptreact', 'javascript', 'javascriptreact']
@@ -87,6 +88,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const diagnostics = new DriftDiagnosticsProvider()
   const treeProvider = new DriftTreeProvider()
   const statusBar = new DriftStatusBarItem()
+  const codeActions = new DriftCodeActionProvider()
 
   const treeView = vscode.window.createTreeView('driftIssues', {
     treeDataProvider: treeProvider,
@@ -121,6 +123,14 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   )
 
+  const codeActionRegistration = vscode.languages.registerCodeActionsProvider(
+    SUPPORTED_LANGUAGES.map((language) => ({ language })),
+    codeActions,
+    {
+      providedCodeActionKinds: [vscode.CodeActionKind.QuickFix],
+    },
+  )
+
   context.subscriptions.push(
     { dispose: () => diagnostics.dispose() },
     { dispose: () => statusBar.dispose() },
@@ -129,6 +139,7 @@ export function activate(context: vscode.ExtensionContext): void {
     scanCmd,
     clearCmd,
     goToCmd,
+    codeActionRegistration,
   )
 }
 

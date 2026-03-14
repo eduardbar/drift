@@ -150,7 +150,7 @@ drift review --base origin/main --fail-on 5
 
 ### `drift map [path]`
 
-Generate an `architecture.svg` map with inferred layer dependencies.
+Generate an `architecture.svg` map with inferred layer dependencies. When layer config is present, the SVG also highlights cycle edges and layer violations.
 
 ```bash
 drift map
@@ -161,6 +161,11 @@ drift map ./src --output docs/architecture.svg
 | Flag | Description |
 |------|-------------|
 | `--output <file>` | Output path for the SVG file (default: `architecture.svg`) |
+
+Edge legend in SVG:
+- Gray: normal dependency
+- Orange: cycle edge
+- Red: layer violation edge
 
 ---
 
@@ -270,6 +275,7 @@ Auto-fix safe issues with explicit preview/write modes.
 ```bash
 drift fix ./src --preview
 drift fix ./src --write
+drift fix ./src --write --yes
 drift fix ./src --dry-run   # alias of --preview
 ```
 
@@ -278,6 +284,7 @@ drift fix ./src --dry-run   # alias of --preview
 | `--preview` | Preview before/after without writing files |
 | `--write` | Apply fixes to disk |
 | `--dry-run` | Backward-compatible alias for preview mode |
+| `--yes` | Skip interactive confirmation for write mode |
 
 ---
 
@@ -411,6 +418,14 @@ jobs:
 ```
 
 `drift ci` emits `::error` and `::warning` annotations that appear inline in the PR diff and writes a formatted summary to `$GITHUB_STEP_SUMMARY`. Use this when you want visibility beyond a pass/fail exit code.
+
+### Auto PR comment with `drift review`
+
+The repository includes `.github/workflows/review-pr.yml`, which:
+- generates a PR-ready markdown comment from `drift review --comment`
+- updates a single sticky comment (`<!-- drift-review -->`) on non-fork PRs
+- falls back to `$GITHUB_STEP_SUMMARY` for fork PRs
+- enforces a score delta threshold with `--fail-on`
 
 ---
 

@@ -4,6 +4,8 @@ import { Command } from 'commander'
 import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createRequire } from 'node:module'
+import { createInterface } from 'node:readline/promises'
+import { stdin as input, stdout as output } from 'node:process'
 const require = createRequire(import.meta.url)
 const { version: VERSION } = require('../package.json') as { version: string }
 import { analyzeProject, analyzeFile, TrendAnalyzer, BlameAnalyzer } from './analyzer.js'
@@ -155,7 +157,8 @@ program
   .action(async (targetPath: string | undefined, options: { output: string }) => {
     const resolvedPath = resolve(targetPath ?? '.')
     process.stderr.write(`\nBuilding architecture map for ${resolvedPath}...\n`)
-    const out = generateArchitectureMap(resolvedPath, options.output)
+    const config = await loadConfig(resolvedPath)
+    const out = generateArchitectureMap(resolvedPath, options.output, config)
     process.stderr.write(`  Architecture map saved to ${out}\n\n`)
   })
 
@@ -259,11 +262,37 @@ program
   .option('--preview', 'Preview changes without writing files')
   .option('--write', 'Write fixes to disk')
   .option('--dry-run', 'Show what would change without writing files')
-  .action(async (targetPath: string | undefined, options: { rule?: string; dryRun?: boolean; preview?: boolean; write?: boolean }) => {
+  .option('-y, --yes', 'Skip interactive confirmation for --write')
+  .action(async (targetPath: string | undefined, options: { rule?: string; dryRun?: boolean; preview?: boolean; write?: boolean; yes?: boolean }) => {
     const resolvedPath = resolve(targetPath ?? '.')
     const config = await loadConfig(resolvedPath)
     const previewMode = Boolean(options.preview || options.dryRun)
     const writeMode = options.write ?? !previewMode
+
+    if (writeMode && !options.yes) {
+      const previewResults = await applyFixes(resolvedPath, config, {
+        rule: options.rule,
+        dryRun: true,
+        preview: true,
+        write: false,
+      })
+
+      if (previewResults.length === 0) {
+        console.log('No fixable issues found.')
+        return
+      }
+
+      const files = new Set(previewResults.map((result) => result.file)).size
+      const prompt = `Apply ${previewResults.length} fix(es) across ${files} file(s)? [y/N] `
+      const rl = createInterface({ input, output })
+      const answer = (await rl.question(prompt)).trim().toLowerCase()
+      rl.close()
+
+      if (answer !== 'y' && answer !== 'yes') {
+        console.log('Aborted. No files were modified.')
+        return
+      }
+    }
 
     const results = await applyFixes(resolvedPath, config, {
       rule: options.rule,

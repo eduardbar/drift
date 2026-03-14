@@ -125,6 +125,33 @@ describe('new feature MVP', () => {
     expect(svg).toContain('domain')
   })
 
+  it('marks cycle and layer violation edges in architecture SVG', () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'drift-map-flags-'))
+    mkdirSync(join(tmpDir, 'ui'))
+    mkdirSync(join(tmpDir, 'api'))
+
+    writeFileSync(join(tmpDir, 'ui', 'a.ts'), "import { b } from '../api/b.js'\nexport const a = b\n")
+    writeFileSync(join(tmpDir, 'api', 'b.ts'), "import { a } from '../ui/a.js'\nexport const b = a\n")
+
+    const svg = generateArchitectureSvg(tmpDir, {
+      layers: [
+        {
+          name: 'ui',
+          patterns: [`${tmpDir.replace(/\\/g, '/')}/ui/**`],
+          canImportFrom: ['api'],
+        },
+        {
+          name: 'api',
+          patterns: [`${tmpDir.replace(/\\/g, '/')}/api/**`],
+          canImportFrom: [],
+        },
+      ],
+    })
+
+    expect(svg).toContain('data-kind="cycle"')
+    expect(svg).toContain('data-kind="violation"')
+  })
+
   it('falls back safely when plugin cannot be loaded', () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'drift-plugin-fallback-'))
     writeFileSync(join(tmpDir, 'index.ts'), 'export const x = 1\n')
