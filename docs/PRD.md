@@ -1,6 +1,6 @@
 # PRD - drift
 
-Version: 1.1.0  
+Version: 1.2.0  
 Estado: Activo  
 Producto: `@eduardbar/drift`
 
@@ -8,7 +8,7 @@ Producto: `@eduardbar/drift`
 
 `drift` es un CLI de analisis estatico para TypeScript que detecta deuda tecnica asociada a codigo generado por IA y calcula score por archivo y por repositorio.
 
-Con release `v1.1.0`, el producto ya entrega comandos operativos, analisis AST, reglas de arquitectura configurables, salida accionable y flujo de fixes/reportes para uso local y CI.
+Con release `v1.2.0`, el producto entrega comandos operativos, analisis AST, reglas de arquitectura configurables, salida accionable, workflow CI para PR comments, y foundations SaaS (`drift cloud ingest|summary|dashboard`) con politica free-until-7500.
 
 ## 2) Vision de producto
 
@@ -45,7 +45,8 @@ Detectar patrones de olor tecnico vinculados a codigo IA, estimar probabilidad d
 
 ### Pendiente
 
-- Dashboard SaaS (historico, equipos, gobierno y visibilidad organizacional).
+- Hardening del contrato de plugins para ecosistema externo amplio.
+- Evolucion del dashboard SaaS foundations a experiencia multi-tenant full (auth, permisos por rol y billing activo post-umbral).
 
 ## 5) Criterios de aceptacion vigentes
 
@@ -102,13 +103,17 @@ Criterio de done:
 - Plugins con contrato estable y manejo de errores robusto.
 - Documentacion de versionado para autores de plugins.
 
-### v3 (prioridad: capa organizacional)
+### v3 (fundations completadas en v1.2.0)
 
-Prioridad:
-- Dashboard SaaS.
+Prioridades cerradas:
+- Base de datos local de snapshots para cloud MVP.
+- Ingestion de reportes en storage local SaaS-like.
+- Summary de uso/threshold y dashboard HTML inicial.
+- Guardrails de fase gratuita por workspace + politica free-until-7500.
 
-Criterio de done:
-- Historico multi-repo, vistas por equipo y gobierno de calidad con autenticacion basica.
+Siguiente incremento (v3.x):
+- Auth real multi-tenant, permisos por equipo y backend remoto persistente.
+- Activacion de billing cuando el umbral de 7.500 usuarios se cumpla.
 
 ## 6.1) Estrategia de monetizacion (aprobada)
 
