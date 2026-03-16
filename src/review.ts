@@ -1,4 +1,4 @@
-import { resolve } from 'node:path'
+import { relative, resolve } from 'node:path'
 import { analyzeProject } from './analyzer.js'
 import { loadConfig } from './config.js'
 import { buildReport } from './reporter.js'
@@ -66,7 +66,7 @@ export async function generateReview(projectPath: string, baseRef: string): Prom
       ...baseReport,
       files: baseReport.files.map((file) => ({
         ...file,
-        path: file.path.replace(tempDir!, resolvedPath),
+        path: resolve(resolvedPath, relative(tempDir!, file.path)),
       })),
     }
 

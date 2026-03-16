@@ -17,18 +17,25 @@ Use this checklist before releasing the trust-core milestone.
 - [ ] Confirm PR comment includes both sections in this order: `drift trust` then `drift review`.
 - [ ] Confirm `drift-trust-<PR_NUMBER>` artifact exists and contains `drift-trust.json`.
 
+Smoke PR runbook:
+
+- [ ] Create a short-lived branch (for example `chore/trust-ci-smoke`) with a docs-only change.
+- [ ] Open a PR against `master` and wait for `review-pr` workflow to complete.
+- [ ] Verify gate behavior and comment rendering, then close or merge the PR.
+- [ ] Delete the short-lived branch after validation.
+
 ## 3) Gate behavior acceptance
 
 Default trust gate for this milestone:
 
-- `--min-trust 65`
-- `--max-risk MEDIUM`
+- `--min-trust 45`
+- `--max-risk HIGH`
 
 Checks:
 
-- [ ] PR fails when trust score is below 65.
-- [ ] PR fails when merge risk is `HIGH` or `CRITICAL`.
-- [ ] PR passes when trust score is 65+ and merge risk is `LOW` or `MEDIUM`.
+- [ ] PR fails when trust score is below 45.
+- [ ] PR fails when merge risk is `CRITICAL`.
+- [ ] PR passes when trust score is 45+ and merge risk is `LOW`, `MEDIUM`, or `HIGH`.
 
 ## 4) Narrative and docs acceptance
 

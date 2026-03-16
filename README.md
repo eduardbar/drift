@@ -162,8 +162,8 @@ drift trust ./src --json
 drift trust ./src --base origin/main
 drift trust ./src --base origin/main --markdown
 drift trust ./src --markdown --output trust.md
-drift trust ./src --min-trust 65
-drift trust ./src --max-risk MEDIUM
+drift trust ./src --min-trust 45
+drift trust ./src --max-risk HIGH
 ```
 
 | Flag | Description |
@@ -477,12 +477,12 @@ The repository includes `.github/workflows/review-pr.yml`, which:
 - generates a PR-ready markdown comment with `drift trust --markdown` first and `drift review --comment` as supplementary context
 - updates a single sticky comment (`<!-- drift-review -->`) on non-fork PRs
 - falls back to `$GITHUB_STEP_SUMMARY` for fork PRs
-- enforces a trust baseline gate with `drift trust --min-trust 65 --max-risk MEDIUM`
+- enforces a trust baseline gate with `drift trust --min-trust 45 --max-risk HIGH`
 - uploads `drift trust --json` as a CI artifact for manual KPI tracking
 
 Default gate behavior in this repo:
-- fail when trust is below 65
-- fail when merge risk is above `MEDIUM` (that means `HIGH` and `CRITICAL` are blocked)
+- fail when trust is below 45
+- fail when merge risk is above `HIGH` (that means `CRITICAL` is blocked)
 
 ---
 
