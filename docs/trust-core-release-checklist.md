@@ -4,12 +4,12 @@ Use this checklist before releasing the trust-core milestone.
 
 ## 1) Local validation
 
-- [ ] `npm ci`
-- [ ] `npm test`
-- [ ] `npx @eduardbar/drift trust . --base origin/main --markdown`
-- [ ] `npx @eduardbar/drift trust . --base origin/main --json-output drift-trust.json`
-- [ ] `npx @eduardbar/drift trust-gate drift-trust.json --min-trust 45 --max-risk HIGH`
-- [ ] `npx @eduardbar/drift review --base origin/main --comment`
+- [x] `npm ci`
+- [x] `npm test`
+- [x] `npx --no-install tsx ./src/cli.ts trust . --base origin/master --markdown`
+- [x] `npx --no-install tsx ./src/cli.ts trust . --base origin/master --json-output drift-trust.json`
+- [x] `npx --no-install tsx ./src/cli.ts trust-gate drift-trust.json --min-trust 45 --max-risk HIGH`
+- [x] `npx --no-install tsx ./src/cli.ts review --base origin/master --comment`
 
 ## 2) CI workflow validation
 
@@ -41,13 +41,13 @@ Default trust gate for this milestone:
 
 Checks:
 
-- [ ] PR fails when trust score is below 45.
-- [ ] PR fails when merge risk is `CRITICAL`.
-- [ ] PR passes when trust score is 45+ and merge risk is `LOW`, `MEDIUM`, or `HIGH`.
+- [x] PR fails when trust score is below 45.
+- [x] PR fails when merge risk is `CRITICAL`.
+- [x] PR passes when trust score is 45+ and merge risk is `LOW`, `MEDIUM`, or `HIGH`.
 
 ## 4) Narrative and docs acceptance
 
-- [ ] `README.md` positions drift as an AI Code Audit CLI for merge trust in AI-assisted PRs.
-- [ ] `package.json` description matches the same positioning.
-- [ ] `src/cli.ts` program description matches the same positioning.
-- [ ] `ROADMAP.md` no longer contradicts PRD on core vs premium direction.
+- [x] `README.md` positions drift as an AI Code Audit CLI for merge trust in AI-assisted PRs.
+- [x] `package.json` description matches the same positioning.
+- [x] `src/cli.ts` program description matches the same positioning.
+- [x] `ROADMAP.md` no longer contradicts PRD on core vs premium direction.
