@@ -2,6 +2,10 @@
 
 Use this checklist before releasing the trust-core milestone.
 
+Smoke validation note:
+
+- Keep one temporary PR open long enough to validate workflow behavior end-to-end, then close it if no code changes are needed.
+
 ## 1) Local validation
 
 - [ ] `npm ci`
