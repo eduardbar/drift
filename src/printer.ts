@@ -133,6 +133,10 @@ function formatFixSuggestion(issue: DriftIssue): string[] {
       'Fix or remove the failing plugin in drift.config.*',
       'Validate plugin contract: export { name, rules[] } and detector functions',
     ],
+    'plugin-warning': [
+      'Review plugin validation warnings and align with the recommended contract',
+      'Use explicit rule ids and valid severity/weight values',
+    ],
   }
   return suggestions[issue.rule] ?? ['Review and fix manually']
 }

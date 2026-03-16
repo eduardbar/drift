@@ -1,7 +1,7 @@
 // drift-ignore-file
 import * as path from 'node:path'
 import { Project } from 'ts-morph'
-import type { DriftIssue, FileReport, DriftConfig, LoadedPlugin, PluginRuleContext } from './types.js'
+import type { DriftIssue, FileReport, DriftConfig, LoadedPlugin, PluginRuleContext, PluginLoadError, PluginLoadWarning } from './types.js'
 
 // Rules
 import { isFileIgnored } from './rules/shared.js'
@@ -97,6 +97,7 @@ export const RULE_WEIGHTS: Record<string, { severity: DriftIssue['severity']; we
   // Phase 8: semantic duplication
   'semantic-duplication':          { severity: 'warning', weight: 12 },
   'plugin-error':                  { severity: 'warning', weight: 4  },
+  'plugin-warning':                { severity: 'info',    weight: 0  },
 }
 
 const AI_SMELL_SIGNALS = new Set([
@@ -152,12 +153,43 @@ function runPluginRules(
   for (const loaded of loadedPlugins) {
     for (const rule of loaded.plugin.rules) {
       try {
-        const detected = rule.detect(file, context) ?? []
-        for (const issue of detected) {
+        const detected = rule.detect(file, context)
+        if (detected == null) continue
+        if (!Array.isArray(detected)) {
+          throw new Error(`detect() must return DriftIssue[], got ${typeof detected}`)
+        }
+
+        for (const [issueIndex, issue] of detected.entries()) {
+          if (!issue || typeof issue !== 'object') {
+            issues.push({
+              rule: 'plugin-error',
+              severity: 'warning',
+              message: `Plugin '${loaded.plugin.name}' rule '${rule.name}' returned a non-object issue at index ${issueIndex}`,
+              line: 1,
+              column: 1,
+              snippet: file.getBaseName(),
+            })
+            continue
+          }
+
+          const line = typeof issue.line === 'number' ? issue.line : 1
+          const column = typeof issue.column === 'number' ? issue.column : 1
+          const message = typeof issue.message === 'string'
+            ? issue.message
+            : `Invalid plugin issue at index ${issueIndex}: missing string 'message'`
+          const snippet = typeof issue.snippet === 'string' ? issue.snippet : file.getBaseName()
+          const severity = issue.severity === 'error' || issue.severity === 'warning' || issue.severity === 'info'
+            ? issue.severity
+            : (rule.severity ?? 'warning')
+
           issues.push({
             ...issue,
             rule: issue.rule || `${loaded.plugin.name}/${rule.name}`,
-            severity: issue.severity ?? (rule.severity ?? 'warning'),
+            severity,
+            line,
+            column,
+            message,
+            snippet,
           })
         }
       } catch (error) {
@@ -173,6 +205,41 @@ function runPluginRules(
     }
   }
   return issues
+}
+
+function normalizeDiagnosticFilePart(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]+/g, '_')
+}
+
+function pluginDiagnosticToIssue(
+  targetPath: string,
+  diagnostic: PluginLoadError | PluginLoadWarning,
+  kind: 'error' | 'warning',
+): FileReport {
+  const prefix = kind === 'error' ? 'Failed to load plugin' : 'Plugin validation warning'
+  const ruleLabel = diagnostic.ruleId ? ` rule '${diagnostic.ruleId}'` : ''
+  const pluginLabel = diagnostic.pluginName
+    ? `'${diagnostic.pluginId}' (${diagnostic.pluginName})`
+    : `'${diagnostic.pluginId}'`
+
+  const issue: DriftIssue = {
+    rule: kind === 'error' ? 'plugin-error' : 'plugin-warning',
+    severity: kind === 'error' ? 'warning' : 'info',
+    message: `${prefix} ${pluginLabel}${ruleLabel}: ${diagnostic.message}`,
+    line: 1,
+    column: 1,
+    snippet: diagnostic.pluginId,
+  }
+
+  const safePluginId = normalizeDiagnosticFilePart(diagnostic.pluginId)
+  const safeRuleId = diagnostic.ruleId ? `.${normalizeDiagnosticFilePart(diagnostic.ruleId)}` : ''
+  const kindDir = kind === 'error' ? '.drift-plugin-errors' : '.drift-plugin-warnings'
+
+  return {
+    path: path.join(targetPath, kindDir, `${safePluginId}${safeRuleId}.plugin`),
+    issues: [issue],
+    score: calculateScore([issue], RULE_WEIGHTS),
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -340,22 +407,16 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
     }
   }
 
-  // Plugin load failures are surfaced as synthetic report entries.
+  // Plugin diagnostics are surfaced as synthetic report entries.
   if (pluginRuntime.errors.length > 0) {
     for (const err of pluginRuntime.errors) {
-      const pluginIssue: DriftIssue = {
-        rule: 'plugin-error',
-        severity: 'warning',
-        message: `Failed to load plugin '${err.pluginId}': ${err.message}`,
-        line: 1,
-        column: 1,
-        snippet: err.pluginId,
-      }
-      reports.push({
-        path: path.join(targetPath, '.drift-plugin-errors', `${err.pluginId}.plugin`),
-        issues: [pluginIssue],
-        score: calculateScore([pluginIssue], RULE_WEIGHTS),
-      })
+      reports.push(pluginDiagnosticToIssue(targetPath, err, 'error'))
+    }
+  }
+
+  if (pluginRuntime.warnings.length > 0) {
+    for (const warning of pluginRuntime.warnings) {
+      reports.push(pluginDiagnosticToIssue(targetPath, warning, 'warning'))
     }
   }
 

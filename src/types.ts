@@ -187,10 +187,12 @@ export interface PluginRuleContext {
 }
 
 export interface DriftPluginRule {
+  id?: string
   name: string
   severity?: DriftIssue['severity']
   weight?: number
   detect: (file: SourceFile, context: PluginRuleContext) => DriftIssue[]
+  fix?: (issue: DriftIssue, file: SourceFile, context: PluginRuleContext) => DriftIssue | void
 }
 
 export interface DriftPlugin {
@@ -205,6 +207,17 @@ export interface LoadedPlugin {
 
 export interface PluginLoadError {
   pluginId: string
+  pluginName?: string
+  ruleId?: string
+  code?: string
+  message: string
+}
+
+export interface PluginLoadWarning {
+  pluginId: string
+  pluginName?: string
+  ruleId?: string
+  code?: string
   message: string
 }
 
