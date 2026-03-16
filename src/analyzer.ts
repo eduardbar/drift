@@ -224,6 +224,26 @@ function normalizeDiagnosticFilePart(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, '_')
 }
 
+function pluginDiagnosticHint(code: string | undefined): string {
+  switch (code) {
+    case 'plugin-api-version-implicit':
+      return 'Add apiVersion: 1 to make plugin compatibility explicit.'
+    case 'plugin-api-version-invalid':
+      return 'Use a positive integer apiVersion (for example: 1).'
+    case 'plugin-api-version-unsupported':
+      return 'Upgrade/downgrade the plugin to the currently supported API version.'
+    case 'plugin-rule-id-invalid':
+      return 'Rename the rule id to lowercase/kebab-case format.'
+    case 'plugin-rule-id-duplicate':
+      return 'Ensure each rule id is unique within the plugin.'
+    case 'plugin-capabilities-invalid':
+    case 'plugin-capabilities-value-invalid':
+      return 'Set capabilities as an object map with primitive values only.'
+    default:
+      return 'Review plugin contract docs and adjust exported metadata and rule shape.'
+  }
+}
+
 function pluginDiagnosticToIssue(
   targetPath: string,
   diagnostic: PluginLoadError | PluginLoadWarning,
@@ -231,6 +251,8 @@ function pluginDiagnosticToIssue(
 ): FileReport {
   const prefix = kind === 'error' ? 'Failed to load plugin' : 'Plugin validation warning'
   const ruleLabel = diagnostic.ruleId ? ` rule '${diagnostic.ruleId}'` : ''
+  const codeLabel = diagnostic.code ? ` [${diagnostic.code}]` : ''
+  const hint = pluginDiagnosticHint(diagnostic.code)
   const pluginLabel = diagnostic.pluginName
     ? `'${diagnostic.pluginId}' (${diagnostic.pluginName})`
     : `'${diagnostic.pluginId}'`
@@ -238,7 +260,7 @@ function pluginDiagnosticToIssue(
   const issue: DriftIssue = {
     rule: kind === 'error' ? 'plugin-error' : 'plugin-warning',
     severity: kind === 'error' ? 'warning' : 'info',
-    message: `${prefix} ${pluginLabel}${ruleLabel}: ${diagnostic.message}`,
+    message: `${prefix}${codeLabel} ${pluginLabel}${ruleLabel}: ${diagnostic.message} Next: ${hint}`,
     line: 1,
     column: 1,
     snippet: diagnostic.pluginId,

@@ -5,10 +5,13 @@ import type { DriftIssue, DriftPlugin, DriftPluginRule, PluginLoadError, PluginL
 
 const require = createRequire(import.meta.url)
 const VALID_SEVERITIES: DriftIssue['severity'][] = ['error', 'warning', 'info']
-const RULE_ID_RECOMMENDED = /^[a-z0-9]+(?:[-_/][a-z0-9]+)*$/
+const SUPPORTED_PLUGIN_API_VERSION = 1
+const RULE_ID_REQUIRED = /^[a-z][a-z0-9]*(?:[-_/][a-z0-9]+)*$/
 
 type PluginCandidate = {
   name?: unknown
+  apiVersion?: unknown
+  capabilities?: unknown
   rules?: unknown
 }
 
@@ -63,6 +66,7 @@ function normalizeRule(
   pluginName: string,
   rawRule: RuleCandidate,
   ruleIndex: number,
+  options: { strictRuleId: boolean },
   errors: PluginLoadError[],
   warnings: PluginLoadWarning[],
 ): DriftPluginRule | undefined {
@@ -103,12 +107,22 @@ function normalizeRule(
     )
   }
 
-  if (!RULE_ID_RECOMMENDED.test(rawRuleId)) {
+  if (!RULE_ID_REQUIRED.test(rawRuleId)) {
+    if (options.strictRuleId) {
+      pushError(
+        errors,
+        pluginId,
+        `Rule id '${ruleLabel}' is invalid. Use lowercase letters, numbers, and separators (-, _, /), starting with a letter.`,
+        { pluginName, ruleId: rawRuleId, code: 'plugin-rule-id-invalid' },
+      )
+      return undefined
+    }
+
     pushWarning(
       warnings,
       pluginId,
-      `Rule id '${ruleLabel}' uses a non-recommended format. Use lowercase/kebab-case for better compatibility.`,
-      { pluginName, ruleId: rawRuleId, code: 'plugin-rule-id-format' },
+      `Rule id '${ruleLabel}' uses a legacy format. For forward compatibility, migrate to lowercase kebab-case and set apiVersion: ${SUPPORTED_PLUGIN_API_VERSION}.`,
+      { pluginName, ruleId: rawRuleId, code: 'plugin-rule-id-format-legacy' },
     )
   }
 
@@ -205,6 +219,66 @@ function validatePluginContract(
     return { errors, warnings }
   }
 
+  const hasExplicitApiVersion = plugin.apiVersion !== undefined
+  const isLegacyPlugin = !hasExplicitApiVersion
+
+  if (isLegacyPlugin) {
+    pushWarning(
+      warnings,
+      pluginId,
+      `Plugin '${pluginName}' does not declare 'apiVersion'. Assuming ${SUPPORTED_PLUGIN_API_VERSION} for backward compatibility; please add apiVersion: ${SUPPORTED_PLUGIN_API_VERSION}.`,
+      { pluginName, code: 'plugin-api-version-implicit' },
+    )
+  } else if (typeof plugin.apiVersion !== 'number' || !Number.isInteger(plugin.apiVersion) || plugin.apiVersion <= 0) {
+    pushError(
+      errors,
+      pluginId,
+      `Plugin '${pluginName}' has invalid apiVersion '${String(plugin.apiVersion)}'. Expected a positive integer (for example: ${SUPPORTED_PLUGIN_API_VERSION}).`,
+      { pluginName, code: 'plugin-api-version-invalid' },
+    )
+    return { errors, warnings }
+  } else if (plugin.apiVersion !== SUPPORTED_PLUGIN_API_VERSION) {
+    pushError(
+      errors,
+      pluginId,
+      `Plugin '${pluginName}' targets apiVersion ${plugin.apiVersion}, but this drift build supports apiVersion ${SUPPORTED_PLUGIN_API_VERSION}.`,
+      { pluginName, code: 'plugin-api-version-unsupported' },
+    )
+    return { errors, warnings }
+  }
+
+  let capabilities: DriftPlugin['capabilities'] | undefined
+  if (plugin.capabilities !== undefined) {
+    if (!plugin.capabilities || typeof plugin.capabilities !== 'object' || Array.isArray(plugin.capabilities)) {
+      pushError(
+        errors,
+        pluginId,
+        `Plugin '${pluginName}' has invalid capabilities metadata. Expected an object map like { "fixes": true } when provided.`,
+        { pluginName, code: 'plugin-capabilities-invalid' },
+      )
+      return { errors, warnings }
+    }
+
+    const entries = Object.entries(plugin.capabilities as Record<string, unknown>)
+    for (const [capabilityKey, capabilityValue] of entries) {
+      const capabilityType = typeof capabilityValue
+      if (capabilityType !== 'string' && capabilityType !== 'number' && capabilityType !== 'boolean') {
+        pushError(
+          errors,
+          pluginId,
+          `Plugin '${pluginName}' capability '${capabilityKey}' has invalid value type '${capabilityType}'. Allowed: string | number | boolean.`,
+          { pluginName, code: 'plugin-capabilities-value-invalid' },
+        )
+      }
+    }
+
+    if (errors.length > 0) {
+      return { errors, warnings }
+    }
+
+    capabilities = plugin.capabilities as DriftPlugin['capabilities']
+  }
+
   if (!Array.isArray(plugin.rules)) {
     pushError(
       errors,
@@ -216,6 +290,7 @@ function validatePluginContract(
   }
 
   const normalizedRules: DriftPluginRule[] = []
+  const seenRuleIds = new Set<string>()
 
   for (const [ruleIndex, rawRule] of plugin.rules.entries()) {
     if (!rawRule || typeof rawRule !== 'object') {
@@ -228,8 +303,27 @@ function validatePluginContract(
       continue
     }
 
-    const normalized = normalizeRule(pluginId, pluginName, rawRule as RuleCandidate, ruleIndex, errors, warnings)
+    const normalized = normalizeRule(
+      pluginId,
+      pluginName,
+      rawRule as RuleCandidate,
+      ruleIndex,
+      { strictRuleId: !isLegacyPlugin },
+      errors,
+      warnings,
+    )
     if (normalized) {
+      if (seenRuleIds.has(normalized.id ?? normalized.name)) {
+        pushError(
+          errors,
+          pluginId,
+          `Plugin '${pluginName}' defines duplicate rule id '${normalized.id ?? normalized.name}'. Rule ids must be unique within a plugin.`,
+          { pluginName, ruleId: normalized.id ?? normalized.name, code: 'plugin-rule-id-duplicate' },
+        )
+        continue
+      }
+
+      seenRuleIds.add(normalized.id ?? normalized.name)
       normalizedRules.push(normalized)
     }
   }
@@ -247,6 +341,8 @@ function validatePluginContract(
   return {
     plugin: {
       name: pluginName,
+      apiVersion: hasExplicitApiVersion ? plugin.apiVersion as number : SUPPORTED_PLUGIN_API_VERSION,
+      capabilities,
       rules: normalizedRules,
     },
     errors,

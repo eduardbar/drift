@@ -12,12 +12,12 @@ describe('plugin contract hardening', () => {
     tmpDir = ''
   })
 
-  it('loads a valid plugin and executes its rule', () => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'drift-plugin-valid-'))
+  it('keeps legacy plugins compatible when apiVersion is missing', () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'drift-plugin-legacy-compatible-'))
     writeFileSync(join(tmpDir, 'index.ts'), 'export const foo = 1\n')
-    writeFileSync(join(tmpDir, 'valid-plugin.js'), [
+    writeFileSync(join(tmpDir, 'legacy-plugin.js'), [
       'module.exports = {',
-      "  name: 'example-plugin',",
+      "  name: 'legacy-plugin',",
       '  rules: [',
       '    {',
       "      id: 'no-foo-export',",
@@ -32,18 +32,24 @@ describe('plugin contract hardening', () => {
       "          snippet: 'export const foo = 1',",
       '        }]',
       '      }',
+      '    },',
+      '    {',
+      "      id: 'Legacy Rule Name',",
+      '      detect() { return [] }',
       '    }',
       '  ]',
       '}',
     ].join('\n'))
 
     const reports = analyzeProject(tmpDir, {
-      plugins: ['./valid-plugin.js'],
+      plugins: ['./legacy-plugin.js'],
     })
 
     const allIssues = reports.flatMap((report) => report.issues)
-    expect(allIssues.some((issue) => issue.rule === 'example-plugin/no-foo-export')).toBe(true)
+    expect(allIssues.some((issue) => issue.rule === 'legacy-plugin/no-foo-export')).toBe(true)
     expect(allIssues.some((issue) => issue.rule === 'plugin-error')).toBe(false)
+    expect(allIssues.some((issue) => issue.rule === 'plugin-warning' && issue.message.includes('[plugin-api-version-implicit]'))).toBe(true)
+    expect(allIssues.some((issue) => issue.rule === 'plugin-warning' && issue.message.includes('[plugin-rule-id-format-legacy]'))).toBe(true)
   })
 
   it('reports actionable diagnostics for invalid plugin contract', () => {
@@ -52,6 +58,7 @@ describe('plugin contract hardening', () => {
     writeFileSync(join(tmpDir, 'broken-plugin.js'), [
       'module.exports = {',
       "  name: 'broken-plugin',",
+      "  apiVersion: 1,",
       '  rules: [',
       '    {',
       "      name: 'broken rule id',",
@@ -73,33 +80,93 @@ describe('plugin contract hardening', () => {
 
     expect(pluginIssues.length).toBeGreaterThan(0)
     expect(pluginIssues.some((issue) => issue.message.includes('broken-plugin.js'))).toBe(true)
-    expect(pluginIssues.some((issue) => issue.message.includes('broken rule id'))).toBe(true)
+    expect(pluginIssues.some((issue) => issue.message.includes('[plugin-rule-detect-invalid]'))).toBe(true)
   })
 
-  it('surfaces non-fatal plugin validation warnings without failing analysis', () => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'drift-plugin-warning-contract-'))
+  it('rejects plugins with unsupported apiVersion', () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'drift-plugin-version-mismatch-'))
     writeFileSync(join(tmpDir, 'index.ts'), 'export const ok = true\n')
-    writeFileSync(join(tmpDir, 'warning-plugin.js'), [
+    writeFileSync(join(tmpDir, 'version-mismatch-plugin.js'), [
       'module.exports = {',
-      "  name: 'warning-plugin',",
+      "  name: 'version-mismatch-plugin',",
+      '  apiVersion: 99,',
       '  rules: [',
       '    {',
-      "      id: 'Bad Rule Name',",
-      '      detect(a, b, c) {',
-      '        return []',
-      '      }',
+      "      id: 'valid-rule-id',",
+      '      detect() { return [] }',
       '    }',
       '  ]',
       '}',
     ].join('\n'))
 
     const reports = analyzeProject(tmpDir, {
-      plugins: ['./warning-plugin.js'],
+      plugins: ['./version-mismatch-plugin.js'],
     })
 
     const issues = reports.flatMap((report) => report.issues)
-    expect(issues.some((issue) => issue.rule === 'plugin-warning')).toBe(true)
-    expect(issues.some((issue) => issue.rule === 'plugin-error')).toBe(false)
+    expect(issues.some((issue) => issue.rule === 'plugin-error' && issue.message.includes('[plugin-api-version-unsupported]'))).toBe(true)
+    expect(issues.some((issue) => issue.rule === 'version-mismatch-plugin/valid-rule-id')).toBe(false)
+  })
+
+  it('rejects plugins with invalid apiVersion format', () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'drift-plugin-version-invalid-'))
+    writeFileSync(join(tmpDir, 'index.ts'), 'export const ok = true\n')
+    writeFileSync(join(tmpDir, 'version-invalid-plugin.js'), [
+      'module.exports = {',
+      "  name: 'version-invalid-plugin',",
+      "  apiVersion: '1',",
+      '  rules: [',
+      '    {',
+      "      id: 'valid-rule-id',",
+      '      detect() { return [] }',
+      '    }',
+      '  ]',
+      '}',
+    ].join('\n'))
+
+    const reports = analyzeProject(tmpDir, {
+      plugins: ['./version-invalid-plugin.js'],
+    })
+
+    const issues = reports.flatMap((report) => report.issues)
+    expect(issues.some((issue) => issue.rule === 'plugin-error' && issue.message.includes('[plugin-api-version-invalid]'))).toBe(true)
+    expect(issues.some((issue) => issue.rule === 'version-invalid-plugin/valid-rule-id')).toBe(false)
+  })
+
+  it('rejects duplicate rule IDs within the same plugin', () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'drift-plugin-duplicate-rules-'))
+    writeFileSync(join(tmpDir, 'index.ts'), 'export const ok = true\n')
+    writeFileSync(join(tmpDir, 'duplicate-rules-plugin.js'), [
+      'module.exports = {',
+      "  name: 'duplicate-rules-plugin',",
+      '  apiVersion: 1,',
+      '  rules: [',
+      '    {',
+      "      id: 'duplicate-rule',",
+      '      detect() {',
+      '        return [{',
+      "          message: 'first duplicate still runs',",
+      '          line: 1,',
+      '          column: 1,',
+      "          snippet: 'export const ok = true',",
+      '        }]',
+      '      }',
+      '    },',
+      '    {',
+      "      id: 'duplicate-rule',",
+      '      detect() { return [] }',
+      '    }',
+      '  ]',
+      '}',
+    ].join('\n'))
+
+    const reports = analyzeProject(tmpDir, {
+      plugins: ['./duplicate-rules-plugin.js'],
+    })
+
+    const issues = reports.flatMap((report) => report.issues)
+    expect(issues.some((issue) => issue.rule === 'plugin-error' && issue.message.includes('[plugin-rule-id-duplicate]'))).toBe(true)
+    expect(issues.some((issue) => issue.rule === 'duplicate-rules-plugin/duplicate-rule')).toBe(true)
   })
 
   it('isolates plugin runtime failures and continues analysis', () => {
@@ -112,6 +179,11 @@ describe('plugin contract hardening', () => {
     writeFileSync(join(tmpDir, 'mixed-plugin.js'), [
       'module.exports = {',
       "  name: 'mixed-plugin',",
+      '  apiVersion: 1,',
+      '  capabilities: {',
+      '    fixes: true,',
+      '    runtimeSafe: true',
+      '  },',
       '  rules: [',
       '    {',
       "      name: 'throwing-rule',",
@@ -142,5 +214,6 @@ describe('plugin contract hardening', () => {
     expect(rules).toContain('mixed-plugin/safe-rule')
     expect(rules).toContain('plugin-error')
     expect(rules).toContain('any-abuse')
+    expect(rules).not.toContain('plugin-warning')
   })
 })
