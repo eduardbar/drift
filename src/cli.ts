@@ -21,18 +21,28 @@ import { applyFixes, type FixResult } from './fix.js'
 import { loadHistory, saveSnapshot, printHistory, printSnapshotDiff } from './snapshot.js'
 import { generateReview } from './review.js'
 import { generateArchitectureMap } from './map.js'
-import { ingestSnapshotFromReport, getSaasSummary, generateSaasDashboardHtml } from './saas.js'
+import {
+  changeOrganizationPlan,
+  generateSaasDashboardHtml,
+  getOrganizationEffectiveLimits,
+  getOrganizationUsageSnapshot,
+  getSaasSummary,
+  ingestSnapshotFromReport,
+  listOrganizationPlanChanges,
+} from './saas.js'
 import {
   buildTrustReport,
+  explainTrustGatePolicy,
+  formatTrustGatePolicyExplanation,
   formatTrustJson,
   renderTrustOutput,
   shouldFailTrustGate,
   normalizeMergeRiskLevel,
   MERGE_RISK_ORDER,
   detectBranchName,
-  resolveTrustGatePolicy,
 } from './trust.js'
 import type { DriftDiff, DriftTrustReport, DriftAnalysisOptions, MergeRiskLevel } from './types.js'
+import type { TrustGatePolicyExplanation } from './trust.js'
 
 const program = new Command()
 
@@ -72,10 +82,7 @@ function addResourceOptions(command: Command): Command {
     .option('--with-semantic-duplication', 'Keep semantic-duplication rule enabled in low-memory mode')
 }
 
-function parseTrustGateOptions(
-  options: { minTrust?: string; maxRisk?: string },
-  policy: { minTrust?: number; maxRisk?: MergeRiskLevel },
-): { minTrust?: number; maxRisk?: MergeRiskLevel } {
+function parseTrustGateOverrides(options: { minTrust?: string; maxRisk?: string }): { minTrust?: number; maxRisk?: MergeRiskLevel } {
   const cliMinTrust = options.minTrust ? Number(options.minTrust) : undefined
   if (options.minTrust && Number.isNaN(cliMinTrust)) {
     process.stderr.write('\n  Error: --min-trust must be a valid number\n\n')
@@ -92,8 +99,8 @@ function parseTrustGateOptions(
   }
 
   return {
-    minTrust: typeof cliMinTrust === 'number' ? cliMinTrust : policy.minTrust,
-    maxRisk: cliMaxRisk ?? policy.maxRisk,
+    minTrust: typeof cliMinTrust === 'number' ? cliMinTrust : undefined,
+    maxRisk: cliMaxRisk,
   }
 }
 
@@ -101,6 +108,19 @@ function resolveBranchFromOption(branch?: string): string | undefined {
   const normalized = branch?.trim()
   if (normalized) return normalized
   return detectBranchName()
+}
+
+function printTrustGatePolicyDebug(explanation: TrustGatePolicyExplanation): void {
+  process.stderr.write(`${formatTrustGatePolicyExplanation(explanation)}\n`)
+  if (explanation.invalidPolicyPack) {
+    process.stderr.write(`Warning: policy pack '${explanation.invalidPolicyPack}' was not found. Falling back to base/preset policy.\n`)
+  }
+}
+
+function printSaasErrorAndExit(error: unknown): never {
+  const message = error instanceof Error ? error.message : String(error)
+  process.stderr.write(`\n  Error: ${message}\n\n`)
+  process.exit(1)
 }
 
 program
@@ -246,6 +266,8 @@ addResourceOptions(
   .option('--min-trust <n>', 'Exit with code 1 if trust score is below threshold')
   .option('--max-risk <level>', 'Exit with code 1 if merge risk exceeds level (LOW|MEDIUM|HIGH|CRITICAL)')
   .option('--branch <name>', 'Branch name for trust policy matching (default: auto-detect from CI env)')
+  .option('--policy-pack <name>', 'Trust policy pack from drift.config trustGate.policyPacks')
+  .option('--explain-policy', 'Print effective trust gate policy resolution to stderr')
   .action(async (
     targetPath: string | undefined,
     options: {
@@ -257,6 +279,8 @@ addResourceOptions(
       minTrust?: string
       maxRisk?: string
       branch?: string
+      policyPack?: string
+      explainPolicy?: boolean
     } & ResourceOptionFlags,
   ) => {
     let tempDir: string | undefined
@@ -272,7 +296,18 @@ addResourceOptions(
 
       const report = buildReport(resolvedPath, files)
       const branchName = resolveBranchFromOption(options.branch)
-      const policy = resolveTrustGatePolicy(config, branchName)
+      const policyExplanation = explainTrustGatePolicy(config, {
+        branchName,
+        policyPack: options.policyPack,
+        overrides: parseTrustGateOverrides(options),
+      })
+      const policy = policyExplanation.effectivePolicy
+
+      if (options.explainPolicy) {
+        printTrustGatePolicyDebug(policyExplanation)
+      } else if (policyExplanation.invalidPolicyPack) {
+        process.stderr.write(`Warning: policy pack '${policyExplanation.invalidPolicyPack}' was not found. Falling back to base/preset policy.\n`)
+      }
 
       let diff: DriftDiff | undefined
       if (options.base) {
@@ -314,8 +349,7 @@ addResourceOptions(
         return
       }
 
-      const gateOptions = parseTrustGateOptions(options, policy)
-      if (shouldFailTrustGate(trust, gateOptions)) {
+      if (shouldFailTrustGate(trust, policy)) {
         process.exit(1)
       }
     } catch (err) {
@@ -334,14 +368,27 @@ program
   .option('--min-trust <n>', 'Fail if trust score is below threshold')
   .option('--max-risk <level>', 'Fail if merge risk exceeds level (LOW|MEDIUM|HIGH|CRITICAL)')
   .option('--branch <name>', 'Branch name for trust policy matching (default: auto-detect from CI env)')
-  .action(async (trustJsonFile: string, options: { minTrust?: string; maxRisk?: string; branch?: string }) => {
+  .option('--policy-pack <name>', 'Trust policy pack from drift.config trustGate.policyPacks')
+  .option('--explain-policy', 'Print effective trust gate policy resolution to stderr')
+  .action(async (trustJsonFile: string, options: { minTrust?: string; maxRisk?: string; branch?: string; policyPack?: string; explainPolicy?: boolean }) => {
     try {
       const filePath = resolve(trustJsonFile)
       const raw = readFileSync(filePath, 'utf8')
       const parsed = JSON.parse(raw) as Partial<DriftTrustReport>
       const config = await loadConfig(resolve('.'))
       const branchName = resolveBranchFromOption(options.branch)
-      const policy = resolveTrustGatePolicy(config, branchName)
+      const policyExplanation = explainTrustGatePolicy(config, {
+        branchName,
+        policyPack: options.policyPack,
+        overrides: parseTrustGateOverrides(options),
+      })
+      const policy = policyExplanation.effectivePolicy
+
+      if (options.explainPolicy) {
+        printTrustGatePolicyDebug(policyExplanation)
+      } else if (policyExplanation.invalidPolicyPack) {
+        process.stderr.write(`Warning: policy pack '${policyExplanation.invalidPolicyPack}' was not found. Falling back to base/preset policy.\n`)
+      }
 
       if (typeof parsed.trust_score !== 'number') {
         process.stderr.write('\n  Error: trust JSON is missing numeric trust_score\n\n')
@@ -374,8 +421,7 @@ program
         return
       }
 
-      const gateOptions = parseTrustGateOptions(options, policy)
-      if (shouldFailTrustGate(trust, gateOptions)) {
+      if (shouldFailTrustGate(trust, policy)) {
         process.exit(1)
       }
 
@@ -636,29 +682,35 @@ addResourceOptions(
   .option('--role <role>', 'Role hint (owner|member|viewer)')
   .option('--plan <plan>', 'Organization plan (free|sponsor|team|business)')
   .option('--repo <name>', 'Repo name (default: basename of scanned path)')
+  .option('--actor <user>', 'Actor user id for permission checks (local-only authz context)')
   .option('--store <file>', 'Store file path (default: .drift-cloud/store.json)')
-  .action(async (targetPath: string | undefined, options: { org: string; workspace: string; user: string; role?: string; plan?: string; repo?: string; store?: string } & ResourceOptionFlags) => {
-    const resolvedPath = resolve(targetPath ?? '.')
-    process.stderr.write(`\nScanning ${resolvedPath} for cloud ingest...\n`)
-    const config = await loadConfig(resolvedPath)
-    const files = analyzeProject(resolvedPath, config, resolveAnalysisOptions(options))
-    const report = buildReport(resolvedPath, files)
+  .action(async (targetPath: string | undefined, options: { org: string; workspace: string; user: string; role?: string; plan?: string; repo?: string; actor?: string; store?: string } & ResourceOptionFlags) => {
+    try {
+      const resolvedPath = resolve(targetPath ?? '.')
+      process.stderr.write(`\nScanning ${resolvedPath} for cloud ingest...\n`)
+      const config = await loadConfig(resolvedPath)
+      const files = analyzeProject(resolvedPath, config, resolveAnalysisOptions(options))
+      const report = buildReport(resolvedPath, files)
 
-    const snapshot = ingestSnapshotFromReport(report, {
-      organizationId: options.org,
-      workspaceId: options.workspace,
-      userId: options.user,
-      role: options.role as 'owner' | 'member' | 'viewer' | undefined,
-      plan: options.plan as 'free' | 'sponsor' | 'team' | 'business' | undefined,
-      repoName: options.repo ?? basename(resolvedPath),
-      storeFile: options.store,
-      policy: config?.saas,
-    })
+      const snapshot = ingestSnapshotFromReport(report, {
+        organizationId: options.org,
+        workspaceId: options.workspace,
+        userId: options.user,
+        role: options.role as 'owner' | 'member' | 'viewer' | undefined,
+        plan: options.plan as 'free' | 'sponsor' | 'team' | 'business' | undefined,
+        repoName: options.repo ?? basename(resolvedPath),
+        actorUserId: options.actor,
+        storeFile: options.store,
+        policy: config?.saas,
+      })
 
-    process.stdout.write(`Ingested snapshot ${snapshot.id}\n`)
-    process.stdout.write(`Organization: ${snapshot.organizationId}  Workspace: ${snapshot.workspaceId}  Repo: ${snapshot.repoName}\n`)
-    process.stdout.write(`Role: ${snapshot.role}  Plan: ${snapshot.plan}\n`)
-    process.stdout.write(`Score: ${snapshot.totalScore}/100  Issues: ${snapshot.totalIssues}\n\n`)
+      process.stdout.write(`Ingested snapshot ${snapshot.id}\n`)
+      process.stdout.write(`Organization: ${snapshot.organizationId}  Workspace: ${snapshot.workspaceId}  Repo: ${snapshot.repoName}\n`)
+      process.stdout.write(`Role: ${snapshot.role}  Plan: ${snapshot.plan}\n`)
+      process.stdout.write(`Score: ${snapshot.totalScore}/100  Issues: ${snapshot.totalIssues}\n\n`)
+    } catch (error) {
+      printSaasErrorAndExit(error)
+    }
   }),
 )
 
@@ -668,40 +720,156 @@ cloud
   .option('--json', 'Output raw JSON summary')
   .option('--org <id>', 'Filter summary by organization id')
   .option('--workspace <id>', 'Filter summary by workspace id')
+  .option('--actor <user>', 'Actor user id for permission checks (local-only authz context)')
   .option('--store <file>', 'Store file path (default: .drift-cloud/store.json)')
-  .action((options: { json?: boolean; org?: string; workspace?: string; store?: string }) => {
-    const summary = getSaasSummary({
-      storeFile: options.store,
-      organizationId: options.org,
-      workspaceId: options.workspace,
-    })
+  .action((options: { json?: boolean; org?: string; workspace?: string; actor?: string; store?: string }) => {
+    try {
+      const summary = getSaasSummary({
+        storeFile: options.store,
+        organizationId: options.org,
+        workspaceId: options.workspace,
+        actorUserId: options.actor,
+      })
 
-    if (options.json) {
-      process.stdout.write(JSON.stringify(summary, null, 2) + '\n')
-      return
+      if (options.json) {
+        process.stdout.write(JSON.stringify(summary, null, 2) + '\n')
+        return
+      }
+
+      process.stdout.write('\n')
+      process.stdout.write(`Phase: ${summary.phase.toUpperCase()}\n`)
+      process.stdout.write(`Users registered: ${summary.usersRegistered}\n`)
+      process.stdout.write(`Active workspaces (30d): ${summary.workspacesActive}\n`)
+      process.stdout.write(`Active repos (30d): ${summary.reposActive}\n`)
+      process.stdout.write(`Total snapshots: ${summary.totalSnapshots}\n`)
+      process.stdout.write(`Free user threshold: ${summary.policy.freeUserThreshold}\n`)
+      process.stdout.write(`Threshold reached: ${summary.thresholdReached ? 'yes' : 'no'}\n`)
+      process.stdout.write(`Free users remaining: ${summary.freeUsersRemaining}\n`)
+      process.stdout.write('Runs per month:\n')
+
+      const monthly = Object.entries(summary.runsPerMonth).sort(([a], [b]) => a.localeCompare(b))
+      if (monthly.length === 0) {
+        process.stdout.write('  - none\n\n')
+        return
+      }
+
+      for (const [month, runs] of monthly) {
+        process.stdout.write(`  - ${month}: ${runs}\n`)
+      }
+      process.stdout.write('\n')
+    } catch (error) {
+      printSaasErrorAndExit(error)
     }
+  })
 
-    process.stdout.write('\n')
-    process.stdout.write(`Phase: ${summary.phase.toUpperCase()}\n`)
-    process.stdout.write(`Users registered: ${summary.usersRegistered}\n`)
-    process.stdout.write(`Active workspaces (30d): ${summary.workspacesActive}\n`)
-    process.stdout.write(`Active repos (30d): ${summary.reposActive}\n`)
-    process.stdout.write(`Total snapshots: ${summary.totalSnapshots}\n`)
-    process.stdout.write(`Free user threshold: ${summary.policy.freeUserThreshold}\n`)
-    process.stdout.write(`Threshold reached: ${summary.thresholdReached ? 'yes' : 'no'}\n`)
-    process.stdout.write(`Free users remaining: ${summary.freeUsersRemaining}\n`)
-    process.stdout.write('Runs per month:\n')
+cloud
+  .command('plan-set')
+  .description('Set organization plan (owner role required when actor is provided)')
+  .requiredOption('--org <id>', 'Organization id')
+  .requiredOption('--plan <plan>', 'New organization plan (free|sponsor|team|business)')
+  .requiredOption('--actor <user>', 'Actor user id used for owner-gated billing writes')
+  .option('--reason <text>', 'Optional reason for audit trail')
+  .option('--store <file>', 'Store file path (default: .drift-cloud/store.json)')
+  .option('--json', 'Output raw JSON plan change')
+  .action((options: { org: string; plan: string; actor: string; reason?: string; store?: string; json?: boolean }) => {
+    try {
+      const change = changeOrganizationPlan({
+        organizationId: options.org,
+        actorUserId: options.actor,
+        newPlan: options.plan as 'free' | 'sponsor' | 'team' | 'business',
+        reason: options.reason,
+        storeFile: options.store,
+      })
 
-    const monthly = Object.entries(summary.runsPerMonth).sort(([a], [b]) => a.localeCompare(b))
-    if (monthly.length === 0) {
-      process.stdout.write('  - none\n\n')
-      return
+      if (options.json) {
+        process.stdout.write(JSON.stringify(change, null, 2) + '\n')
+        return
+      }
+
+      process.stdout.write(`Plan updated for org '${change.organizationId}': ${change.fromPlan} -> ${change.toPlan}\n`)
+      process.stdout.write(`Changed by: ${change.changedByUserId} at ${change.changedAt}\n`)
+      if (change.reason) process.stdout.write(`Reason: ${change.reason}\n`)
+    } catch (error) {
+      printSaasErrorAndExit(error)
     }
+  })
 
-    for (const [month, runs] of monthly) {
-      process.stdout.write(`  - ${month}: ${runs}\n`)
+cloud
+  .command('plan-changes')
+  .description('List organization plan change audit trail')
+  .requiredOption('--org <id>', 'Organization id')
+  .requiredOption('--actor <user>', 'Actor user id used for billing read permissions')
+  .option('--store <file>', 'Store file path (default: .drift-cloud/store.json)')
+  .option('--json', 'Output raw JSON plan changes')
+  .action((options: { org: string; actor: string; store?: string; json?: boolean }) => {
+    try {
+      const changes = listOrganizationPlanChanges({
+        organizationId: options.org,
+        actorUserId: options.actor,
+        storeFile: options.store,
+      })
+
+      if (options.json) {
+        process.stdout.write(JSON.stringify(changes, null, 2) + '\n')
+        return
+      }
+
+      if (changes.length === 0) {
+        process.stdout.write(`No plan changes found for org '${options.org}'.\n`)
+        return
+      }
+
+      process.stdout.write(`Plan changes for org '${options.org}':\n`)
+      for (const change of changes) {
+        const reasonSuffix = change.reason ? ` reason='${change.reason}'` : ''
+        process.stdout.write(`- ${change.changedAt}: ${change.fromPlan} -> ${change.toPlan} by ${change.changedByUserId}${reasonSuffix}\n`)
+      }
+    } catch (error) {
+      printSaasErrorAndExit(error)
     }
-    process.stdout.write('\n')
+  })
+
+cloud
+  .command('usage')
+  .description('Show organization usage and effective limits')
+  .requiredOption('--org <id>', 'Organization id')
+  .requiredOption('--actor <user>', 'Actor user id used for billing read permissions')
+  .option('--month <yyyy-mm>', 'Month filter for runCountThisMonth (default: current UTC month)')
+  .option('--store <file>', 'Store file path (default: .drift-cloud/store.json)')
+  .option('--json', 'Output usage and limits as raw JSON')
+  .action((options: { org: string; actor: string; month?: string; store?: string; json?: boolean }) => {
+    try {
+      const usage = getOrganizationUsageSnapshot({
+        organizationId: options.org,
+        actorUserId: options.actor,
+        month: options.month,
+        storeFile: options.store,
+      })
+      const limits = getOrganizationEffectiveLimits({
+        organizationId: options.org,
+        storeFile: options.store,
+      })
+
+      if (options.json) {
+        process.stdout.write(JSON.stringify({ usage, limits }, null, 2) + '\n')
+        return
+      }
+
+      process.stdout.write(`Organization: ${usage.organizationId}\n`)
+      process.stdout.write(`Plan: ${usage.plan}\n`)
+      process.stdout.write(`Captured at: ${usage.capturedAt}\n`)
+      process.stdout.write(`Workspace count: ${usage.workspaceCount}\n`)
+      process.stdout.write(`Repo count: ${usage.repoCount}\n`)
+      process.stdout.write(`Runs total: ${usage.runCount}\n`)
+      process.stdout.write(`Runs this month: ${usage.runCountThisMonth}\n`)
+      process.stdout.write('Effective limits:\n')
+      process.stdout.write(`  - maxWorkspaces: ${limits.maxWorkspaces}\n`)
+      process.stdout.write(`  - maxReposPerWorkspace: ${limits.maxReposPerWorkspace}\n`)
+      process.stdout.write(`  - maxRunsPerWorkspacePerMonth: ${limits.maxRunsPerWorkspacePerMonth}\n`)
+      process.stdout.write(`  - retentionDays: ${limits.retentionDays}\n`)
+    } catch (error) {
+      printSaasErrorAndExit(error)
+    }
   })
 
 cloud

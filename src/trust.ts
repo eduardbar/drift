@@ -5,6 +5,7 @@ import type {
   DriftReport,
   DriftTrustReport,
   MergeRiskLevel,
+  TrustGatePolicyPack,
   TrustGatePolicyPreset,
   TrustDiffContext,
   TrustFixPriority,
@@ -41,10 +42,49 @@ interface TrustRenderOptions {
   markdown?: boolean
 }
 
+function formatTrustGatePolicyValues(values: TrustGateOptions): string {
+  const enabled = typeof values.enabled === 'boolean' ? String(values.enabled) : 'inherit'
+  const minTrust = typeof values.minTrust === 'number' ? String(values.minTrust) : 'inherit'
+  const maxRisk = values.maxRisk ?? 'inherit'
+  return `enabled=${enabled} minTrust=${minTrust} maxRisk=${maxRisk}`
+}
+
 export interface TrustGateOptions {
   enabled?: boolean
   minTrust?: number
   maxRisk?: MergeRiskLevel
+}
+
+export interface TrustGatePolicyResolutionOptions {
+  branchName?: string
+  policyPack?: string
+  overrides?: TrustGateOptions
+}
+
+export interface TrustGatePolicyResolutionStep {
+  source: 'base' | 'policy-pack' | 'branch-preset' | 'overrides'
+  name: string
+  values: TrustGateOptions
+}
+
+export interface TrustGatePolicyExplanation {
+  effectivePolicy: TrustGateOptions
+  branchName?: string
+  selectedPolicyPack?: string
+  invalidPolicyPack?: string
+  steps: TrustGatePolicyResolutionStep[]
+}
+
+export interface TrustGateEvaluation {
+  shouldFail: boolean
+  reasons: string[]
+  checks: {
+    gateDisabled: boolean
+    belowMinTrust: boolean
+    aboveMaxRisk: boolean
+    minTrust?: number
+    maxRisk?: MergeRiskLevel
+  }
 }
 
 export const MERGE_RISK_ORDER: MergeRiskLevel[] = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
@@ -105,6 +145,70 @@ function normalizeMaxRisk(value: unknown): MergeRiskLevel | undefined {
   return normalizeMergeRiskLevel(value)
 }
 
+function normalizeTrustGateOptions(
+  source: { enabled?: unknown; minTrust?: unknown; maxRisk?: unknown } | undefined,
+): TrustGateOptions {
+  if (!source) return {}
+
+  return {
+    enabled: typeof source.enabled === 'boolean' ? source.enabled : undefined,
+    minTrust: normalizeMinTrust(source.minTrust),
+    maxRisk: normalizeMaxRisk(source.maxRisk),
+  }
+}
+
+function mergeTrustGateOptions(base: TrustGateOptions, layer: TrustGateOptions): TrustGateOptions {
+  return {
+    enabled: typeof layer.enabled === 'boolean' ? layer.enabled : base.enabled,
+    minTrust: layer.minTrust ?? base.minTrust,
+    maxRisk: layer.maxRisk ?? base.maxRisk,
+  }
+}
+
+function normalizeResolutionOptions(
+  branchNameOrOptions?: string | TrustGatePolicyResolutionOptions,
+  explicitOverrides?: TrustGateOptions,
+): TrustGatePolicyResolutionOptions {
+  if (typeof branchNameOrOptions === 'string') {
+    return {
+      branchName: branchNameOrOptions,
+      overrides: explicitOverrides,
+    }
+  }
+
+  if (!branchNameOrOptions) {
+    return {
+      overrides: explicitOverrides,
+    }
+  }
+
+  return {
+    ...branchNameOrOptions,
+    overrides: explicitOverrides
+      ? mergeTrustGateOptions(normalizeTrustGateOptions(branchNameOrOptions.overrides), normalizeTrustGateOptions(explicitOverrides))
+      : branchNameOrOptions.overrides,
+  }
+}
+
+function resolvePolicyPack(
+  policyPacks: Record<string, TrustGatePolicyPack> | undefined,
+  policyPackName: string | undefined,
+): { name?: string; pack?: TrustGatePolicyPack; invalid?: string } {
+  const normalizedName = policyPackName?.trim()
+  if (!normalizedName) return {}
+
+  if (!policyPacks) {
+    return { name: normalizedName, invalid: normalizedName }
+  }
+
+  const pack = policyPacks[normalizedName]
+  if (!pack) {
+    return { name: normalizedName, invalid: normalizedName }
+  }
+
+  return { name: normalizedName, pack }
+}
+
 export function detectBranchName(env: NodeJS.ProcessEnv = process.env): string | undefined {
   for (const key of BRANCH_ENV_CANDIDATES) {
     const value = env[key]?.trim()
@@ -114,36 +218,93 @@ export function detectBranchName(env: NodeJS.ProcessEnv = process.env): string |
   return undefined
 }
 
-export function resolveTrustGatePolicy(config: DriftConfig | undefined, branchName?: string): TrustGateOptions {
+export function explainTrustGatePolicy(
+  config: DriftConfig | undefined,
+  branchName?: string,
+  overrides?: TrustGateOptions,
+): TrustGatePolicyExplanation
+export function explainTrustGatePolicy(
+  config: DriftConfig | undefined,
+  options?: TrustGatePolicyResolutionOptions,
+): TrustGatePolicyExplanation
+export function explainTrustGatePolicy(
+  config: DriftConfig | undefined,
+  branchNameOrOptions?: string | TrustGatePolicyResolutionOptions,
+  explicitOverrides?: TrustGateOptions,
+): TrustGatePolicyExplanation {
   const policy = config?.trustGate
-  if (!policy) return {}
+  const resolution = normalizeResolutionOptions(branchNameOrOptions, explicitOverrides)
+  const normalizedBranch = resolution.branchName?.trim()
+  const packResolution = resolvePolicyPack(policy?.policyPacks, resolution.policyPack)
 
-  const resolved: TrustGateOptions = {
-    enabled: typeof policy.enabled === 'boolean' ? policy.enabled : undefined,
-    minTrust: normalizeMinTrust(policy.minTrust),
-    maxRisk: normalizeMaxRisk(policy.maxRisk),
+  const steps: TrustGatePolicyResolutionStep[] = []
+  const base = normalizeTrustGateOptions(policy)
+  let effective = base
+  steps.push({ source: 'base', name: 'trustGate', values: base })
+
+  if (packResolution.pack) {
+    const packOptions = normalizeTrustGateOptions(packResolution.pack)
+    effective = mergeTrustGateOptions(effective, packOptions)
+    steps.push({ source: 'policy-pack', name: packResolution.name ?? 'unknown', values: packOptions })
   }
 
-  const normalizedBranch = branchName?.trim()
-  if (!normalizedBranch) {
-    return resolved
-  }
-
-  const matchedPresets = resolvePresetsForBranch(normalizedBranch, policy.presets)
-  if (matchedPresets.length === 0) {
-    return resolved
-  }
-
-  let merged = { ...resolved }
-  for (const preset of matchedPresets) {
-    merged = {
-      enabled: typeof preset.enabled === 'boolean' ? preset.enabled : merged.enabled,
-      minTrust: normalizeMinTrust(preset.minTrust) ?? merged.minTrust,
-      maxRisk: normalizeMaxRisk(preset.maxRisk) ?? merged.maxRisk,
+  if (normalizedBranch) {
+    const matchedPresets = resolvePresetsForBranch(normalizedBranch, policy?.presets)
+    for (const preset of matchedPresets) {
+      const presetOptions = normalizeTrustGateOptions(preset)
+      effective = mergeTrustGateOptions(effective, presetOptions)
+      steps.push({ source: 'branch-preset', name: preset.branch, values: presetOptions })
     }
   }
 
-  return merged
+  const overrides = normalizeTrustGateOptions(resolution.overrides)
+  if (Object.values(overrides).some((value) => value !== undefined)) {
+    effective = mergeTrustGateOptions(effective, overrides)
+    steps.push({ source: 'overrides', name: 'cli', values: overrides })
+  }
+
+  return {
+    effectivePolicy: effective,
+    branchName: normalizedBranch,
+    selectedPolicyPack: packResolution.name,
+    invalidPolicyPack: packResolution.invalid,
+    steps,
+  }
+}
+
+export function resolveTrustGatePolicy(
+  config: DriftConfig | undefined,
+  branchName?: string,
+  overrides?: TrustGateOptions,
+): TrustGateOptions
+export function resolveTrustGatePolicy(
+  config: DriftConfig | undefined,
+  options?: TrustGatePolicyResolutionOptions,
+): TrustGateOptions
+export function resolveTrustGatePolicy(
+  config: DriftConfig | undefined,
+  branchNameOrOptions?: string | TrustGatePolicyResolutionOptions,
+  explicitOverrides?: TrustGateOptions,
+): TrustGateOptions {
+  const options = normalizeResolutionOptions(branchNameOrOptions, explicitOverrides)
+  return explainTrustGatePolicy(config, options).effectivePolicy
+}
+
+export function formatTrustGatePolicyExplanation(explanation: TrustGatePolicyExplanation): string {
+  const lines = ['Trust gate policy resolution:']
+  lines.push(`- branch: ${explanation.branchName ?? 'not provided'}`)
+  lines.push(`- policy pack: ${explanation.selectedPolicyPack ?? 'not selected'}`)
+  if (explanation.invalidPolicyPack) {
+    lines.push(`- invalid policy pack: ${explanation.invalidPolicyPack}`)
+  }
+  lines.push('- steps:')
+
+  for (const [index, step] of explanation.steps.entries()) {
+    lines.push(`  ${index + 1}. ${step.source} (${step.name}): ${formatTrustGatePolicyValues(step.values)}`)
+  }
+
+  lines.push(`- effective: ${formatTrustGatePolicyValues(explanation.effectivePolicy)}`)
+  return lines.join('\n')
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -398,18 +559,50 @@ export function shouldFailByMaxRisk(actual: MergeRiskLevel, allowedMaxRisk: Merg
   return MERGE_RISK_ORDER.indexOf(actual) > MERGE_RISK_ORDER.indexOf(allowedMaxRisk)
 }
 
-export function shouldFailTrustGate(trust: DriftTrustReport, options: TrustGateOptions): boolean {
+export function evaluateTrustGate(trust: DriftTrustReport, options: TrustGateOptions): TrustGateEvaluation {
   if (options.enabled === false) {
-    return false
+    return {
+      shouldFail: false,
+      reasons: ['trust gate disabled by policy'],
+      checks: {
+        gateDisabled: true,
+        belowMinTrust: false,
+        aboveMaxRisk: false,
+        minTrust: options.minTrust,
+        maxRisk: options.maxRisk,
+      },
+    }
   }
 
-  if (typeof options.minTrust === 'number' && !Number.isNaN(options.minTrust) && trust.trust_score < options.minTrust) {
-    return true
+  const belowMinTrust =
+    typeof options.minTrust === 'number' &&
+    !Number.isNaN(options.minTrust) &&
+    trust.trust_score < options.minTrust
+
+  const aboveMaxRisk = Boolean(options.maxRisk && shouldFailByMaxRisk(trust.merge_risk, options.maxRisk))
+  const reasons: string[] = []
+
+  if (belowMinTrust) {
+    reasons.push(`trust ${trust.trust_score} is below minTrust ${options.minTrust}`)
   }
 
-  if (options.maxRisk && shouldFailByMaxRisk(trust.merge_risk, options.maxRisk)) {
-    return true
+  if (aboveMaxRisk && options.maxRisk) {
+    reasons.push(`merge risk ${trust.merge_risk} exceeds maxRisk ${options.maxRisk}`)
   }
 
-  return false
+  return {
+    shouldFail: belowMinTrust || aboveMaxRisk,
+    reasons,
+    checks: {
+      gateDisabled: false,
+      belowMinTrust,
+      aboveMaxRisk,
+      minTrust: options.minTrust,
+      maxRisk: options.maxRisk,
+    },
+  }
+}
+
+export function shouldFailTrustGate(trust: DriftTrustReport, options: TrustGateOptions): boolean {
+  return evaluateTrustGate(trust, options).shouldFail
 }

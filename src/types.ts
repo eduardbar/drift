@@ -106,11 +106,18 @@ export interface TrustGatePolicyPreset {
   maxRisk?: MergeRiskLevel
 }
 
+export interface TrustGatePolicyPack {
+  enabled?: boolean
+  minTrust?: number
+  maxRisk?: MergeRiskLevel
+}
+
 export interface TrustGatePolicyConfig {
   enabled?: boolean
   minTrust?: number
   maxRisk?: MergeRiskLevel
   presets?: TrustGatePolicyPreset[]
+  policyPacks?: Record<string, TrustGatePolicyPack>
 }
 
 export interface TrustReason {

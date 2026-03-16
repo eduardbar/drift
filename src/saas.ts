@@ -55,6 +55,16 @@ export interface SaasMembership {
   lastSeenAt: string
 }
 
+export interface SaasPlanChange {
+  id: string
+  organizationId: string
+  fromPlan: SaasPlan
+  toPlan: SaasPlan
+  changedAt: string
+  changedByUserId: string
+  reason?: string
+}
+
 export interface SaasSnapshot {
   id: string
   createdAt: string
@@ -86,6 +96,63 @@ export interface SaasStore {
   memberships: Record<string, SaasMembership>
   repos: Record<string, SaasRepo>
   snapshots: SaasSnapshot[]
+  planChanges: SaasPlanChange[]
+}
+
+export type SaasOperation = 'snapshot:write' | 'snapshot:read' | 'summary:read' | 'billing:write' | 'billing:read'
+
+export interface SaasPermissionContext {
+  operation: SaasOperation
+  organizationId: string
+  workspaceId?: string
+  actorUserId?: string
+}
+
+export interface SaasPermissionResult {
+  actorRole?: SaasRole
+  requiredRole: SaasRole
+}
+
+export interface SaasEffectiveLimits {
+  plan: SaasPlan
+  maxWorkspaces: number
+  maxReposPerWorkspace: number
+  maxRunsPerWorkspacePerMonth: number
+  retentionDays: number
+}
+
+export interface SaasOrganizationUsageSnapshot {
+  organizationId: string
+  plan: SaasPlan
+  capturedAt: string
+  workspaceCount: number
+  repoCount: number
+  runCount: number
+  runCountThisMonth: number
+}
+
+export interface ChangeOrganizationPlanOptions {
+  organizationId: string
+  actorUserId: string
+  newPlan: SaasPlan
+  reason?: string
+  storeFile?: string
+  policy?: SaasPolicyOverrides
+}
+
+export interface SaasUsageQueryOptions {
+  organizationId: string
+  month?: string
+  storeFile?: string
+  policy?: SaasPolicyOverrides
+  actorUserId?: string
+}
+
+export interface SaasPlanChangeQueryOptions {
+  organizationId: string
+  storeFile?: string
+  policy?: SaasPolicyOverrides
+  actorUserId?: string
 }
 
 export interface SaasSummary {
@@ -113,6 +180,7 @@ export interface SaasQueryOptions {
   policy?: SaasPolicyOverrides
   organizationId?: string
   workspaceId?: string
+  actorUserId?: string
 }
 
 export interface IngestOptions {
@@ -122,15 +190,50 @@ export interface IngestOptions {
   role?: SaasRole
   plan?: SaasPlan
   repoName?: string
+  actorUserId?: string
   storeFile?: string
   policy?: SaasPolicyOverrides
 }
 
-const STORE_VERSION = 2
+const STORE_VERSION = 3
 const ACTIVE_WINDOW_DAYS = 30
 const DEFAULT_ORGANIZATION_ID = 'default-org'
 const VALID_ROLES: SaasRole[] = ['owner', 'member', 'viewer']
 const VALID_PLANS: SaasPlan[] = ['free', 'sponsor', 'team', 'business']
+const ROLE_PRIORITY: Record<SaasRole, number> = { viewer: 1, member: 2, owner: 3 }
+const REQUIRED_ROLE_BY_OPERATION: Record<SaasOperation, SaasRole> = {
+  'snapshot:write': 'member',
+  'snapshot:read': 'viewer',
+  'summary:read': 'viewer',
+  'billing:write': 'owner',
+  'billing:read': 'viewer',
+}
+
+export class SaasPermissionError extends Error {
+  readonly code = 'SAAS_PERMISSION_DENIED'
+  readonly operation: SaasOperation
+  readonly organizationId: string
+  readonly workspaceId?: string
+  readonly actorUserId?: string
+  readonly requiredRole: SaasRole
+  readonly actorRole?: SaasRole
+
+  constructor(context: SaasPermissionContext, requiredRole: SaasRole, actorRole?: SaasRole) {
+    const actor = context.actorUserId ?? 'unknown-actor'
+    const workspaceSuffix = context.workspaceId ? ` workspace='${context.workspaceId}'` : ''
+    const actualRole = actorRole ?? 'none'
+    super(
+      `Permission denied for operation '${context.operation}'. actor='${actor}' organization='${context.organizationId}'${workspaceSuffix} requiredRole='${requiredRole}' actualRole='${actualRole}'.`,
+    )
+    this.name = 'SaasPermissionError'
+    this.operation = context.operation
+    this.organizationId = context.organizationId
+    this.workspaceId = context.workspaceId
+    this.actorUserId = context.actorUserId
+    this.requiredRole = requiredRole
+    this.actorRole = actorRole
+  }
+}
 
 export const DEFAULT_SAAS_POLICY: SaasPolicy = {
   freeUserThreshold: 7500,
@@ -182,6 +285,7 @@ function createEmptyStore(policy?: SaasPolicyOverrides): SaasStore {
     memberships: {},
     repos: {},
     snapshots: [],
+    planChanges: [],
   }
 }
 
@@ -193,6 +297,71 @@ function normalizePlan(plan?: string): SaasPlan {
 function normalizeRole(role?: string): SaasRole {
   if (!role) return 'member'
   return VALID_ROLES.includes(role as SaasRole) ? (role as SaasRole) : 'member'
+}
+
+function hasRoleAtLeast(role: SaasRole | undefined, requiredRole: SaasRole): boolean {
+  if (!role) return false
+  return ROLE_PRIORITY[role] >= ROLE_PRIORITY[requiredRole]
+}
+
+function resolveActorRole(store: SaasStore, organizationId: string, actorUserId: string, workspaceId?: string): SaasRole | undefined {
+  if (workspaceId) {
+    const scopedMembershipId = membershipKey(organizationId, workspaceId, actorUserId)
+    return store.memberships[scopedMembershipId]?.role
+  }
+
+  let highestRole: SaasRole | undefined
+  for (const membership of Object.values(store.memberships)) {
+    if (membership.organizationId !== organizationId) continue
+    if (membership.userId !== actorUserId) continue
+    if (!highestRole || ROLE_PRIORITY[membership.role] > ROLE_PRIORITY[highestRole]) {
+      highestRole = membership.role
+      if (highestRole === 'owner') break
+    }
+  }
+  return highestRole
+}
+
+function assertPermissionInStore(store: SaasStore, context: SaasPermissionContext): SaasPermissionResult {
+  const requiredRole = REQUIRED_ROLE_BY_OPERATION[context.operation]
+  if (!context.actorUserId) {
+    return { requiredRole }
+  }
+
+  const actorRole = resolveActorRole(store, context.organizationId, context.actorUserId, context.workspaceId)
+  if (!hasRoleAtLeast(actorRole, requiredRole)) {
+    throw new SaasPermissionError(context, requiredRole, actorRole)
+  }
+
+  return { requiredRole, actorRole }
+}
+
+export function getRequiredRoleForOperation(operation: SaasOperation): SaasRole {
+  return REQUIRED_ROLE_BY_OPERATION[operation]
+}
+
+export function assertSaasPermission(context: SaasPermissionContext & { storeFile?: string; policy?: SaasPolicyOverrides }): SaasPermissionResult {
+  const storeFile = resolve(context.storeFile ?? defaultSaasStorePath())
+  const store = loadStoreInternal(storeFile, context.policy)
+  return assertPermissionInStore(store, context)
+}
+
+export function getSaasEffectiveLimits(input: { plan: SaasPlan; policy?: SaasPolicyOverrides }): SaasEffectiveLimits {
+  const policy = resolveSaasPolicy(input.policy)
+  return {
+    plan: input.plan,
+    maxWorkspaces: policy.maxWorkspacesPerOrganizationByPlan[input.plan],
+    maxReposPerWorkspace: policy.maxReposPerWorkspace,
+    maxRunsPerWorkspacePerMonth: policy.maxRunsPerWorkspacePerMonth,
+    retentionDays: policy.retentionDays,
+  }
+}
+
+export function getOrganizationEffectiveLimits(options: { organizationId: string; storeFile?: string; policy?: SaasPolicyOverrides }): SaasEffectiveLimits {
+  const storeFile = resolve(options.storeFile ?? defaultSaasStorePath())
+  const store = loadStoreInternal(storeFile, options.policy)
+  const plan = normalizePlan(store.organizations[options.organizationId]?.plan)
+  return getSaasEffectiveLimits({ plan, policy: store.policy })
 }
 
 function workspaceKey(organizationId: string, workspaceId: string): string {
@@ -242,6 +411,7 @@ function loadStoreInternal(storeFile: string, policy?: SaasPolicyOverrides): Saa
   merged.memberships = parsed.memberships ?? {}
   merged.repos = parsed.repos ?? {}
   merged.snapshots = parsed.snapshots ?? []
+  merged.planChanges = parsed.planChanges ?? []
   merged.policy = resolveSaasPolicy({ ...merged.policy, ...policy })
 
   for (const workspace of Object.values(merged.workspaces)) {
@@ -346,12 +516,140 @@ function assertGuardrails(store: SaasStore, options: IngestOptions, nowIso: stri
   }
 }
 
+function appendPlanChange(
+  store: SaasStore,
+  input: { organizationId: string; fromPlan: SaasPlan; toPlan: SaasPlan; changedByUserId: string; reason?: string; changedAt: string },
+): SaasPlanChange {
+  const change: SaasPlanChange = {
+    id: `${input.changedAt}-${Math.random().toString(16).slice(2, 10)}`,
+    organizationId: input.organizationId,
+    fromPlan: input.fromPlan,
+    toPlan: input.toPlan,
+    changedAt: input.changedAt,
+    changedByUserId: input.changedByUserId,
+    reason: input.reason,
+  }
+  store.planChanges.push(change)
+  return change
+}
+
+export function changeOrganizationPlan(options: ChangeOrganizationPlanOptions): SaasPlanChange {
+  const storeFile = resolve(options.storeFile ?? defaultSaasStorePath())
+  const store = loadStoreInternal(storeFile, options.policy)
+  const nowIso = new Date().toISOString()
+
+  const organization = store.organizations[options.organizationId]
+  if (!organization) {
+    throw new Error(`Organization '${options.organizationId}' does not exist.`)
+  }
+
+  assertPermissionInStore(store, {
+    operation: 'billing:write',
+    organizationId: options.organizationId,
+    actorUserId: options.actorUserId,
+  })
+
+  const nextPlan = normalizePlan(options.newPlan)
+  if (organization.plan === nextPlan) {
+    const unchanged = appendPlanChange(store, {
+      organizationId: organization.id,
+      fromPlan: organization.plan,
+      toPlan: nextPlan,
+      changedAt: nowIso,
+      changedByUserId: options.actorUserId,
+      reason: options.reason,
+    })
+    saveStore(storeFile, store)
+    return unchanged
+  }
+
+  const previousPlan = organization.plan
+  organization.plan = nextPlan
+  organization.lastSeenAt = nowIso
+  const change = appendPlanChange(store, {
+    organizationId: organization.id,
+    fromPlan: previousPlan,
+    toPlan: nextPlan,
+    changedAt: nowIso,
+    changedByUserId: options.actorUserId,
+    reason: options.reason,
+  })
+  saveStore(storeFile, store)
+  return change
+}
+
+export function listOrganizationPlanChanges(options: SaasPlanChangeQueryOptions): SaasPlanChange[] {
+  const storeFile = resolve(options.storeFile ?? defaultSaasStorePath())
+  const store = loadStoreInternal(storeFile, options.policy)
+
+  assertPermissionInStore(store, {
+    operation: 'billing:read',
+    organizationId: options.organizationId,
+    actorUserId: options.actorUserId,
+  })
+
+  return store.planChanges
+    .filter((change) => change.organizationId === options.organizationId)
+    .sort((a, b) => b.changedAt.localeCompare(a.changedAt))
+}
+
+export function getOrganizationUsageSnapshot(options: SaasUsageQueryOptions): SaasOrganizationUsageSnapshot {
+  const storeFile = resolve(options.storeFile ?? defaultSaasStorePath())
+  const store = loadStoreInternal(storeFile, options.policy)
+
+  assertPermissionInStore(store, {
+    operation: 'billing:read',
+    organizationId: options.organizationId,
+    actorUserId: options.actorUserId,
+  })
+
+  const organization = store.organizations[options.organizationId]
+  if (!organization) {
+    throw new Error(`Organization '${options.organizationId}' does not exist.`)
+  }
+
+  const month = options.month ?? monthKey(new Date().toISOString())
+  const organizationRunSnapshots = store.snapshots.filter((snapshot) => snapshot.organizationId === options.organizationId)
+
+  return {
+    organizationId: options.organizationId,
+    plan: organization.plan,
+    capturedAt: new Date().toISOString(),
+    workspaceCount: organization.workspaceIds.length,
+    repoCount: organization.workspaceIds
+      .map((workspaceId) => store.workspaces[workspaceKey(options.organizationId, workspaceId)])
+      .filter((workspace): workspace is SaasWorkspace => Boolean(workspace))
+      .reduce((count, workspace) => count + workspace.repoIds.length, 0),
+    runCount: organizationRunSnapshots.length,
+    runCountThisMonth: organizationRunSnapshots.filter((snapshot) => monthKey(snapshot.createdAt) === month).length,
+  }
+}
+
 export function ingestSnapshotFromReport(report: DriftReport, options: IngestOptions): SaasSnapshot {
   const storeFile = resolve(options.storeFile ?? defaultSaasStorePath())
   const store = loadStoreInternal(storeFile, options.policy)
   const nowIso = new Date().toISOString()
   const scoped = resolveScopedIdentity(options)
   const requestedPlan = normalizePlan(options.plan)
+
+  const workspaceExists = Boolean(store.workspaces[scoped.workspaceKey])
+  const organizationExists = Boolean(store.organizations[scoped.organizationId])
+  if (options.actorUserId) {
+    if (workspaceExists) {
+      assertPermissionInStore(store, {
+        operation: 'snapshot:write',
+        organizationId: scoped.organizationId,
+        workspaceId: scoped.workspaceId,
+        actorUserId: options.actorUserId,
+      })
+    } else if (organizationExists) {
+      assertPermissionInStore(store, {
+        operation: 'billing:write',
+        organizationId: scoped.organizationId,
+        actorUserId: options.actorUserId,
+      })
+    }
+  }
 
   assertGuardrails(store, options, nowIso)
 
@@ -371,7 +669,25 @@ export function ingestSnapshotFromReport(report: DriftReport, options: IngestOpt
 
   if (existingOrg) {
     existingOrg.lastSeenAt = nowIso
-    if (options.plan) existingOrg.plan = requestedPlan
+    if (options.plan && existingOrg.plan !== requestedPlan) {
+      if (options.actorUserId) {
+        assertPermissionInStore(store, {
+          operation: 'billing:write',
+          organizationId: scoped.organizationId,
+          actorUserId: options.actorUserId,
+        })
+      }
+      const previousPlan = existingOrg.plan
+      existingOrg.plan = requestedPlan
+      appendPlanChange(store, {
+        organizationId: scoped.organizationId,
+        fromPlan: previousPlan,
+        toPlan: requestedPlan,
+        changedAt: nowIso,
+        changedByUserId: options.actorUserId ?? options.userId,
+        reason: 'ingest-option-plan-change',
+      })
+    }
   } else {
     store.organizations[scoped.organizationId] = {
       id: scoped.organizationId,
@@ -474,6 +790,17 @@ function matchesTenantScope(snapshot: SaasSnapshot, options?: SaasQueryOptions):
 export function listSaasSnapshots(options?: SaasQueryOptions): SaasSnapshot[] {
   const storeFile = resolve(options?.storeFile ?? defaultSaasStorePath())
   const store = loadStoreInternal(storeFile, options?.policy)
+
+  if (options?.actorUserId) {
+    const organizationId = options.organizationId ?? DEFAULT_ORGANIZATION_ID
+    assertPermissionInStore(store, {
+      operation: 'snapshot:read',
+      organizationId,
+      workspaceId: options.workspaceId,
+      actorUserId: options.actorUserId,
+    })
+  }
+
   saveStore(storeFile, store)
   return store.snapshots
     .filter((snapshot) => matchesTenantScope(snapshot, options))
@@ -483,6 +810,17 @@ export function listSaasSnapshots(options?: SaasQueryOptions): SaasSnapshot[] {
 export function getSaasSummary(options?: SaasQueryOptions): SaasSummary {
   const storeFile = resolve(options?.storeFile ?? defaultSaasStorePath())
   const store = loadStoreInternal(storeFile, options?.policy)
+
+  if (options?.actorUserId) {
+    const organizationId = options.organizationId ?? DEFAULT_ORGANIZATION_ID
+    assertPermissionInStore(store, {
+      operation: 'summary:read',
+      organizationId,
+      workspaceId: options.workspaceId,
+      actorUserId: options.actorUserId,
+    })
+  }
+
   saveStore(storeFile, store)
 
   const scopedSnapshots = store.snapshots.filter((snapshot) => matchesTenantScope(snapshot, options))

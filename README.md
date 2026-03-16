@@ -171,6 +171,7 @@ drift trust ./src --markdown --output trust.md
 drift trust ./src --min-trust 45
 drift trust ./src --max-risk HIGH
 drift trust ./src --branch main
+drift trust ./src --branch release/v1.4.0 --policy-pack strict --explain-policy
 ```
 
 | Flag | Description |
@@ -182,6 +183,8 @@ drift trust ./src --branch main
 | `--min-trust <n>` | Exit code 1 when trust score is below `n` |
 | `--max-risk <level>` | Exit code 1 when computed merge risk exceeds `LOW`, `MEDIUM`, `HIGH`, or `CRITICAL` |
 | `--branch <name>` | Branch used for `drift.config` trust policy matching (falls back to CI env vars) |
+| `--policy-pack <name>` | Optional trust policy pack from `trustGate.policyPacks` in `drift.config.*` |
+| `--explain-policy` | Print base/pack/branch/override resolution and effective gate policy to stderr |
 
 When `trustGate` policy is configured in `drift.config.*`, branch-based thresholds are applied automatically. CLI flags still override policy values.
 
@@ -194,6 +197,7 @@ Evaluate trust gate thresholds from a previously generated trust JSON file. This
 ```bash
 drift trust-gate drift-trust.json --min-trust 45 --max-risk HIGH
 drift trust-gate drift-trust.json --branch release/v1.2.0
+drift trust-gate drift-trust.json --branch main --policy-pack balanced --explain-policy
 ```
 
 | Flag | Description |
@@ -201,6 +205,8 @@ drift trust-gate drift-trust.json --branch release/v1.2.0
 | `--min-trust <n>` | Exit code 1 when trust score in JSON is below `n` |
 | `--max-risk <level>` | Exit code 1 when merge risk in JSON exceeds `LOW`, `MEDIUM`, `HIGH`, or `CRITICAL` |
 | `--branch <name>` | Branch used for `drift.config` trust policy matching (falls back to CI env vars) |
+| `--policy-pack <name>` | Optional trust policy pack from `trustGate.policyPacks` in `drift.config.*` |
+| `--explain-policy` | Print base/pack/branch/override resolution and effective gate policy to stderr |
 
 ---
 
@@ -352,6 +358,11 @@ Local multi-tenant foundations backed by `.drift-cloud/store.json`.
 drift cloud ingest ./src --org acme --workspace core --user u-123 --role owner --plan sponsor --repo webapp
 drift cloud summary
 drift cloud summary --org acme --workspace core
+drift cloud summary --org acme --workspace core --actor u-owner
+drift cloud ingest ./src --org acme --workspace core --user u-member --actor u-owner
+drift cloud plan-set --org acme --plan team --actor u-owner --reason "annual upgrade"
+drift cloud plan-changes --org acme --actor u-owner
+drift cloud usage --org acme --actor u-owner
 drift cloud summary --json
 drift cloud dashboard --output drift-cloud-dashboard.html
 ```
@@ -360,8 +371,11 @@ drift cloud dashboard --output drift-cloud-dashboard.html
 
 | Command | Description |
 |---------|-------------|
-| `drift cloud ingest [path] --org <id> --workspace <id> --user <id> [--role <owner\|member\|viewer>] [--plan <free\|sponsor\|team\|business>] [--repo <name>] [--store <file>]` | Scans the path and stores one tenant-scoped snapshot |
-| `drift cloud summary [--json] [--org <id>] [--workspace <id>] [--store <file>]` | Shows users/workspaces/repos usage and runs per month, optionally scoped |
+| `drift cloud ingest [path] --org <id> --workspace <id> --user <id> [--role <owner\|member\|viewer>] [--plan <free\|sponsor\|team\|business>] [--repo <name>] [--actor <user>] [--store <file>]` | Scans the path and stores one tenant-scoped snapshot (actor is optional authz context for writes) |
+| `drift cloud summary [--json] [--org <id>] [--workspace <id>] [--actor <user>] [--store <file>]` | Shows users/workspaces/repos usage and runs per month, optionally scoped with actor-based read checks |
+| `drift cloud plan-set --org <id> --plan <free\|sponsor\|team\|business> --actor <user> [--reason <text>] [--store <file>]` | Updates organization plan and writes an audited plan-change event (owner-gated by actor) |
+| `drift cloud plan-changes --org <id> --actor <user> [--json] [--store <file>]` | Lists audited plan lifecycle events for the organization |
+| `drift cloud usage --org <id> --actor <user> [--month <yyyy-mm>] [--json] [--store <file>]` | Shows organization usage plus effective limits for current plan |
 | `drift cloud dashboard [--output <file>] [--store <file>]` | Generates an HTML dashboard with trends and hotspots |
 
 `drift cloud` ships with tenant identity boundaries (`organizationId` + `workspaceId`), role primitives (`owner`/`member`/`viewer`), and plan placeholders (`free`/`sponsor`/`team`/`business`). It is an infrastructure foundation, not a full auth/billing platform.

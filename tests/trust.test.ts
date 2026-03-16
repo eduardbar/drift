@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   buildTrustReport,
   detectBranchName,
+  evaluateTrustGate,
+  formatTrustGatePolicyExplanation,
+  explainTrustGatePolicy,
   formatTrustJson,
   formatTrustMarkdown,
   normalizeMergeRiskLevel,
@@ -132,6 +135,11 @@ describe('drift trust baseline', () => {
     const mediumTrust = { ...trust, trust_score: 65, merge_risk: 'HIGH' as const }
 
     expect(shouldFailTrustGate(mediumTrust, { enabled: false, minTrust: 90, maxRisk: 'LOW' })).toBe(false)
+
+    const evaluation = evaluateTrustGate(mediumTrust, { enabled: false, minTrust: 90, maxRisk: 'LOW' })
+    expect(evaluation.shouldFail).toBe(false)
+    expect(evaluation.checks.gateDisabled).toBe(true)
+    expect(evaluation.reasons).toContain('trust gate disabled by policy')
   })
 
   it('normalizes merge risk level inputs', () => {
@@ -200,6 +208,11 @@ describe('drift trust branch policy', () => {
       enabled: true,
       minTrust: 45,
       maxRisk: 'HIGH',
+      policyPacks: {
+        strict: { enabled: true, minTrust: 90, maxRisk: 'LOW' },
+        balanced: { minTrust: 60, maxRisk: 'MEDIUM' },
+        lenient: { minTrust: 30, maxRisk: 'CRITICAL' },
+      },
       presets: [
         { branch: '*', minTrust: 40, maxRisk: 'CRITICAL' },
         { branch: 'main', minTrust: 70, maxRisk: 'MEDIUM' },
@@ -231,6 +244,67 @@ describe('drift trust branch policy', () => {
 
   it('returns empty policy when trust gate config is missing', () => {
     expect(resolveTrustGatePolicy(undefined, 'main')).toEqual({})
+  })
+
+  it('resolves precedence in deterministic order base -> pack -> branch -> overrides', () => {
+    const policy = resolveTrustGatePolicy(config, {
+      branchName: 'main',
+      policyPack: 'strict',
+      overrides: { maxRisk: 'CRITICAL' },
+    })
+
+    expect(policy).toMatchObject({ enabled: true, minTrust: 70, maxRisk: 'CRITICAL' })
+  })
+
+  it('reports invalid policy pack and preserves legacy branch behavior', () => {
+    const legacy = resolveTrustGatePolicy(config, 'main')
+    const explained = explainTrustGatePolicy(config, {
+      branchName: 'main',
+      policyPack: 'unknown-pack',
+    })
+
+    expect(explained.invalidPolicyPack).toBe('unknown-pack')
+    expect(explained.effectivePolicy).toMatchObject(legacy)
+  })
+
+  it('keeps compatibility between branch-only and options signatures', () => {
+    const branchOnly = resolveTrustGatePolicy(config, 'release/v1.2.3')
+    const optionsBased = resolveTrustGatePolicy(config, { branchName: 'release/v1.2.3' })
+
+    expect(optionsBased).toEqual(branchOnly)
+  })
+
+  it('explains resolution steps in application order', () => {
+    const explained = explainTrustGatePolicy(config, {
+      branchName: 'main',
+      policyPack: 'balanced',
+      overrides: { minTrust: 75 },
+    })
+
+    expect(explained.steps.map((step) => step.source)).toEqual([
+      'base',
+      'policy-pack',
+      'branch-preset',
+      'branch-preset',
+      'overrides',
+    ])
+    expect(explained.effectivePolicy).toMatchObject({ enabled: true, minTrust: 75, maxRisk: 'MEDIUM' })
+  })
+
+  it('formats policy explanation with layer summary for CLI debug mode', () => {
+    const explained = explainTrustGatePolicy(config, {
+      branchName: 'main',
+      policyPack: 'strict',
+      overrides: { maxRisk: 'CRITICAL' },
+    })
+
+    const formatted = formatTrustGatePolicyExplanation(explained)
+    expect(formatted).toContain('Trust gate policy resolution:')
+    expect(formatted).toContain('base (trustGate)')
+    expect(formatted).toContain('policy-pack (strict)')
+    expect(formatted).toContain('branch-preset (main)')
+    expect(formatted).toContain('overrides (cli)')
+    expect(formatted).toContain('effective: enabled=true minTrust=70 maxRisk=CRITICAL')
   })
 
   it('detects branch names from CI environment candidates', () => {

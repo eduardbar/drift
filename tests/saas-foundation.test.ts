@@ -4,7 +4,18 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { analyzeProject } from '../src/analyzer.js'
 import { buildReport } from '../src/reporter.js'
-import { ingestSnapshotFromReport, getSaasSummary, listSaasSnapshots } from '../src/saas.js'
+import {
+  SaasPermissionError,
+  assertSaasPermission,
+  changeOrganizationPlan,
+  getOrganizationEffectiveLimits,
+  getOrganizationUsageSnapshot,
+  getSaasEffectiveLimits,
+  getSaasSummary,
+  ingestSnapshotFromReport,
+  listOrganizationPlanChanges,
+  listSaasSnapshots,
+} from '../src/saas.js'
 
 function createProjectDir(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), prefix))
@@ -205,5 +216,171 @@ describe('saas foundations', () => {
 
     expect(ownerSnapshot.role).toBe('owner')
     expect(viewerSnapshot.role).toBe('viewer')
+  })
+
+  it('enforces deterministic permission errors when actor is unauthorized', () => {
+    const projectDir = createProjectDir('drift-saas-authz-')
+    dirs.push(projectDir)
+    const storeFile = join(projectDir, '.drift-cloud', 'store.json')
+    const report = createReport(projectDir)
+
+    ingestSnapshotFromReport(report, {
+      organizationId: 'org-auth',
+      workspaceId: 'ws-auth',
+      userId: 'u-owner',
+      storeFile,
+    })
+
+    ingestSnapshotFromReport(report, {
+      organizationId: 'org-auth',
+      workspaceId: 'ws-auth',
+      userId: 'u-viewer',
+      role: 'viewer',
+      storeFile,
+    })
+
+    expect(() => {
+      ingestSnapshotFromReport(report, {
+        organizationId: 'org-auth',
+        workspaceId: 'ws-auth',
+        userId: 'u-viewer',
+        actorUserId: 'u-viewer',
+        storeFile,
+      })
+    }).toThrowError(SaasPermissionError)
+
+    try {
+      ingestSnapshotFromReport(report, {
+        organizationId: 'org-auth',
+        workspaceId: 'ws-auth',
+        userId: 'u-viewer',
+        actorUserId: 'u-viewer',
+        storeFile,
+      })
+    } catch (error) {
+      expect(error).toBeInstanceOf(SaasPermissionError)
+      const permissionError = error as SaasPermissionError
+      expect(permissionError.code).toBe('SAAS_PERMISSION_DENIED')
+      expect(permissionError.operation).toBe('snapshot:write')
+      expect(permissionError.requiredRole).toBe('member')
+      expect(permissionError.actorRole).toBe('viewer')
+    }
+  })
+
+  it('tracks billing plan lifecycle and usage snapshots', () => {
+    const projectDir = createProjectDir('drift-saas-billing-')
+    dirs.push(projectDir)
+    const storeFile = join(projectDir, '.drift-cloud', 'store.json')
+    const report = createReport(projectDir)
+
+    ingestSnapshotFromReport(report, {
+      organizationId: 'org-billing',
+      workspaceId: 'ws-1',
+      userId: 'u-owner',
+      storeFile,
+      plan: 'free',
+    })
+    ingestSnapshotFromReport(report, {
+      organizationId: 'org-billing',
+      workspaceId: 'ws-1',
+      userId: 'u-owner',
+      repoName: 'repo-2',
+      storeFile,
+    })
+
+    ingestSnapshotFromReport(report, {
+      organizationId: 'org-billing',
+      workspaceId: 'ws-1',
+      userId: 'u-member',
+      role: 'member',
+      storeFile,
+    })
+
+    expect(() => {
+      changeOrganizationPlan({
+        organizationId: 'org-billing',
+        actorUserId: 'u-member',
+        newPlan: 'team',
+        storeFile,
+      })
+    }).toThrowError(SaasPermissionError)
+
+    const planChange = changeOrganizationPlan({
+      organizationId: 'org-billing',
+      actorUserId: 'u-owner',
+      newPlan: 'team',
+      reason: 'need more workspace capacity',
+      storeFile,
+    })
+
+    expect(planChange.fromPlan).toBe('free')
+    expect(planChange.toPlan).toBe('team')
+    expect(planChange.reason).toBe('need more workspace capacity')
+
+    const changes = listOrganizationPlanChanges({
+      organizationId: 'org-billing',
+      actorUserId: 'u-owner',
+      storeFile,
+    })
+    expect(changes).toHaveLength(1)
+    expect(changes[0]?.changedByUserId).toBe('u-owner')
+
+    const usage = getOrganizationUsageSnapshot({
+      organizationId: 'org-billing',
+      actorUserId: 'u-owner',
+      storeFile,
+    })
+    expect(usage.workspaceCount).toBe(1)
+    expect(usage.repoCount).toBe(2)
+    expect(usage.runCount).toBe(3)
+    expect(usage.runCountThisMonth).toBe(3)
+    expect(usage.plan).toBe('team')
+
+    const limitsByPlan = getSaasEffectiveLimits({ plan: 'team' })
+    const limitsByOrg = getOrganizationEffectiveLimits({ organizationId: 'org-billing', storeFile })
+    expect(limitsByPlan.plan).toBe('team')
+    expect(limitsByOrg.plan).toBe('team')
+    expect(limitsByOrg.maxWorkspaces).toBe(limitsByPlan.maxWorkspaces)
+  })
+
+  it('supports explicit authorization checks for scoped reads', () => {
+    const projectDir = createProjectDir('drift-saas-read-authz-')
+    dirs.push(projectDir)
+    const storeFile = join(projectDir, '.drift-cloud', 'store.json')
+    const report = createReport(projectDir)
+
+    ingestSnapshotFromReport(report, {
+      organizationId: 'org-read',
+      workspaceId: 'ws-read',
+      userId: 'u-owner',
+      storeFile,
+    })
+
+    ingestSnapshotFromReport(report, {
+      organizationId: 'org-read',
+      workspaceId: 'ws-read',
+      userId: 'u-viewer',
+      role: 'viewer',
+      storeFile,
+    })
+
+    const allowed = assertSaasPermission({
+      operation: 'summary:read',
+      organizationId: 'org-read',
+      workspaceId: 'ws-read',
+      actorUserId: 'u-viewer',
+      storeFile,
+    })
+    expect(allowed.requiredRole).toBe('viewer')
+    expect(allowed.actorRole).toBe('viewer')
+
+    expect(() => {
+      assertSaasPermission({
+        operation: 'billing:write',
+        organizationId: 'org-read',
+        actorUserId: 'u-viewer',
+        storeFile,
+      })
+    }).toThrowError(SaasPermissionError)
   })
 })
