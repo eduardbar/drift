@@ -1,8 +1,18 @@
 // drift-ignore-file
 import * as path from 'node:path'
-import { readdirSync } from 'node:fs'
+import { readdirSync, statSync } from 'node:fs'
 import { Project } from 'ts-morph'
-import type { DriftIssue, FileReport, DriftConfig, LoadedPlugin, PluginRuleContext, PluginLoadError, PluginLoadWarning } from './types.js'
+import type {
+  DriftIssue,
+  FileReport,
+  DriftConfig,
+  DriftAnalysisOptions,
+  DriftPerformanceConfig,
+  LoadedPlugin,
+  PluginRuleContext,
+  PluginLoadError,
+  PluginLoadWarning,
+} from './types.js'
 
 // Rules
 import { isFileIgnored } from './rules/shared.js'
@@ -99,6 +109,8 @@ export const RULE_WEIGHTS: Record<string, { severity: DriftIssue['severity']; we
   'semantic-duplication':          { severity: 'warning', weight: 12 },
   'plugin-error':                  { severity: 'warning', weight: 4  },
   'plugin-warning':                { severity: 'info',    weight: 0  },
+  'analysis-skip-max-files':       { severity: 'info',    weight: 0  },
+  'analysis-skip-file-size':       { severity: 'info',    weight: 0  },
 }
 
 const AI_SMELL_SIGNALS = new Set([
@@ -253,8 +265,26 @@ function shouldAnalyzeFile(fileName: string): boolean {
   return ANALYZABLE_EXTENSIONS.has(path.extname(fileName))
 }
 
-function collectAnalyzableSourcePaths(targetPath: string): string[] {
-  const sourcePaths: string[] = []
+interface AnalyzableSource {
+  path: string
+  sizeBytes: number
+}
+
+interface ResolvedAnalysisOptions {
+  lowMemory: boolean
+  chunkSize: number
+  maxFiles?: number
+  maxFileSizeKb?: number
+  includeSemanticDuplication: boolean
+}
+
+interface SourceSelection {
+  selectedPaths: string[]
+  skippedReports: FileReport[]
+}
+
+function collectAnalyzableSources(targetPath: string): AnalyzableSource[] {
+  const sourcePaths: AnalyzableSource[] = []
   const queue: string[] = [targetPath]
 
   while (queue.length > 0) {
@@ -278,12 +308,159 @@ function collectAnalyzableSourcePaths(targetPath: string): string[] {
 
       if (!entry.isFile()) continue
       if (!shouldAnalyzeFile(entry.name)) continue
-      sourcePaths.push(entryPath)
+
+      let sizeBytes = 0
+      try {
+        sizeBytes = statSync(entryPath).size
+      } catch {
+        sizeBytes = 0
+      }
+
+      sourcePaths.push({ path: entryPath, sizeBytes })
     }
   }
 
-  sourcePaths.sort()
+  sourcePaths.sort((a, b) => a.path.localeCompare(b.path))
   return sourcePaths
+}
+
+function resolveAnalysisOptions(config?: DriftConfig, options?: DriftAnalysisOptions): ResolvedAnalysisOptions {
+  const performance: DriftPerformanceConfig | undefined = config?.performance
+  const lowMemory = options?.lowMemory ?? performance?.lowMemory ?? false
+  const chunkSize = Math.max(1, options?.chunkSize ?? performance?.chunkSize ?? (lowMemory ? 40 : 200))
+  const includeSemanticDuplication = options?.includeSemanticDuplication
+    ?? performance?.includeSemanticDuplication
+    ?? !lowMemory
+
+  return {
+    lowMemory,
+    chunkSize,
+    maxFiles: options?.maxFiles ?? performance?.maxFiles,
+    maxFileSizeKb: options?.maxFileSizeKb ?? performance?.maxFileSizeKb,
+    includeSemanticDuplication,
+  }
+}
+
+function chunkPaths(paths: string[], chunkSize: number): string[][] {
+  if (paths.length === 0) return []
+  const chunks: string[][] = []
+  for (let i = 0; i < paths.length; i += chunkSize) {
+    chunks.push(paths.slice(i, i + chunkSize))
+  }
+  return chunks
+}
+
+function toPathKey(filePath: string): string {
+  let normalized = path.normalize(filePath)
+  if (process.platform === 'win32' && /^\\[A-Za-z]:\\/.test(normalized)) {
+    normalized = normalized.slice(1)
+  }
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized
+}
+
+function createAnalysisSkipReport(filePath: string, rule: 'analysis-skip-max-files' | 'analysis-skip-file-size', message: string): FileReport {
+  const issue: DriftIssue = {
+    rule,
+    severity: RULE_WEIGHTS[rule].severity,
+    message,
+    line: 1,
+    column: 1,
+    snippet: path.basename(filePath),
+  }
+  return {
+    path: filePath,
+    issues: [issue],
+    score: calculateScore([issue], RULE_WEIGHTS),
+  }
+}
+
+function selectSourcesForAnalysis(sources: AnalyzableSource[], options: ResolvedAnalysisOptions): SourceSelection {
+  let selected = sources
+  const skippedReports: FileReport[] = []
+
+  if (typeof options.maxFiles === 'number' && options.maxFiles >= 0 && selected.length > options.maxFiles) {
+    const allowed = selected.slice(0, options.maxFiles)
+    const skipped = selected.slice(options.maxFiles)
+    selected = allowed
+
+    for (const source of skipped) {
+      skippedReports.push(createAnalysisSkipReport(
+        source.path,
+        'analysis-skip-max-files',
+        `Skipped by maxFiles guardrail (${options.maxFiles})`,
+      ))
+    }
+  }
+
+  if (typeof options.maxFileSizeKb === 'number' && options.maxFileSizeKb > 0) {
+    const maxBytes = options.maxFileSizeKb * 1024
+    const keep: AnalyzableSource[] = []
+    for (const source of selected) {
+      if (source.sizeBytes > maxBytes) {
+        const fileSizeKb = Math.ceil(source.sizeBytes / 1024)
+        skippedReports.push(createAnalysisSkipReport(
+          source.path,
+          'analysis-skip-file-size',
+          `Skipped by maxFileSizeKb guardrail (${fileSizeKb}KB > ${options.maxFileSizeKb}KB)`,
+        ))
+      } else {
+        keep.push(source)
+      }
+    }
+    selected = keep
+  }
+
+  return {
+    selectedPaths: selected.map((source) => source.path),
+    skippedReports,
+  }
+}
+
+function resolveImportTargetPath(
+  importerPath: string,
+  moduleSpecifier: string,
+  sourcePathMap: Map<string, string>,
+): string | undefined {
+  if (!moduleSpecifier.startsWith('.') && !path.isAbsolute(moduleSpecifier)) {
+    return undefined
+  }
+
+  const normalizedSpecifier = moduleSpecifier.replace(/\\/g, '/')
+  const basePath = path.resolve(path.dirname(importerPath), normalizedSpecifier)
+  const ext = path.extname(basePath)
+  const candidates = new Set<string>()
+
+  const addCandidate = (candidate: string) => {
+    candidates.add(path.normalize(candidate))
+  }
+
+  if (ext.length > 0) {
+    addCandidate(basePath)
+    if (ext === '.js' || ext === '.jsx' || ext === '.ts' || ext === '.tsx') {
+      const withoutExt = basePath.slice(0, -ext.length)
+      addCandidate(`${withoutExt}.ts`)
+      addCandidate(`${withoutExt}.tsx`)
+      addCandidate(`${withoutExt}.js`)
+      addCandidate(`${withoutExt}.jsx`)
+    }
+  } else {
+    addCandidate(basePath)
+    addCandidate(`${basePath}.ts`)
+    addCandidate(`${basePath}.tsx`)
+    addCandidate(`${basePath}.js`)
+    addCandidate(`${basePath}.jsx`)
+    addCandidate(path.join(basePath, 'index.ts'))
+    addCandidate(path.join(basePath, 'index.tsx'))
+    addCandidate(path.join(basePath, 'index.js'))
+    addCandidate(path.join(basePath, 'index.jsx'))
+  }
+
+  for (const candidate of candidates) {
+    const resolved = sourcePathMap.get(toPathKey(candidate))
+    if (resolved) return resolved
+  }
+
+  return undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -359,96 +536,126 @@ export function analyzeFile(
 // Project-level analysis (phases 2, 3, 8 require the full file set)
 // ---------------------------------------------------------------------------
 
-export function analyzeProject(targetPath: string, config?: DriftConfig): FileReport[] {
-  const project = new Project({
-    skipAddingFilesFromTsConfig: true,
-    compilerOptions: { allowJs: true, jsx: 1 },  // 1 = JsxEmit.Preserve
-  })
-
-  const sourcePaths = collectAnalyzableSourcePaths(targetPath)
-  if (sourcePaths.length > 0) {
-    project.addSourceFilesAtPaths(sourcePaths)
-  }
-
-  const sourceFiles = project.getSourceFiles()
+export function analyzeProject(targetPath: string, config?: DriftConfig, options?: DriftAnalysisOptions): FileReport[] {
+  const analysisOptions = resolveAnalysisOptions(config, options)
+  const discoveredSources = collectAnalyzableSources(targetPath)
+  const { selectedPaths: sourcePaths, skippedReports } = selectSourcesForAnalysis(discoveredSources, analysisOptions)
+  const sourcePathMap = new Map<string, string>(sourcePaths.map((filePath) => [toPathKey(filePath), filePath]))
   const pluginRuntime = loadPlugins(targetPath, config?.plugins)
 
-  // Phase 1: per-file analysis
-  const reports: FileReport[] = []
+  const reports: FileReport[] = [...skippedReports]
   const reportByPath = new Map<string, FileReport>()
   const ignoredPaths = new Set<string>()
-
-  for (const file of sourceFiles) {
-    const filePath = file.getFilePath()
-    const report = analyzeFile(file, {
-      config,
-      loadedPlugins: pluginRuntime.plugins,
-      projectRoot: targetPath,
-    })
-
-    reports.push(report)
-    reportByPath.set(report.path, report)
-    if (isFileIgnored(file)) ignoredPaths.add(filePath)
-  }
-
-  const getReport = (filePath: string): FileReport | undefined => {
-    if (ignoredPaths.has(filePath)) return undefined
-    return reportByPath.get(filePath)
-  }
-
-  // ── Phase 2 setup: build import graph ──────────────────────────────────────
-  const allImportedPaths = new Set<string>()
-  const allImportedNames = new Map<string, Set<string>>()
+  const allImportedPathKeys = new Set<string>()
+  const allImportedNamesByKey = new Map<string, Set<string>>()
   const allLiteralImports = new Set<string>()
   const importGraph = new Map<string, Set<string>>()
+  const fingerprintMap = new Map<string, Array<{ filePath: string; name: string; line: number; col: number }>>()
 
-  for (const sf of sourceFiles) {
-    const sfPath = sf.getFilePath()
-    for (const decl of sf.getImportDeclarations()) {
+  const getReport = (filePath: string): FileReport | undefined => {
+    const fileKey = toPathKey(filePath)
+    if (ignoredPaths.has(fileKey)) return undefined
+    return reportByPath.get(fileKey)
+  }
+
+  const addImportedName = (resolvedPath: string, name: string) => {
+    const resolvedKey = toPathKey(resolvedPath)
+    if (!allImportedNamesByKey.has(resolvedKey)) {
+      allImportedNamesByKey.set(resolvedKey, new Set())
+    }
+    allImportedNamesByKey.get(resolvedKey)!.add(name)
+  }
+
+  const collectCrossFileMetadata = (sourceFile: import('ts-morph').SourceFile) => {
+    const sourceFilePath = sourceFile.getFilePath()
+    const sourceFileKey = toPathKey(sourceFilePath)
+    const sourceFilePathCanonical = sourcePathMap.get(sourceFileKey) ?? sourceFilePath
+
+    for (const decl of sourceFile.getImportDeclarations()) {
       const moduleSpecifier = decl.getModuleSpecifierValue()
       allLiteralImports.add(moduleSpecifier)
 
-      const resolved = decl.getModuleSpecifierSourceFile()
-      if (resolved) {
-        const resolvedPath = resolved.getFilePath()
-        allImportedPaths.add(resolvedPath)
+      const resolvedPath = analysisOptions.lowMemory
+        ? resolveImportTargetPath(sourceFilePath, moduleSpecifier, sourcePathMap)
+        : decl.getModuleSpecifierSourceFile()?.getFilePath()
 
-        if (!importGraph.has(sfPath)) importGraph.set(sfPath, new Set())
-        importGraph.get(sfPath)!.add(resolvedPath)
+      if (!resolvedPath) continue
+      const resolvedPathKey = toPathKey(resolvedPath)
+      const resolvedPathCanonical = sourcePathMap.get(resolvedPathKey) ?? resolvedPath
+      allImportedPathKeys.add(resolvedPathKey)
 
-        const named = decl.getNamedImports().map(n => n.getName())
-        const def = decl.getDefaultImport()?.getText()
-        const ns = decl.getNamespaceImport()?.getText()
+      if (!importGraph.has(sourceFilePathCanonical)) importGraph.set(sourceFilePathCanonical, new Set())
+      importGraph.get(sourceFilePathCanonical)!.add(resolvedPathCanonical)
 
-        if (!allImportedNames.has(resolvedPath)) {
-          allImportedNames.set(resolvedPath, new Set())
-        }
-        const nameSet = allImportedNames.get(resolvedPath)!
-        for (const n of named) nameSet.add(n)
-        if (def) nameSet.add('default')
-        if (ns) nameSet.add('*')
+      for (const named of decl.getNamedImports().map((namedImport) => namedImport.getName())) {
+        addImportedName(resolvedPathCanonical, named)
       }
+      if (decl.getDefaultImport()) addImportedName(resolvedPathCanonical, 'default')
+      if (decl.getNamespaceImport()) addImportedName(resolvedPathCanonical, '*')
     }
 
-    for (const exportDecl of sf.getExportDeclarations()) {
-      const reExportedModule = exportDecl.getModuleSpecifierSourceFile()
-      if (!reExportedModule) continue
+    for (const exportDecl of sourceFile.getExportDeclarations()) {
+      const moduleSpecifier = exportDecl.getModuleSpecifierValue()
+      if (!moduleSpecifier) continue
 
-      const reExportedPath = reExportedModule.getFilePath()
-      allImportedPaths.add(reExportedPath)
+      const reExportedPath = analysisOptions.lowMemory
+        ? resolveImportTargetPath(sourceFilePath, moduleSpecifier, sourcePathMap)
+        : exportDecl.getModuleSpecifierSourceFile()?.getFilePath()
 
-      if (!allImportedNames.has(reExportedPath)) {
-        allImportedNames.set(reExportedPath, new Set())
-      }
-      const nameSet = allImportedNames.get(reExportedPath)!
+      if (!reExportedPath) continue
+      const reExportedPathKey = toPathKey(reExportedPath)
+      const reExportedPathCanonical = sourcePathMap.get(reExportedPathKey) ?? reExportedPath
+      allImportedPathKeys.add(reExportedPathKey)
 
       const namedExports = exportDecl.getNamedExports()
       if (namedExports.length === 0) {
-        nameSet.add('*')
+        addImportedName(reExportedPathCanonical, '*')
       } else {
-        for (const ne of namedExports) nameSet.add(ne.getName())
+        for (const namedExport of namedExports) {
+          addImportedName(reExportedPathCanonical, namedExport.getName())
+        }
       }
     }
+
+    if (!analysisOptions.includeSemanticDuplication || ignoredPaths.has(sourceFileKey)) {
+      return
+    }
+
+    for (const { fn, name, line, col } of collectFunctions(sourceFile)) {
+      const fp = fingerprintFunction(fn)
+      if (!fingerprintMap.has(fp)) fingerprintMap.set(fp, [])
+      fingerprintMap.get(fp)!.push({ filePath: sourceFilePathCanonical, name, line, col })
+    }
+  }
+
+  const analyzeChunk = (chunk: string[]) => {
+    const project = new Project({
+      skipAddingFilesFromTsConfig: true,
+      compilerOptions: { allowJs: true, jsx: 1 },
+    })
+    project.addSourceFilesAtPaths(chunk)
+
+    for (const sourceFile of project.getSourceFiles()) {
+      const sourceFilePath = sourceFile.getFilePath()
+      const sourceFileKey = toPathKey(sourceFilePath)
+      const sourceFilePathCanonical = sourcePathMap.get(sourceFileKey) ?? sourceFilePath
+      const report = analyzeFile(sourceFile, {
+        config,
+        loadedPlugins: pluginRuntime.plugins,
+        projectRoot: targetPath,
+      })
+      report.path = sourceFilePathCanonical
+
+      reports.push(report)
+      reportByPath.set(sourceFileKey, report)
+      if (isFileIgnored(sourceFile)) ignoredPaths.add(sourceFileKey)
+      collectCrossFileMetadata(sourceFile)
+    }
+  }
+
+  const chunks = chunkPaths(sourcePaths, analysisOptions.lowMemory ? analysisOptions.chunkSize : sourcePaths.length || 1)
+  for (const chunk of chunks) {
+    analyzeChunk(chunk)
   }
 
   // Plugin diagnostics are surfaced as synthetic report entries.
@@ -464,19 +671,34 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
     }
   }
 
-  // ── Phase 2: dead-file + unused-export + unused-dependency ─────────────────
-  const deadFiles = detectDeadFiles(sourceFiles, allImportedPaths, RULE_WEIGHTS)
-  for (const [sfPath, issue] of deadFiles) {
-    const report = getReport(sfPath)
-    if (report) {
-      report.issues.push(issue)
-    }
-  }
+  for (const chunk of chunks) {
+    const project = new Project({
+      skipAddingFilesFromTsConfig: true,
+      compilerOptions: { allowJs: true, jsx: 1 },
+    })
+    project.addSourceFilesAtPaths(chunk)
+    const sourceFiles = project.getSourceFiles()
 
-  const unusedExports = detectUnusedExports(sourceFiles, allImportedNames, RULE_WEIGHTS)
-  for (const [sfPath, issues] of unusedExports) {
-    const report = getReport(sfPath)
-    if (report) {
+    const importedPathsForChunk = new Set<string>()
+    const importedNamesForChunk = new Map<string, Set<string>>()
+    for (const sourceFile of sourceFiles) {
+      const sfPath = sourceFile.getFilePath()
+      const sfKey = toPathKey(sfPath)
+      if (allImportedPathKeys.has(sfKey)) importedPathsForChunk.add(sfPath)
+      const importedNames = allImportedNamesByKey.get(sfKey)
+      if (importedNames) importedNamesForChunk.set(sfPath, new Set(importedNames))
+    }
+
+    const deadFiles = detectDeadFiles(sourceFiles, importedPathsForChunk, RULE_WEIGHTS)
+    for (const [sfPath, issue] of deadFiles) {
+      const report = getReport(sfPath)
+      if (report) report.issues.push(issue)
+    }
+
+    const unusedExports = detectUnusedExports(sourceFiles, importedNamesForChunk, RULE_WEIGHTS)
+    for (const [sfPath, issues] of unusedExports) {
+      const report = getReport(sfPath)
+      if (!report) continue
       for (const issue of issues) {
         report.issues.push(issue)
       }
@@ -493,83 +715,65 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
     })
   }
 
-  // ── Phase 3: circular-dependency ────────────────────────────────────────────
   const circularIssues = detectCircularDependencies(importGraph, RULE_WEIGHTS)
   for (const [filePath, issue] of circularIssues) {
     const report = getReport(filePath)
-    if (report) {
-      report.issues.push(issue)
-    }
+    if (report) report.issues.push(issue)
   }
 
-  // ── Phase 3b: layer-violation ────────────────────────────────────────────────
   if (config?.layers && config.layers.length > 0) {
     const layerIssues = detectLayerViolations(importGraph, config.layers, targetPath, RULE_WEIGHTS)
     for (const [filePath, issues] of layerIssues) {
       const report = getReport(filePath)
-      if (report) {
-        for (const issue of issues) {
-          report.issues.push(issue)
-        }
+      if (!report) continue
+      for (const issue of issues) {
+        report.issues.push(issue)
       }
     }
   }
 
-  // ── Phase 3c: cross-boundary-import ─────────────────────────────────────────
   if (config?.modules && config.modules.length > 0) {
     const boundaryIssues = detectCrossBoundaryImports(importGraph, config.modules, targetPath, RULE_WEIGHTS)
     for (const [filePath, issues] of boundaryIssues) {
       const report = getReport(filePath)
-      if (report) {
-        for (const issue of issues) {
-          report.issues.push(issue)
-        }
+      if (!report) continue
+      for (const issue of issues) {
+        report.issues.push(issue)
       }
     }
   }
 
-  // ── Phase 8: semantic-duplication ───────────────────────────────────────────
-  const fingerprintMap = new Map<string, Array<{ filePath: string; name: string; line: number; col: number }>>()
-  const relativePathCache = new Map<string, string>()
-
-  const toRelativePath = (filePath: string): string => {
-    const cached = relativePathCache.get(filePath)
-    if (cached) return cached
-    const value = path.relative(targetPath, filePath).replace(/\\/g, '/')
-    relativePathCache.set(filePath, value)
-    return value
-  }
-
-  for (const sf of sourceFiles) {
-    if (isFileIgnored(sf)) continue
-    const sfPath = sf.getFilePath()
-    for (const { fn, name, line, col } of collectFunctions(sf)) {
-      const fp = fingerprintFunction(fn)
-      if (!fingerprintMap.has(fp)) fingerprintMap.set(fp, [])
-      fingerprintMap.get(fp)!.push({ filePath: sfPath, name, line, col })
+  if (analysisOptions.includeSemanticDuplication) {
+    const relativePathCache = new Map<string, string>()
+    const toRelativePath = (filePath: string): string => {
+      const cached = relativePathCache.get(filePath)
+      if (cached) return cached
+      const value = path.relative(targetPath, filePath).replace(/\\/g, '/')
+      relativePathCache.set(filePath, value)
+      return value
     }
-  }
 
-  for (const [, entries] of fingerprintMap) {
-    if (entries.length < 2) continue
+    for (const [, entries] of fingerprintMap) {
+      if (entries.length < 2) continue
 
-    for (const entry of entries) {
-      const report = reportByPath.get(entry.filePath)
-      if (!report) continue
+      for (const entry of entries) {
+        const report = getReport(entry.filePath)
+        if (!report) continue
 
-      const others = entries
-        .filter(e => e !== entry)
-        .map(e => `${toRelativePath(e.filePath)}:${e.line} (${e.name})`)
-        .join(', ')
+        const others = entries
+          .filter((other) => other !== entry)
+          .map((other) => `${toRelativePath(other.filePath)}:${other.line} (${other.name})`)
+          .join(', ')
 
-      report.issues.push({
-        rule: 'semantic-duplication',
-        severity: 'warning',
-        message: `Function '${entry.name}' is semantically identical to: ${others}`,
-        line: entry.line,
-        column: entry.col,
-        snippet: `function ${entry.name} — duplicated in ${entries.length - 1} other location${entries.length > 2 ? 's' : ''}`,
-      })
+        report.issues.push({
+          rule: 'semantic-duplication',
+          severity: 'warning',
+          message: `Function '${entry.name}' is semantically identical to: ${others}`,
+          line: entry.line,
+          column: entry.col,
+          snippet: `function ${entry.name} - duplicated in ${entries.length - 1} other location${entries.length > 2 ? 's' : ''}`,
+        })
+      }
     }
   }
 

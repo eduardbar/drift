@@ -167,6 +167,7 @@ export interface DriftConfig {
   layers?: LayerDefinition[]
   modules?: ModuleBoundary[]
   plugins?: string[]
+  performance?: DriftPerformanceConfig
   architectureRules?: {
     controllerNoDb?: boolean
     serviceNoHttp?: boolean
@@ -178,6 +179,22 @@ export interface DriftConfig {
     maxReposPerWorkspace?: number
     retentionDays?: number
   }
+}
+
+export interface DriftPerformanceConfig {
+  lowMemory?: boolean
+  chunkSize?: number
+  maxFiles?: number
+  maxFileSizeKb?: number
+  includeSemanticDuplication?: boolean
+}
+
+export interface DriftAnalysisOptions {
+  lowMemory?: boolean
+  chunkSize?: number
+  maxFiles?: number
+  maxFileSizeKb?: number
+  includeSemanticDuplication?: boolean
 }
 
 export interface PluginRuleContext {

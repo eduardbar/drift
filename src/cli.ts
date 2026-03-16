@@ -23,29 +23,66 @@ import { generateReview } from './review.js'
 import { generateArchitectureMap } from './map.js'
 import { ingestSnapshotFromReport, getSaasSummary, generateSaasDashboardHtml } from './saas.js'
 import { buildTrustReport, formatTrustJson, renderTrustOutput, shouldFailTrustGate, normalizeMergeRiskLevel, MERGE_RISK_ORDER } from './trust.js'
-import type { DriftDiff, DriftTrustReport, MergeRiskLevel } from './types.js'
+import type { DriftDiff, DriftTrustReport, DriftAnalysisOptions, MergeRiskLevel } from './types.js'
 
 const program = new Command()
+
+type ResourceOptionFlags = {
+  lowMemory?: boolean
+  chunkSize?: string
+  maxFiles?: string
+  maxFileSizeKb?: string
+  withSemanticDuplication?: boolean
+}
+
+function parseOptionalPositiveInt(rawValue: string | undefined, flagName: string): number | undefined {
+  if (rawValue == null) return undefined
+  const value = Number(rawValue)
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`${flagName} must be a non-negative integer`)
+  }
+  return value
+}
+
+function resolveAnalysisOptions(options: ResourceOptionFlags): DriftAnalysisOptions {
+  return {
+    lowMemory: options.lowMemory,
+    chunkSize: parseOptionalPositiveInt(options.chunkSize, '--chunk-size'),
+    maxFiles: parseOptionalPositiveInt(options.maxFiles, '--max-files'),
+    maxFileSizeKb: parseOptionalPositiveInt(options.maxFileSizeKb, '--max-file-size-kb'),
+    includeSemanticDuplication: options.withSemanticDuplication ? true : undefined,
+  }
+}
+
+function addResourceOptions(command: Command): Command {
+  return command
+    .option('--low-memory', 'Reduce peak memory usage by chunking AST analysis')
+    .option('--chunk-size <n>', 'Files per chunk in low-memory mode (default: 40)')
+    .option('--max-files <n>', 'Maximum files to analyze before soft-skipping extras')
+    .option('--max-file-size-kb <n>', 'Skip files above this size and report diagnostics')
+    .option('--with-semantic-duplication', 'Keep semantic-duplication rule enabled in low-memory mode')
+}
 
 program
   .name('drift')
   .description('AI Code Audit CLI for merge trust in AI-assisted PRs')
   .version(VERSION)
 
-program
-  .command('scan [path]', { isDefault: true })
+addResourceOptions(
+  program
+    .command('scan [path]', { isDefault: true })
   .description('Scan a directory for vibe coding drift')
   .option('-o, --output <file>', 'Write report to a Markdown file')
   .option('--json', 'Output raw JSON report')
   .option('--ai', 'Output AI-optimized JSON for LLM consumption')
   .option('--fix', 'Show fix suggestions for each issue')
   .option('--min-score <n>', 'Exit with code 1 if overall score exceeds this threshold', '0')
-  .action(async (targetPath: string | undefined, options: { output?: string; json?: boolean; ai?: boolean; fix?: boolean; minScore: string }) => {
+  .action(async (targetPath: string | undefined, options: { output?: string; json?: boolean; ai?: boolean; fix?: boolean; minScore: string } & ResourceOptionFlags) => {
     const resolvedPath = resolve(targetPath ?? '.')
 
     process.stderr.write(`\nScanning ${resolvedPath}...\n`)
     const config = await loadConfig(resolvedPath)
-    const files = analyzeProject(resolvedPath, config)
+    const files = analyzeProject(resolvedPath, config, resolveAnalysisOptions(options))
     process.stderr.write(`  Found ${files.length} TypeScript file(s)\n\n`)
     const report = buildReport(resolvedPath, files)
 
@@ -74,15 +111,18 @@ program
     if (minScore > 0 && report.totalScore > minScore) {
       process.exit(1)
     }
-  })
+  }),
+)
 
-program
-  .command('diff [ref]')
+addResourceOptions(
+  program
+    .command('diff [ref]')
   .description('Compare current state against a git ref (default: HEAD~1)')
   .option('--json', 'Output raw JSON diff')
-  .action(async (ref: string | undefined, options: { json?: boolean }) => {
+  .action(async (ref: string | undefined, options: { json?: boolean } & ResourceOptionFlags) => {
     const baseRef = ref ?? 'HEAD~1'
     const projectPath = resolve('.')
+    const analysisOptions = resolveAnalysisOptions(options)
 
     let tempDir: string | undefined
 
@@ -91,12 +131,12 @@ program
 
       // Scan current state
       const config = await loadConfig(projectPath)
-      const currentFiles = analyzeProject(projectPath, config)
+      const currentFiles = analyzeProject(projectPath, config, analysisOptions)
       const currentReport = buildReport(projectPath, currentFiles)
 
       // Extract base state from git
       tempDir = extractFilesAtRef(projectPath, baseRef)
-      const baseFiles = analyzeProject(tempDir, config)
+      const baseFiles = analyzeProject(tempDir, config, analysisOptions)
 
       // Remap base file paths to match current project paths
       // (temp dir paths → project paths for accurate comparison)
@@ -123,7 +163,8 @@ program
     } finally {
       if (tempDir) cleanupTempDir(tempDir)
     }
-  })
+  }),
+)
 
 program
   .command('review')
@@ -153,8 +194,9 @@ program
     }
   })
 
-program
-  .command('trust [path]')
+addResourceOptions(
+  program
+    .command('trust [path]')
   .description('Compute merge trust baseline from drift signals')
   .option('--base <ref>', 'Git base ref for diff-aware trust scoring')
   .option('--json', 'Output structured trust JSON')
@@ -173,16 +215,17 @@ program
       jsonOutput?: string
       minTrust?: string
       maxRisk?: string
-    },
+    } & ResourceOptionFlags,
   ) => {
     let tempDir: string | undefined
 
     try {
       const resolvedPath = resolve(targetPath ?? '.')
+      const analysisOptions = resolveAnalysisOptions(options)
 
       process.stderr.write(`\nScanning ${resolvedPath} for trust signals...\n`)
       const config = await loadConfig(resolvedPath)
-      const files = analyzeProject(resolvedPath, config)
+      const files = analyzeProject(resolvedPath, config, analysisOptions)
       process.stderr.write(`  Found ${files.length} TypeScript file(s)\n\n`)
 
       const report = buildReport(resolvedPath, files)
@@ -191,7 +234,7 @@ program
       if (options.base) {
         process.stderr.write(`Computing diff signals against ${options.base}...\n`)
         tempDir = extractFilesAtRef(resolvedPath, options.base)
-        const baseFiles = analyzeProject(tempDir, config)
+        const baseFiles = analyzeProject(tempDir, config, analysisOptions)
         const baseReport = buildReport(tempDir, baseFiles)
         const remappedBase = {
           ...baseReport,
@@ -247,7 +290,8 @@ program
     } finally {
       if (tempDir) cleanupTempDir(tempDir)
     }
-  })
+  }),
+)
 
 program
   .command('trust-gate <trustJsonFile>')
@@ -325,48 +369,53 @@ program
     process.stderr.write(`  Architecture map saved to ${out}\n\n`)
   })
 
-program
-  .command('report [path]')
+addResourceOptions(
+  program
+    .command('report [path]')
   .description('Generate a self-contained HTML report')
   .option('-o, --output <file>', 'Output file path (default: drift-report.html)', 'drift-report.html')
-  .action(async (targetPath: string | undefined, options: { output: string }) => {
+  .action(async (targetPath: string | undefined, options: { output: string } & ResourceOptionFlags) => {
     const resolvedPath = resolve(targetPath ?? '.')
     process.stderr.write(`\nScanning ${resolvedPath}...\n`)
     const config = await loadConfig(resolvedPath)
-    const files = analyzeProject(resolvedPath, config)
+    const files = analyzeProject(resolvedPath, config, resolveAnalysisOptions(options))
     process.stderr.write(`  Found ${files.length} TypeScript file(s)\n\n`)
     const report = buildReport(resolvedPath, files)
     const html = generateHtmlReport(report)
     const outPath = resolve(options.output)
     writeFileSync(outPath, html, 'utf8')
     process.stderr.write(`  Report saved to ${outPath}\n\n`)
-  })
+  }),
+)
 
-program
-  .command('badge [path]')
+addResourceOptions(
+  program
+    .command('badge [path]')
   .description('Generate a badge.svg with the current drift score')
   .option('-o, --output <file>', 'Output file path (default: badge.svg)', 'badge.svg')
-  .action(async (targetPath: string | undefined, options: { output: string }) => {
+  .action(async (targetPath: string | undefined, options: { output: string } & ResourceOptionFlags) => {
     const resolvedPath = resolve(targetPath ?? '.')
     process.stderr.write(`\nScanning ${resolvedPath}...\n`)
     const config = await loadConfig(resolvedPath)
-    const files = analyzeProject(resolvedPath, config)
+    const files = analyzeProject(resolvedPath, config, resolveAnalysisOptions(options))
     const report = buildReport(resolvedPath, files)
     const svg = generateBadge(report.totalScore)
     const outPath = resolve(options.output)
     writeFileSync(outPath, svg, 'utf8')
     process.stderr.write(`  Badge saved to ${outPath}\n`)
     process.stderr.write(`  Score: ${report.totalScore}/100\n\n`)
-  })
+  }),
+)
 
-program
-  .command('ci [path]')
+addResourceOptions(
+  program
+    .command('ci [path]')
   .description('Emit GitHub Actions annotations and step summary')
   .option('--min-score <n>', 'Exit with code 1 if overall score exceeds this threshold', '0')
-  .action(async (targetPath: string | undefined, options: { minScore: string }) => {
+  .action(async (targetPath: string | undefined, options: { minScore: string } & ResourceOptionFlags) => {
     const resolvedPath = resolve(targetPath ?? '.')
     const config = await loadConfig(resolvedPath)
-    const files = analyzeProject(resolvedPath, config)
+    const files = analyzeProject(resolvedPath, config, resolveAnalysisOptions(options))
     const report = buildReport(resolvedPath, files)
     emitCIAnnotations(report)
     printCISummary(report)
@@ -374,7 +423,8 @@ program
     if (minScore > 0 && report.totalScore > minScore) {
       process.exit(1)
     }
-  })
+  }),
+)
 
 program
   .command('trend [period]')
@@ -502,15 +552,16 @@ program
     }
   })
 
-program
-  .command('snapshot [path]')
+addResourceOptions(
+  program
+    .command('snapshot [path]')
   .description('Record a score snapshot to drift-history.json')
   .option('-l, --label <label>', 'label for this snapshot (e.g. sprint name, version)')
   .option('--history', 'show all recorded snapshots')
   .option('--diff', 'compare current score vs last snapshot')
   .action(async (
     targetPath: string | undefined,
-    opts: { label?: string; history?: boolean; diff?: boolean },
+    opts: { label?: string; history?: boolean; diff?: boolean } & ResourceOptionFlags,
   ) => {
     const resolvedPath = resolve(targetPath ?? '.')
 
@@ -522,7 +573,7 @@ program
 
     process.stderr.write(`\nScanning ${resolvedPath}...\n`)
     const config = await loadConfig(resolvedPath)
-    const files = analyzeProject(resolvedPath, config)
+    const files = analyzeProject(resolvedPath, config, resolveAnalysisOptions(opts))
     process.stderr.write(`  Found ${files.length} TypeScript file(s)\n\n`)
     const report = buildReport(resolvedPath, files)
 
@@ -538,24 +589,26 @@ program
       `  Snapshot recorded${labelStr}: score ${entry.score} (${entry.grade}) — ${entry.totalIssues} issues across ${entry.files} files\n`,
     )
     process.stdout.write(`  Saved to drift-history.json\n\n`)
-  })
+  }),
+)
 
 const cloud = program
   .command('cloud')
   .description('Local SaaS foundations: ingest, summary, and dashboard')
 
-cloud
-  .command('ingest [path]')
+addResourceOptions(
+  cloud
+    .command('ingest [path]')
   .description('Scan path, build report, and store cloud snapshot')
   .requiredOption('--workspace <id>', 'Workspace id')
   .requiredOption('--user <id>', 'User id')
   .option('--repo <name>', 'Repo name (default: basename of scanned path)')
   .option('--store <file>', 'Store file path (default: .drift-cloud/store.json)')
-  .action(async (targetPath: string | undefined, options: { workspace: string; user: string; repo?: string; store?: string }) => {
+  .action(async (targetPath: string | undefined, options: { workspace: string; user: string; repo?: string; store?: string } & ResourceOptionFlags) => {
     const resolvedPath = resolve(targetPath ?? '.')
     process.stderr.write(`\nScanning ${resolvedPath} for cloud ingest...\n`)
     const config = await loadConfig(resolvedPath)
-    const files = analyzeProject(resolvedPath, config)
+    const files = analyzeProject(resolvedPath, config, resolveAnalysisOptions(options))
     const report = buildReport(resolvedPath, files)
 
     const snapshot = ingestSnapshotFromReport(report, {
@@ -569,7 +622,8 @@ cloud
     process.stdout.write(`Ingested snapshot ${snapshot.id}\n`)
     process.stdout.write(`Workspace: ${snapshot.workspaceId}  Repo: ${snapshot.repoName}\n`)
     process.stdout.write(`Score: ${snapshot.totalScore}/100  Issues: ${snapshot.totalIssues}\n\n`)
-  })
+  }),
+)
 
 cloud
   .command('summary')

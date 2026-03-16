@@ -177,4 +177,75 @@ describe('new feature MVP', () => {
     expect(write.length).toBeGreaterThan(0)
     expect(readFileSync(file, 'utf8')).not.toContain('console.log')
   })
+
+  it('supports low-memory chunked analysis with cross-file rules', () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'drift-low-memory-'))
+    writeFileSync(join(tmpDir, 'a.ts'), "import { b } from './b.js'\nexport const a = b\n")
+    writeFileSync(join(tmpDir, 'b.ts'), "import { a } from './a.js'\nexport const b = a\n")
+
+    const fullRules = new Set(analyzeProject(tmpDir).flatMap((report) => report.issues.map((issue) => issue.rule)))
+    const lowMemoryRules = new Set(
+      analyzeProject(tmpDir, undefined, { lowMemory: true, chunkSize: 1, includeSemanticDuplication: true })
+        .flatMap((report) => report.issues.map((issue) => issue.rule)),
+    )
+
+    expect(fullRules.has('circular-dependency')).toBe(true)
+    expect(lowMemoryRules.has('circular-dependency')).toBe(true)
+  })
+
+  it('adds diagnostics when max file size guardrail skips files', () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'drift-max-file-size-'))
+    writeFileSync(join(tmpDir, 'small.ts'), 'export const ok = 1\n')
+    writeFileSync(join(tmpDir, 'big.ts'), `export const payload = '${'x'.repeat(5000)}'\n`)
+
+    const reports = analyzeProject(tmpDir, undefined, { maxFileSizeKb: 1 })
+    const skipIssues = reports.flatMap((report) => report.issues.filter((issue) => issue.rule === 'analysis-skip-file-size'))
+
+    expect(skipIssues.length).toBeGreaterThan(0)
+    expect(skipIssues[0].message).toContain('maxFileSizeKb')
+  })
+
+  it('adds diagnostics when max files guardrail skips files', () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'drift-max-files-'))
+    writeFileSync(join(tmpDir, 'a.ts'), 'export const a = 1\n')
+    writeFileSync(join(tmpDir, 'b.ts'), 'export const b = 2\n')
+    writeFileSync(join(tmpDir, 'c.ts'), 'export const c = 3\n')
+
+    const reports = analyzeProject(tmpDir, undefined, { maxFiles: 1 })
+    const skipped = reports.flatMap((report) => report.issues.filter((issue) => issue.rule === 'analysis-skip-max-files'))
+
+    expect(skipped).toHaveLength(2)
+  })
+
+  it('disables semantic duplication by default in low-memory mode but keeps opt-in', () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'drift-low-memory-semantic-'))
+    const functionA = [
+      'export function same(x: number): number {',
+      '  const a = x + 1',
+      '  const b = a * 2',
+      '  const c = b - 3',
+      '  const d = c + 4',
+      '  const e = d * 5',
+      '  const f = e - 6',
+      '  const g = f + 7',
+      '  return g',
+      '}',
+    ].join('\n')
+    const functionB = functionA
+      .replace('same', 'same2')
+      .replace(/\bx\b/g, 'n')
+
+    writeFileSync(join(tmpDir, 'a.ts'), `${functionA}\n`)
+    writeFileSync(join(tmpDir, 'b.ts'), `${functionB}\n`)
+
+    const lowMemoryDefault = analyzeProject(tmpDir, undefined, { lowMemory: true })
+      .flatMap((report) => report.issues.map((issue) => issue.rule))
+    const lowMemoryWithSemantic = analyzeProject(tmpDir, undefined, {
+      lowMemory: true,
+      includeSemanticDuplication: true,
+    }).flatMap((report) => report.issues.map((issue) => issue.rule))
+
+    expect(lowMemoryDefault).not.toContain('semantic-duplication')
+    expect(lowMemoryWithSemantic).toContain('semantic-duplication')
+  })
 })

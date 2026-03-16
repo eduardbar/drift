@@ -106,6 +106,11 @@ npm run test:watch # vitest (watch mode)
 | `--ai` | boolean | JSON optimizado para LLMs (`AIOutput`) |
 | `--fix` | boolean | Muestra sugerencias de fix en consola |
 | `--min-score <n>` | number | Exit code 1 si score supera umbral (CI) |
+| `--low-memory` | boolean | Activa análisis por chunks para bajar el pico de RAM |
+| `--chunk-size <n>` | number | Cantidad de archivos por chunk en low-memory mode |
+| `--max-files <n>` | number | Límite blando de archivos analizados (el resto se reporta como skip) |
+| `--max-file-size-kb <n>` | number | Saltea archivos grandes y agrega diagnóstico de skip |
+| `--with-semantic-duplication` | boolean | Rehabilita semantic-duplication en low-memory mode |
 
 **Uso básico:**
 ```bash
@@ -114,6 +119,7 @@ npx @eduardbar/drift scan ./src --min-score 60
 npx @eduardbar/drift scan ./src --ai | pbcopy   # pegar en Claude/GPT
 npx @eduardbar/drift scan ./src --fix           # ver sugerencias inline
 npx @eduardbar/drift scan ./src -o report.md    # exportar Markdown
+npx @eduardbar/drift scan ./src --low-memory --max-file-size-kb 1024
 ```
 
 ---

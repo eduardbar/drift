@@ -69,6 +69,7 @@ drift scan ./src --json
 drift scan ./src --ai
 drift scan ./src --fix
 drift scan ./src --min-score 50
+drift scan ./src --low-memory --max-file-size-kb 1024
 ```
 
 **Options:**
@@ -80,6 +81,11 @@ drift scan ./src --min-score 50
 | `--ai` | Output structured JSON optimized for LLM consumption (Claude, GPT, etc.) |
 | `--fix` | Print inline fix suggestions for each detected issue |
 | `--min-score <n>` | Exit with code 1 if the overall score meets or exceeds this threshold |
+| `--low-memory` | Analyze files in bounded chunks to reduce peak RAM |
+| `--chunk-size <n>` | Files per chunk in low-memory mode (default: 40) |
+| `--max-files <n>` | Soft cap on analyzed files; extra files are skipped with diagnostics |
+| `--max-file-size-kb <n>` | Skip oversized files with diagnostics to avoid OOM |
+| `--with-semantic-duplication` | Keep semantic duplication rule enabled in low-memory mode |
 
 **Example output:**
 
@@ -413,6 +419,13 @@ import type { DriftConfig } from '@eduardbar/drift'
 
 export default {
   plugins: ['drift-plugin-example'],
+  performance: {
+    lowMemory: true,
+    chunkSize: 40,
+    maxFiles: 8000,
+    maxFileSizeKb: 1024,
+    includeSemanticDuplication: false,
+  },
   architectureRules: {
     controllerNoDb: true,
     serviceNoHttp: true,
@@ -439,6 +452,20 @@ export default {
 ```
 
 Without a config file, `layer-violation` and `cross-boundary-import` are silently skipped. All other rules run with their defaults.
+
+### Memory guardrails (recommended for large repos)
+
+If your repository is large or your machine has limited RAM, start with:
+
+```bash
+drift scan . --low-memory --max-file-size-kb 1024 --max-files 8000
+```
+
+Practical tuning:
+- Lower `--chunk-size` to reduce peak memory further (slower but safer).
+- Keep `includeSemanticDuplication: false` in low-memory mode for the lowest memory footprint.
+- Set `maxFileSizeKb` to skip generated/vendor files that can explode AST memory usage.
+- Set `maxFiles` to protect CI runners from worst-case monorepo scans.
 
 ---
 
