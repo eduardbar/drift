@@ -41,8 +41,10 @@ import {
   MERGE_RISK_ORDER,
   detectBranchName,
 } from './trust.js'
+import { computeTrustKpis, formatTrustKpiConsole, formatTrustKpiJson } from './trust-kpi.js'
 import type { DriftDiff, DriftTrustReport, DriftAnalysisOptions, MergeRiskLevel } from './types.js'
 import type { TrustGatePolicyExplanation } from './trust.js'
+import type { SnapshotHistory } from './snapshot.js'
 
 const program = new Command()
 
@@ -268,6 +270,9 @@ addResourceOptions(
   .option('--branch <name>', 'Branch name for trust policy matching (default: auto-detect from CI env)')
   .option('--policy-pack <name>', 'Trust policy pack from drift.config trustGate.policyPacks')
   .option('--explain-policy', 'Print effective trust gate policy resolution to stderr')
+  .option('--advanced-trust', 'Enable advanced trust mode with historical comparison and team guidance')
+  .option('--previous-trust <file>', 'Previous trust JSON file to compare against (used in advanced mode)')
+  .option('--history-file <file>', 'Snapshot history JSON file (default: <path>/drift-history.json) for advanced mode')
   .action(async (
     targetPath: string | undefined,
     options: {
@@ -281,6 +286,9 @@ addResourceOptions(
       branch?: string
       policyPack?: string
       explainPolicy?: boolean
+      advancedTrust?: boolean
+      previousTrust?: string
+      historyFile?: string
     } & ResourceOptionFlags,
   ) => {
     let tempDir: string | undefined
@@ -326,7 +334,35 @@ addResourceOptions(
         process.stderr.write(`  Diff: ${diff.totalDelta >= 0 ? '+' : ''}${diff.totalDelta} score, +${diff.newIssuesCount} new / -${diff.resolvedIssuesCount} resolved\n\n`)
       }
 
-      const trust = buildTrustReport(report, { diff })
+      let previousTrustReport: Partial<DriftTrustReport> | undefined
+      let snapshots: SnapshotHistory['snapshots'] | undefined
+      if (options.advancedTrust) {
+        if (options.previousTrust) {
+          const previousTrustPath = resolve(options.previousTrust)
+          const rawPreviousTrust = readFileSync(previousTrustPath, 'utf8')
+          previousTrustReport = JSON.parse(rawPreviousTrust) as Partial<DriftTrustReport>
+          process.stderr.write(`Advanced trust: loaded previous trust JSON from ${previousTrustPath}\n`)
+        }
+
+        if (options.historyFile) {
+          const historyPath = resolve(options.historyFile)
+          const rawHistory = readFileSync(historyPath, 'utf8')
+          const history = JSON.parse(rawHistory) as SnapshotHistory
+          snapshots = history.snapshots
+          process.stderr.write(`Advanced trust: loaded snapshot history from ${historyPath}\n`)
+        } else {
+          snapshots = loadHistory(resolvedPath).snapshots
+        }
+      }
+
+      const trust = buildTrustReport(report, {
+        diff,
+        advanced: {
+          enabled: options.advancedTrust,
+          previousTrust: previousTrustReport,
+          snapshots,
+        },
+      })
 
       const rendered = `${renderTrustOutput(trust, options)}\n`
 
@@ -426,6 +462,26 @@ program
       }
 
       process.stdout.write(`Trust gate passed: trust=${trust.trust_score} risk=${trust.merge_risk}\n`)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      process.stderr.write(`\n  Error: ${message}\n\n`)
+      process.exit(1)
+    }
+  })
+
+program
+  .command('kpi <path>')
+  .description('Aggregate trust KPIs from trust JSON artifacts')
+  .option('--no-summary', 'Disable console KPI summary in stderr')
+  .action((targetPath: string, options: { summary?: boolean }) => {
+    try {
+      const kpi = computeTrustKpis(targetPath)
+
+      if (options.summary !== false) {
+        process.stderr.write(`${formatTrustKpiConsole(kpi)}\n`)
+      }
+
+      process.stdout.write(`${formatTrustKpiJson(kpi)}\n`)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       process.stderr.write(`\n  Error: ${message}\n\n`)

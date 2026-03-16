@@ -172,6 +172,9 @@ drift trust ./src --min-trust 45
 drift trust ./src --max-risk HIGH
 drift trust ./src --branch main
 drift trust ./src --branch release/v1.4.0 --policy-pack strict --explain-policy
+drift trust ./src --advanced-trust
+drift trust ./src --advanced-trust --previous-trust ./artifacts/prev-trust.json
+drift trust ./src --advanced-trust --history-file ./drift-history.json --markdown
 ```
 
 | Flag | Description |
@@ -185,6 +188,9 @@ drift trust ./src --branch release/v1.4.0 --policy-pack strict --explain-policy
 | `--branch <name>` | Branch used for `drift.config` trust policy matching (falls back to CI env vars) |
 | `--policy-pack <name>` | Optional trust policy pack from `trustGate.policyPacks` in `drift.config.*` |
 | `--explain-policy` | Print base/pack/branch/override resolution and effective gate policy to stderr |
+| `--advanced-trust` | Enable optional advanced trust layer (historical comparison + team guidance metadata) |
+| `--previous-trust <file>` | Compare current trust against a prior trust JSON file in advanced mode |
+| `--history-file <file>` | Use a specific `drift-history.json` file for advanced historical fallback |
 
 When `trustGate` policy is configured in `drift.config.*`, branch-based thresholds are applied automatically. CLI flags still override policy values.
 
@@ -207,6 +213,30 @@ drift trust-gate drift-trust.json --branch main --policy-pack balanced --explain
 | `--branch <name>` | Branch used for `drift.config` trust policy matching (falls back to CI env vars) |
 | `--policy-pack <name>` | Optional trust policy pack from `trustGate.policyPacks` in `drift.config.*` |
 | `--explain-policy` | Print base/pack/branch/override resolution and effective gate policy to stderr |
+
+---
+
+### `drift kpi <path>`
+
+Aggregate trust KPI evidence from local artifacts (directory or glob). Prints a compact console summary to stderr and structured KPI JSON to stdout.
+
+```bash
+drift kpi ./artifacts/trust
+drift kpi "./artifacts/**/drift-trust-*.json"
+drift kpi ./artifacts/trust --no-summary
+```
+
+| Flag | Description |
+|------|-------------|
+| `--no-summary` | Disable stderr console summary and output JSON only |
+
+Computed KPI fields include:
+- PRs evaluated count
+- Merge risk distribution (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`)
+- Trust score average/median/min/max
+- High-risk ratio (`HIGH` + `CRITICAL`)
+- Diff trend aggregates when `diff_context` exists (`scoreDelta`, new/resolved issues, status distribution)
+- Diagnostics for malformed/missing/invalid JSON artifacts
 
 ---
 

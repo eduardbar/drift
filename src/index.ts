@@ -12,6 +12,12 @@ export {
   normalizeMergeRiskLevel,
   MERGE_RISK_ORDER,
 } from './trust.js'
+export {
+  computeTrustKpis,
+  computeTrustKpisFromReports,
+  formatTrustKpiConsole,
+  formatTrustKpiJson,
+} from './trust-kpi.js'
 export { generateArchitectureMap, generateArchitectureSvg } from './map.js'
 export type {
   DriftReport,
@@ -26,6 +32,10 @@ export type {
   TrustReason,
   TrustFixPriority,
   TrustDiffContext,
+  TrustKpiReport,
+  TrustKpiDiagnostic,
+  TrustDiffTrendSummary,
+  TrustScoreStats,
   MergeRiskLevel,
   DriftPlugin,
   DriftPluginRule,

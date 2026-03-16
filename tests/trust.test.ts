@@ -200,6 +200,106 @@ describe('drift trust baseline', () => {
     expect(renderTrustOutput(trust, { markdown: true })).toBe(formatTrustMarkdown(trust))
     expect(renderTrustOutput(trust, { json: true, markdown: true })).toBe(formatTrustJson(trust))
   })
+
+  it('keeps baseline trust contract unchanged when advanced mode is disabled', () => {
+    const report = createBaseReport({
+      totalScore: 28,
+      summary: {
+        errors: 1,
+        warnings: 2,
+        infos: 0,
+        byRule: {
+          'debug-leftover': 3,
+          'high-complexity': 1,
+        },
+      },
+    })
+
+    const trust = buildTrustReport(report)
+    expect(trust.advanced_context).toBeUndefined()
+    expect(trust.fix_priorities[0]).not.toHaveProperty('confidence')
+    expect(trust.fix_priorities[0]).not.toHaveProperty('explanation')
+    expect(trust.fix_priorities[0]).not.toHaveProperty('systemic')
+  })
+
+  it('enriches trust report with advanced comparison and metadata from previous trust JSON', () => {
+    const report = createBaseReport({
+      totalScore: 22,
+      summary: {
+        errors: 1,
+        warnings: 1,
+        infos: 0,
+        byRule: {
+          'layer-violation': 1,
+          'debug-leftover': 1,
+        },
+      },
+    })
+
+    const trust = buildTrustReport(report, {
+      advanced: {
+        enabled: true,
+        previousTrust: {
+          trust_score: 60,
+          merge_risk: 'HIGH',
+        },
+      },
+    })
+
+    expect(trust.advanced_context?.comparison?.source).toBe('previous-trust-json')
+    expect(typeof trust.advanced_context?.comparison?.trust_delta).toBe('number')
+    expect(trust.advanced_context?.team_guidance.length).toBeGreaterThan(0)
+    expect(trust.fix_priorities[0]).toHaveProperty('confidence')
+    expect(trust.fix_priorities[0]).toHaveProperty('explanation')
+    expect(trust.fix_priorities[0]).toHaveProperty('systemic')
+  })
+
+  it('uses snapshot history as historical fallback in advanced mode', () => {
+    const report = createBaseReport({ totalScore: 20 })
+    const trust = buildTrustReport(report, {
+      advanced: {
+        enabled: true,
+        snapshots: [
+          {
+            timestamp: '2026-01-01T00:00:00.000Z',
+            label: 'baseline',
+            score: 25,
+            grade: 'MODERATE',
+            totalIssues: 6,
+            files: 4,
+            byRule: {
+              'debug-leftover': 2,
+            },
+          },
+        ],
+      },
+    })
+
+    expect(trust.advanced_context?.comparison?.source).toBe('snapshot-history')
+    expect(trust.advanced_context?.comparison?.snapshot_score_delta).toBe(-5)
+  })
+
+  it('prioritizes systemic rules first in advanced mode', () => {
+    const report = createBaseReport({
+      totalScore: 30,
+      summary: {
+        errors: 1,
+        warnings: 2,
+        infos: 0,
+        byRule: {
+          'debug-leftover': 6,
+          'layer-violation': 2,
+        },
+      },
+    })
+
+    const baseline = buildTrustReport(report)
+    const advanced = buildTrustReport(report, { advanced: { enabled: true } })
+
+    expect(baseline.fix_priorities[0]?.rule).toBe('debug-leftover')
+    expect(advanced.fix_priorities[0]?.rule).toBe('layer-violation')
+    expect(advanced.fix_priorities[0]?.systemic).toBe(true)
+  })
 })
 
 describe('drift trust branch policy', () => {

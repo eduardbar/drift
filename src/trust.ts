@@ -10,7 +10,9 @@ import type {
   TrustDiffContext,
   TrustFixPriority,
   TrustReason,
+  TrustAdvancedComparison,
 } from './types.js'
+import type { SnapshotEntry } from './snapshot.js'
 
 const ARCHITECTURE_RULES = new Set([
   'circular-dependency',
@@ -33,8 +35,25 @@ const RULE_SUGGESTIONS: Record<string, string> = {
   'dead-file': 'Delete or wire dead files to avoid stale merge artifacts.',
 }
 
+const SYSTEMIC_RULES = new Set([
+  'circular-dependency',
+  'layer-violation',
+  'cross-boundary-import',
+  'unused-export',
+  'unused-dependency',
+  'dead-file',
+  'semantic-duplication',
+  'controller-no-db',
+  'service-no-http',
+])
+
 interface BuildTrustOptions {
   diff?: DriftDiff
+  advanced?: {
+    enabled?: boolean
+    previousTrust?: Partial<DriftTrustReport>
+    snapshots?: SnapshotEntry[]
+  }
 }
 
 interface TrustRenderOptions {
@@ -392,21 +411,46 @@ function computeDiffContext(diff: DriftDiff): TrustDiffContext {
   }
 }
 
-function computeFixPriorities(report: DriftReport): TrustFixPriority[] {
+function confidenceFromPrioritySignals(
+  occurrences: number,
+  severity: 'error' | 'warning' | 'info',
+  systemic: boolean,
+): 'low' | 'medium' | 'high' {
+  const severityScore = severity === 'error' ? 4 : severity === 'warning' ? 2 : 1
+  const systemicScore = systemic ? 2 : 0
+  const score = occurrences * 2 + severityScore + systemicScore
+
+  if (score >= 12) return 'high'
+  if (score >= 7) return 'medium'
+  return 'low'
+}
+
+function computeFixPriorities(report: DriftReport, advancedMode = false): TrustFixPriority[] {
   const ordered = Object.entries(report.summary.byRule)
     .map(([rule, occurrences]) => {
       const weightConfig = RULE_WEIGHTS[rule] ?? { severity: 'warning' as const, weight: 6 }
       const severityBoost = weightConfig.severity === 'error' ? 25 : weightConfig.severity === 'warning' ? 12 : 4
-      const priorityScore = occurrences * weightConfig.weight + severityBoost
+      const systemic = SYSTEMIC_RULES.has(rule)
+      const systemicBoost = advancedMode && systemic ? 25 : 0
+      const priorityScore = occurrences * weightConfig.weight + severityBoost + systemicBoost
+      const confidence = confidenceFromPrioritySignals(occurrences, weightConfig.severity, systemic)
+      const explanation = advancedMode
+        ? systemic
+          ? 'System-level rule that propagates risk across multiple teams and modules.'
+          : 'Local rule with contained impact; treat as team-level cleanup after systemic fixes.'
+        : undefined
 
       return {
         rule,
         severity: weightConfig.severity,
         occurrences,
+        systemic,
         priorityScore,
         estimatedTrustGain: Math.min(30, Math.max(3, Math.round(priorityScore / 4))),
         effort: effortFromWeight(weightConfig.weight),
         suggestion: RULE_SUGGESTIONS[rule] ?? 'Address this rule in the highest-scored files first.',
+        confidence,
+        explanation,
       }
     })
     .sort((a, b) => b.priorityScore - a.priorityScore)
@@ -420,11 +464,85 @@ function computeFixPriorities(report: DriftReport): TrustFixPriority[] {
     estimated_trust_gain: item.estimatedTrustGain,
     effort: item.effort,
     suggestion: item.suggestion,
+    ...(advancedMode ? { confidence: item.confidence, explanation: item.explanation, systemic: item.systemic } : {}),
   }))
+}
+
+function buildComparisonFromPreviousTrust(
+  trustScore: number,
+  previousTrust: Partial<DriftTrustReport> | undefined,
+): TrustAdvancedComparison | undefined {
+  if (!previousTrust || typeof previousTrust.trust_score !== 'number') return undefined
+
+  const trustDelta = trustScore - previousTrust.trust_score
+  const trend = trustDelta > 0 ? 'improving' : trustDelta < 0 ? 'regressing' : 'stable'
+
+  return {
+    source: 'previous-trust-json',
+    trend,
+    summary: `Trust moved ${trustDelta >= 0 ? '+' : ''}${trustDelta} vs provided previous trust JSON.`,
+    trust_delta: trustDelta,
+    previous_trust_score: previousTrust.trust_score,
+    previous_merge_risk: previousTrust.merge_risk,
+  }
+}
+
+function buildComparisonFromSnapshotHistory(
+  report: DriftReport,
+  snapshots: SnapshotEntry[] | undefined,
+): TrustAdvancedComparison | undefined {
+  const lastSnapshot = snapshots && snapshots.length > 0 ? snapshots[snapshots.length - 1] : undefined
+  if (!lastSnapshot) return undefined
+
+  const snapshotScoreDelta = report.totalScore - lastSnapshot.score
+  const trend = snapshotScoreDelta < 0 ? 'improving' : snapshotScoreDelta > 0 ? 'regressing' : 'stable'
+  const snapshotContext = lastSnapshot.label
+    ? `${lastSnapshot.timestamp} (${lastSnapshot.label})`
+    : lastSnapshot.timestamp
+
+  return {
+    source: 'snapshot-history',
+    trend,
+    summary: `Drift score moved ${snapshotScoreDelta >= 0 ? '+' : ''}${snapshotScoreDelta} vs snapshot ${snapshotContext}.`,
+    snapshot_score_delta: snapshotScoreDelta,
+    snapshot_label: lastSnapshot.label || undefined,
+    snapshot_timestamp: lastSnapshot.timestamp,
+  }
+}
+
+function buildTeamGuidance(
+  priorities: TrustFixPriority[],
+  comparison: TrustAdvancedComparison | undefined,
+  diffContext: TrustDiffContext | undefined,
+): string[] {
+  const systemicTargets = priorities
+    .filter((priority) => priority.systemic)
+    .slice(0, 2)
+    .map((priority) => `${priority.rule} (x${priority.occurrences})`)
+
+  const guidance: string[] = []
+  if (systemicTargets.length > 0) {
+    guidance.push(`Start with systemic rules: ${systemicTargets.join(', ')}.`)
+  }
+
+  if (comparison?.trend === 'regressing') {
+    guidance.push('Trend regressed; freeze net-new debt in CI and assign owners per systemic rule.')
+  }
+
+  if (diffContext && diffContext.newIssues > 0) {
+    guidance.push(`Block net-new issue growth first (+${diffContext.newIssues} new issue(s) in diff context).`)
+  }
+
+  if (guidance.length === 0) {
+    guidance.push('Maintain current baseline and schedule periodic systemic debt cleanup by rule ownership.')
+  }
+
+  return guidance.slice(0, 3)
 }
 
 export function buildTrustReport(report: DriftReport, options?: BuildTrustOptions): DriftTrustReport {
   const reasons = computeReasons(report)
+  const advancedMode = options?.advanced?.enabled === true
 
   const diffContext = options?.diff ? computeDiffContext(options.diff) : undefined
   if (diffContext && diffContext.netImpact > 0) {
@@ -444,14 +562,28 @@ export function buildTrustReport(report: DriftReport, options?: BuildTrustOption
   const totalBonus = diffContext && diffContext.netImpact < 0 ? Math.abs(diffContext.netImpact) : 0
   const trustScore = clamp(Math.round(100 - totalPenalty + totalBonus), 0, 100)
 
+  const comparison = advancedMode
+    ? buildComparisonFromPreviousTrust(trustScore, options?.advanced?.previousTrust)
+      ?? buildComparisonFromSnapshotHistory(report, options?.advanced?.snapshots)
+    : undefined
+
+  const fixPriorities = computeFixPriorities(report, advancedMode)
+  const advancedContext = advancedMode
+    ? {
+      comparison,
+      team_guidance: buildTeamGuidance(fixPriorities, comparison, diffContext),
+    }
+    : undefined
+
   return {
     scannedAt: new Date().toISOString(),
     targetPath: report.targetPath,
     trust_score: trustScore,
     merge_risk: toMergeRisk(trustScore),
     top_reasons: rankedReasons,
-    fix_priorities: computeFixPriorities(report),
+    fix_priorities: fixPriorities,
     diff_context: diffContext,
+    ...(advancedContext ? { advanced_context: advancedContext } : {}),
   }
 }
 
@@ -475,9 +607,21 @@ export function formatTrustConsole(trust: DriftTrustReport): string {
     ? '- none'
     : trust.fix_priorities
       .map((priority) =>
-        `- #${priority.rank} ${priority.rule} (${priority.severity}, x${priority.occurrences}): ${priority.suggestion}`
+        `- #${priority.rank} ${priority.rule} (${priority.severity}, x${priority.occurrences}${priority.confidence ? `, confidence ${priority.confidence}` : ''}): ${priority.suggestion}`
       )
       .join('\n')
+
+  const advanced = trust.advanced_context
+  const advancedComparison = advanced?.comparison
+    ? [
+      `- source: ${advanced.comparison.source}`,
+      `- trend: ${advanced.comparison.trend.toUpperCase()}`,
+      `- summary: ${advanced.comparison.summary}`,
+    ].join('\n')
+    : '- no historical comparison available'
+  const advancedGuidance = advanced?.team_guidance?.length
+    ? advanced.team_guidance.map((item) => `- ${item}`).join('\n')
+    : '- none'
 
   const sections = [
     'drift trust',
@@ -496,6 +640,10 @@ export function formatTrustConsole(trust: DriftTrustReport): string {
     sections.splice(5, 0, 'Diff Context:', diffLines, '')
   }
 
+  if (advanced) {
+    sections.push('', 'Advanced Team Guidance:', advancedComparison, '', advancedGuidance)
+  }
+
   return sections.join('\n')
 }
 
@@ -510,7 +658,7 @@ export function formatTrustMarkdown(trust: DriftTrustReport): string {
     ? '- none'
     : trust.fix_priorities
       .map((priority) =>
-        `- #${priority.rank} \`${priority.rule}\` (${priority.severity}, x${priority.occurrences}, effort: ${priority.effort}) - ${priority.suggestion}`
+        `- #${priority.rank} \`${priority.rule}\` (${priority.severity}, x${priority.occurrences}, effort: ${priority.effort}${priority.confidence ? `, confidence: ${priority.confidence}` : ''}) - ${priority.suggestion}${priority.explanation ? ` ${priority.explanation}` : ''}`
       )
       .join('\n')
 
@@ -527,7 +675,19 @@ export function formatTrustMarkdown(trust: DriftTrustReport): string {
       `- Trust adjustment: **+${diffContext.penalty}** penalty / **-${diffContext.bonus}** bonus (net ${diffContext.netImpact >= 0 ? '+' : ''}${diffContext.netImpact})`,
     ].join('\n')
 
-  return [
+  const advancedComparison = trust.advanced_context?.comparison
+    ? [
+      `- Source: \`${trust.advanced_context.comparison.source}\``,
+      `- Trend: **${trust.advanced_context.comparison.trend.toUpperCase()}**`,
+      `- Summary: ${trust.advanced_context.comparison.summary}`,
+    ].join('\n')
+    : '- Historical comparison not available'
+
+  const advancedGuidance = trust.advanced_context?.team_guidance?.length
+    ? trust.advanced_context.team_guidance.map((item) => `- ${item}`).join('\n')
+    : '- none'
+
+  const sections = [
     '## drift trust',
     '',
     `- Trust Score: **${trust.trust_score}/100**`,
@@ -542,7 +702,13 @@ export function formatTrustMarkdown(trust: DriftTrustReport): string {
     '',
     '### Fix priorities',
     priorities,
-  ].join('\n')
+  ]
+
+  if (trust.advanced_context) {
+    sections.push('', '### Advanced comparison', advancedComparison, '', '### Team guidance', advancedGuidance)
+  }
+
+  return sections.join('\n')
 }
 
 export function formatTrustJson(trust: DriftTrustReport): string {
