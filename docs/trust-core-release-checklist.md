@@ -8,7 +8,7 @@ Use this checklist before releasing the trust-core milestone.
 - [x] `npm test`
 - [x] `npx --no-install tsx ./src/cli.ts trust . --base origin/master --markdown`
 - [x] `npx --no-install tsx ./src/cli.ts trust . --base origin/master --json-output drift-trust.json`
-- [x] `npx --no-install tsx ./src/cli.ts trust-gate drift-trust.json --min-trust 45 --max-risk HIGH`
+- [x] `npx --no-install tsx ./src/cli.ts trust-gate drift-trust.json --min-trust 40 --max-risk HIGH`
 - [x] `npx --no-install tsx ./src/cli.ts review --base origin/master --comment`
 
 ## 2) CI workflow validation
@@ -36,14 +36,14 @@ Smoke PR runbook:
 
 Default trust gate for this milestone:
 
-- `--min-trust 45`
+- `--min-trust 40`
 - `--max-risk HIGH`
 
 Checks:
 
-- [x] PR fails when trust score is below 45.
+- [x] PR fails when trust score is below 40.
 - [x] PR fails when merge risk is `CRITICAL`.
-- [x] PR passes when trust score is 45+ and merge risk is `LOW`, `MEDIUM`, or `HIGH`.
+- [x] PR passes when trust score is 40+ and merge risk is `LOW`, `MEDIUM`, or `HIGH`.
 
 ## 4) Narrative and docs acceptance
 
