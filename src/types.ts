@@ -99,6 +99,20 @@ export interface AIIssue {
 
 export type MergeRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
 
+export interface TrustGatePolicyPreset {
+  branch: string
+  enabled?: boolean
+  minTrust?: number
+  maxRisk?: MergeRiskLevel
+}
+
+export interface TrustGatePolicyConfig {
+  enabled?: boolean
+  minTrust?: number
+  maxRisk?: MergeRiskLevel
+  presets?: TrustGatePolicyPreset[]
+}
+
 export interface TrustReason {
   label: string
   detail: string
@@ -178,7 +192,14 @@ export interface DriftConfig {
     maxRunsPerWorkspacePerMonth?: number
     maxReposPerWorkspace?: number
     retentionDays?: number
+    maxWorkspacesPerOrganizationByPlan?: {
+      free?: number
+      sponsor?: number
+      team?: number
+      business?: number
+    }
   }
+  trustGate?: TrustGatePolicyConfig
 }
 
 export interface DriftPerformanceConfig {
@@ -214,6 +235,8 @@ export interface DriftPluginRule {
 
 export interface DriftPlugin {
   name: string
+  apiVersion?: number
+  capabilities?: Record<string, string | number | boolean>
   rules: DriftPluginRule[]
 }
 

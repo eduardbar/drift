@@ -22,7 +22,16 @@ import { loadHistory, saveSnapshot, printHistory, printSnapshotDiff } from './sn
 import { generateReview } from './review.js'
 import { generateArchitectureMap } from './map.js'
 import { ingestSnapshotFromReport, getSaasSummary, generateSaasDashboardHtml } from './saas.js'
-import { buildTrustReport, formatTrustJson, renderTrustOutput, shouldFailTrustGate, normalizeMergeRiskLevel, MERGE_RISK_ORDER } from './trust.js'
+import {
+  buildTrustReport,
+  formatTrustJson,
+  renderTrustOutput,
+  shouldFailTrustGate,
+  normalizeMergeRiskLevel,
+  MERGE_RISK_ORDER,
+  detectBranchName,
+  resolveTrustGatePolicy,
+} from './trust.js'
 import type { DriftDiff, DriftTrustReport, DriftAnalysisOptions, MergeRiskLevel } from './types.js'
 
 const program = new Command()
@@ -61,6 +70,37 @@ function addResourceOptions(command: Command): Command {
     .option('--max-files <n>', 'Maximum files to analyze before soft-skipping extras')
     .option('--max-file-size-kb <n>', 'Skip files above this size and report diagnostics')
     .option('--with-semantic-duplication', 'Keep semantic-duplication rule enabled in low-memory mode')
+}
+
+function parseTrustGateOptions(
+  options: { minTrust?: string; maxRisk?: string },
+  policy: { minTrust?: number; maxRisk?: MergeRiskLevel },
+): { minTrust?: number; maxRisk?: MergeRiskLevel } {
+  const cliMinTrust = options.minTrust ? Number(options.minTrust) : undefined
+  if (options.minTrust && Number.isNaN(cliMinTrust)) {
+    process.stderr.write('\n  Error: --min-trust must be a valid number\n\n')
+    process.exit(1)
+  }
+
+  let cliMaxRisk: MergeRiskLevel | undefined
+  if (options.maxRisk) {
+    cliMaxRisk = normalizeMergeRiskLevel(options.maxRisk)
+    if (!cliMaxRisk) {
+      process.stderr.write(`\n  Error: --max-risk must be one of ${MERGE_RISK_ORDER.join(', ')}\n\n`)
+      process.exit(1)
+    }
+  }
+
+  return {
+    minTrust: typeof cliMinTrust === 'number' ? cliMinTrust : policy.minTrust,
+    maxRisk: cliMaxRisk ?? policy.maxRisk,
+  }
+}
+
+function resolveBranchFromOption(branch?: string): string | undefined {
+  const normalized = branch?.trim()
+  if (normalized) return normalized
+  return detectBranchName()
 }
 
 program
@@ -205,6 +245,7 @@ addResourceOptions(
   .option('--json-output <file>', 'Write structured trust JSON to file without changing stdout format')
   .option('--min-trust <n>', 'Exit with code 1 if trust score is below threshold')
   .option('--max-risk <level>', 'Exit with code 1 if merge risk exceeds level (LOW|MEDIUM|HIGH|CRITICAL)')
+  .option('--branch <name>', 'Branch name for trust policy matching (default: auto-detect from CI env)')
   .action(async (
     targetPath: string | undefined,
     options: {
@@ -215,6 +256,7 @@ addResourceOptions(
       jsonOutput?: string
       minTrust?: string
       maxRisk?: string
+      branch?: string
     } & ResourceOptionFlags,
   ) => {
     let tempDir: string | undefined
@@ -229,6 +271,8 @@ addResourceOptions(
       process.stderr.write(`  Found ${files.length} TypeScript file(s)\n\n`)
 
       const report = buildReport(resolvedPath, files)
+      const branchName = resolveBranchFromOption(options.branch)
+      const policy = resolveTrustGatePolicy(config, branchName)
 
       let diff: DriftDiff | undefined
       if (options.base) {
@@ -265,22 +309,13 @@ addResourceOptions(
         process.stderr.write(`Trust JSON saved to ${jsonOutPath}\n`)
       }
 
-      const minTrust = options.minTrust ? Number(options.minTrust) : undefined
-      if (options.minTrust && Number.isNaN(minTrust)) {
-        process.stderr.write('\n  Error: --min-trust must be a valid number\n\n')
-        process.exit(1)
+      if (policy.enabled === false) {
+        process.stderr.write(`Trust gate skipped by policy${branchName ? ` (branch: ${branchName})` : ''}\n`)
+        return
       }
 
-      let maxRisk: MergeRiskLevel | undefined
-      if (options.maxRisk) {
-        maxRisk = normalizeMergeRiskLevel(options.maxRisk)
-        if (!maxRisk) {
-          process.stderr.write(`\n  Error: --max-risk must be one of ${MERGE_RISK_ORDER.join(', ')}\n\n`)
-          process.exit(1)
-        }
-      }
-
-      if (shouldFailTrustGate(trust, { minTrust, maxRisk })) {
+      const gateOptions = parseTrustGateOptions(options, policy)
+      if (shouldFailTrustGate(trust, gateOptions)) {
         process.exit(1)
       }
     } catch (err) {
@@ -298,11 +333,15 @@ program
   .description('Evaluate trust gate thresholds from an existing trust JSON file')
   .option('--min-trust <n>', 'Fail if trust score is below threshold')
   .option('--max-risk <level>', 'Fail if merge risk exceeds level (LOW|MEDIUM|HIGH|CRITICAL)')
-  .action((trustJsonFile: string, options: { minTrust?: string; maxRisk?: string }) => {
+  .option('--branch <name>', 'Branch name for trust policy matching (default: auto-detect from CI env)')
+  .action(async (trustJsonFile: string, options: { minTrust?: string; maxRisk?: string; branch?: string }) => {
     try {
       const filePath = resolve(trustJsonFile)
       const raw = readFileSync(filePath, 'utf8')
       const parsed = JSON.parse(raw) as Partial<DriftTrustReport>
+      const config = await loadConfig(resolve('.'))
+      const branchName = resolveBranchFromOption(options.branch)
+      const policy = resolveTrustGatePolicy(config, branchName)
 
       if (typeof parsed.trust_score !== 'number') {
         process.stderr.write('\n  Error: trust JSON is missing numeric trust_score\n\n')
@@ -320,21 +359,6 @@ program
         process.exit(1)
       }
 
-      const minTrust = options.minTrust ? Number(options.minTrust) : undefined
-      if (options.minTrust && Number.isNaN(minTrust)) {
-        process.stderr.write('\n  Error: --min-trust must be a valid number\n\n')
-        process.exit(1)
-      }
-
-      let maxRisk: MergeRiskLevel | undefined
-      if (options.maxRisk) {
-        maxRisk = normalizeMergeRiskLevel(options.maxRisk)
-        if (!maxRisk) {
-          process.stderr.write(`\n  Error: --max-risk must be one of ${MERGE_RISK_ORDER.join(', ')}\n\n`)
-          process.exit(1)
-        }
-      }
-
       const trust: DriftTrustReport = {
         scannedAt: parsed.scannedAt ?? new Date().toISOString(),
         targetPath: parsed.targetPath ?? '.',
@@ -345,7 +369,13 @@ program
         diff_context: parsed.diff_context,
       }
 
-      if (shouldFailTrustGate(trust, { minTrust, maxRisk })) {
+      if (policy.enabled === false) {
+        process.stdout.write(`Trust gate skipped by policy${branchName ? ` (branch: ${branchName})` : ''}\n`)
+        return
+      }
+
+      const gateOptions = parseTrustGateOptions(options, policy)
+      if (shouldFailTrustGate(trust, gateOptions)) {
         process.exit(1)
       }
 
@@ -600,11 +630,14 @@ addResourceOptions(
   cloud
     .command('ingest [path]')
   .description('Scan path, build report, and store cloud snapshot')
+  .option('--org <id>', 'Organization id (default: default-org)', 'default-org')
   .requiredOption('--workspace <id>', 'Workspace id')
   .requiredOption('--user <id>', 'User id')
+  .option('--role <role>', 'Role hint (owner|member|viewer)')
+  .option('--plan <plan>', 'Organization plan (free|sponsor|team|business)')
   .option('--repo <name>', 'Repo name (default: basename of scanned path)')
   .option('--store <file>', 'Store file path (default: .drift-cloud/store.json)')
-  .action(async (targetPath: string | undefined, options: { workspace: string; user: string; repo?: string; store?: string } & ResourceOptionFlags) => {
+  .action(async (targetPath: string | undefined, options: { org: string; workspace: string; user: string; role?: string; plan?: string; repo?: string; store?: string } & ResourceOptionFlags) => {
     const resolvedPath = resolve(targetPath ?? '.')
     process.stderr.write(`\nScanning ${resolvedPath} for cloud ingest...\n`)
     const config = await loadConfig(resolvedPath)
@@ -612,15 +645,19 @@ addResourceOptions(
     const report = buildReport(resolvedPath, files)
 
     const snapshot = ingestSnapshotFromReport(report, {
+      organizationId: options.org,
       workspaceId: options.workspace,
       userId: options.user,
+      role: options.role as 'owner' | 'member' | 'viewer' | undefined,
+      plan: options.plan as 'free' | 'sponsor' | 'team' | 'business' | undefined,
       repoName: options.repo ?? basename(resolvedPath),
       storeFile: options.store,
       policy: config?.saas,
     })
 
     process.stdout.write(`Ingested snapshot ${snapshot.id}\n`)
-    process.stdout.write(`Workspace: ${snapshot.workspaceId}  Repo: ${snapshot.repoName}\n`)
+    process.stdout.write(`Organization: ${snapshot.organizationId}  Workspace: ${snapshot.workspaceId}  Repo: ${snapshot.repoName}\n`)
+    process.stdout.write(`Role: ${snapshot.role}  Plan: ${snapshot.plan}\n`)
     process.stdout.write(`Score: ${snapshot.totalScore}/100  Issues: ${snapshot.totalIssues}\n\n`)
   }),
 )
@@ -629,9 +666,15 @@ cloud
   .command('summary')
   .description('Show SaaS usage metrics and free threshold status')
   .option('--json', 'Output raw JSON summary')
+  .option('--org <id>', 'Filter summary by organization id')
+  .option('--workspace <id>', 'Filter summary by workspace id')
   .option('--store <file>', 'Store file path (default: .drift-cloud/store.json)')
-  .action((options: { json?: boolean; store?: string }) => {
-    const summary = getSaasSummary({ storeFile: options.store })
+  .action((options: { json?: boolean; org?: string; workspace?: string; store?: string }) => {
+    const summary = getSaasSummary({
+      storeFile: options.store,
+      organizationId: options.org,
+      workspaceId: options.workspace,
+    })
 
     if (options.json) {
       process.stdout.write(JSON.stringify(summary, null, 2) + '\n')

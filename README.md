@@ -170,6 +170,7 @@ drift trust ./src --base origin/main --markdown
 drift trust ./src --markdown --output trust.md
 drift trust ./src --min-trust 45
 drift trust ./src --max-risk HIGH
+drift trust ./src --branch main
 ```
 
 | Flag | Description |
@@ -180,6 +181,9 @@ drift trust ./src --max-risk HIGH
 | `--output <file>` | Write selected trust output format to file |
 | `--min-trust <n>` | Exit code 1 when trust score is below `n` |
 | `--max-risk <level>` | Exit code 1 when computed merge risk exceeds `LOW`, `MEDIUM`, `HIGH`, or `CRITICAL` |
+| `--branch <name>` | Branch used for `drift.config` trust policy matching (falls back to CI env vars) |
+
+When `trustGate` policy is configured in `drift.config.*`, branch-based thresholds are applied automatically. CLI flags still override policy values.
 
 ---
 
@@ -189,12 +193,14 @@ Evaluate trust gate thresholds from a previously generated trust JSON file. This
 
 ```bash
 drift trust-gate drift-trust.json --min-trust 45 --max-risk HIGH
+drift trust-gate drift-trust.json --branch release/v1.2.0
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--min-trust <n>` | Exit code 1 when trust score in JSON is below `n` |
 | `--max-risk <level>` | Exit code 1 when merge risk in JSON exceeds `LOW`, `MEDIUM`, `HIGH`, or `CRITICAL` |
+| `--branch <name>` | Branch used for `drift.config` trust policy matching (falls back to CI env vars) |
 
 ---
 
@@ -340,11 +346,12 @@ drift fix ./src --dry-run   # alias of --preview
 
 ### `drift cloud`
 
-Local SaaS foundations backed by `.drift-cloud/store.json`.
+Local multi-tenant foundations backed by `.drift-cloud/store.json`.
 
 ```bash
-drift cloud ingest ./src --workspace acme --user u-123 --repo webapp
+drift cloud ingest ./src --org acme --workspace core --user u-123 --role owner --plan sponsor --repo webapp
 drift cloud summary
+drift cloud summary --org acme --workspace core
 drift cloud summary --json
 drift cloud dashboard --output drift-cloud-dashboard.html
 ```
@@ -353,11 +360,13 @@ drift cloud dashboard --output drift-cloud-dashboard.html
 
 | Command | Description |
 |---------|-------------|
-| `drift cloud ingest [path] --workspace <id> --user <id> [--repo <name>] [--store <file>]` | Scans the path and stores one SaaS snapshot |
-| `drift cloud summary [--json] [--store <file>]` | Shows users/workspaces/repos usage and runs per month |
+| `drift cloud ingest [path] --org <id> --workspace <id> --user <id> [--role <owner\|member\|viewer>] [--plan <free\|sponsor\|team\|business>] [--repo <name>] [--store <file>]` | Scans the path and stores one tenant-scoped snapshot |
+| `drift cloud summary [--json] [--org <id>] [--workspace <id>] [--store <file>]` | Shows users/workspaces/repos usage and runs per month, optionally scoped |
 | `drift cloud dashboard [--output <file>] [--store <file>]` | Generates an HTML dashboard with trends and hotspots |
 
-`drift cloud` ships with a free-until-7,500 strategy and configurable guardrails for the free phase: max runs per workspace per month, max repos per workspace, and retention window.
+`drift cloud` ships with tenant identity boundaries (`organizationId` + `workspaceId`), role primitives (`owner`/`member`/`viewer`), and plan placeholders (`free`/`sponsor`/`team`/`business`). It is an infrastructure foundation, not a full auth/billing platform.
+
+By default, local guardrails enforce one plan-based limit: max workspaces per organization (`free:20`, `sponsor:50`, `team:200`, `business:1000`), plus existing free-phase limits (runs per workspace, repos per workspace, retention window).
 
 ---
 
@@ -430,6 +439,15 @@ export default {
     controllerNoDb: true,
     serviceNoHttp: true,
     maxFunctionLines: 80,
+  },
+  trustGate: {
+    minTrust: 45,
+    maxRisk: 'HIGH',
+    presets: [
+      { branch: 'main', minTrust: 70, maxRisk: 'MEDIUM' },
+      { branch: 'release/*', minTrust: 80, maxRisk: 'LOW' },
+      { branch: 'legacy/*', enabled: false },
+    ],
   },
   layers: [
     { name: 'domain',  patterns: ['src/domain/**'],  canImportFrom: [] },

@@ -1,14 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildTrustReport,
+  detectBranchName,
   formatTrustJson,
   formatTrustMarkdown,
+  normalizeMergeRiskLevel,
   renderTrustOutput,
+  resolveTrustGatePolicy,
   shouldFailByMaxRisk,
   shouldFailTrustGate,
-  normalizeMergeRiskLevel,
 } from '../src/trust.js'
-import type { DriftDiff, DriftReport } from '../src/types.js'
+import type { DriftConfig, DriftDiff, DriftReport } from '../src/types.js'
 
 function createBaseReport(overrides?: Partial<DriftReport>): DriftReport {
   return {
@@ -125,6 +127,13 @@ describe('drift trust baseline', () => {
     expect(shouldFailTrustGate(mediumTrust, { maxRisk: 'HIGH' })).toBe(false)
   })
 
+  it('treats disabled trust gate policy as pass-through', () => {
+    const trust = buildTrustReport(createBaseReport({ totalScore: 30 }))
+    const mediumTrust = { ...trust, trust_score: 65, merge_risk: 'HIGH' as const }
+
+    expect(shouldFailTrustGate(mediumTrust, { enabled: false, minTrust: 90, maxRisk: 'LOW' })).toBe(false)
+  })
+
   it('normalizes merge risk level inputs', () => {
     expect(normalizeMergeRiskLevel('low')).toBe('LOW')
     expect(normalizeMergeRiskLevel('MEDIUM')).toBe('MEDIUM')
@@ -182,6 +191,52 @@ describe('drift trust baseline', () => {
     expect(renderTrustOutput(trust, { json: true })).toBe(formatTrustJson(trust))
     expect(renderTrustOutput(trust, { markdown: true })).toBe(formatTrustMarkdown(trust))
     expect(renderTrustOutput(trust, { json: true, markdown: true })).toBe(formatTrustJson(trust))
+  })
+})
+
+describe('drift trust branch policy', () => {
+  const config: DriftConfig = {
+    trustGate: {
+      enabled: true,
+      minTrust: 45,
+      maxRisk: 'HIGH',
+      presets: [
+        { branch: '*', minTrust: 40, maxRisk: 'CRITICAL' },
+        { branch: 'main', minTrust: 70, maxRisk: 'MEDIUM' },
+        { branch: 'release/*', minTrust: 80, maxRisk: 'LOW' },
+        { branch: 'release/legacy', enabled: false },
+      ],
+    },
+  }
+
+  it('falls back to base policy when branch does not match', () => {
+    const policy = resolveTrustGatePolicy(config, 'feature/new-api')
+    expect(policy).toMatchObject({ enabled: true, minTrust: 40, maxRisk: 'CRITICAL' })
+  })
+
+  it('prefers exact branch preset over wildcard preset', () => {
+    const policy = resolveTrustGatePolicy(config, 'main')
+    expect(policy).toMatchObject({ enabled: true, minTrust: 70, maxRisk: 'MEDIUM' })
+  })
+
+  it('prefers more specific wildcard when multiple patterns match', () => {
+    const policy = resolveTrustGatePolicy(config, 'release/v1.2.3')
+    expect(policy).toMatchObject({ enabled: true, minTrust: 80, maxRisk: 'LOW' })
+  })
+
+  it('applies enabled override from matching branch preset', () => {
+    const policy = resolveTrustGatePolicy(config, 'release/legacy')
+    expect(policy).toMatchObject({ enabled: false, minTrust: 80, maxRisk: 'LOW' })
+  })
+
+  it('returns empty policy when trust gate config is missing', () => {
+    expect(resolveTrustGatePolicy(undefined, 'main')).toEqual({})
+  })
+
+  it('detects branch names from CI environment candidates', () => {
+    expect(detectBranchName({ GITHUB_HEAD_REF: 'feature/payment', GITHUB_REF_NAME: 'main' })).toBe('feature/payment')
+    expect(detectBranchName({ GITHUB_REF_NAME: 'main' })).toBe('main')
+    expect(detectBranchName({})).toBeUndefined()
   })
 })
 

@@ -1,9 +1,11 @@
 import { RULE_WEIGHTS } from './analyzer.js'
 import type {
+  DriftConfig,
   DriftDiff,
   DriftReport,
   DriftTrustReport,
   MergeRiskLevel,
+  TrustGatePolicyPreset,
   TrustDiffContext,
   TrustFixPriority,
   TrustReason,
@@ -40,15 +42,108 @@ interface TrustRenderOptions {
 }
 
 export interface TrustGateOptions {
+  enabled?: boolean
   minTrust?: number
   maxRisk?: MergeRiskLevel
 }
 
 export const MERGE_RISK_ORDER: MergeRiskLevel[] = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
 
+const BRANCH_ENV_CANDIDATES = [
+  'DRIFT_BRANCH',
+  'GITHUB_HEAD_REF',
+  'GITHUB_REF_NAME',
+  'CI_COMMIT_REF_NAME',
+  'BRANCH_NAME',
+] as const
+
 export function normalizeMergeRiskLevel(value: string): MergeRiskLevel | undefined {
   const normalized = value.toUpperCase()
   return MERGE_RISK_ORDER.find((level) => level === normalized)
+}
+
+function branchPatternToRegExp(pattern: string): RegExp {
+  const escaped = pattern.replace(/[|\\{}()[\]^$+?.]/g, '\\$&').replace(/\*/g, '.*')
+  return new RegExp(`^${escaped}$`)
+}
+
+function patternSpecificity(pattern: string): number {
+  const wildcardCount = (pattern.match(/\*/g) ?? []).length
+  const staticChars = pattern.replace(/\*/g, '').length
+  const exactBoost = wildcardCount === 0 ? 10_000 : 0
+  return exactBoost + staticChars * 10 - wildcardCount
+}
+
+function resolvePresetsForBranch(
+  branchName: string,
+  presets: TrustGatePolicyPreset[] | undefined,
+): TrustGatePolicyPreset[] {
+  if (!presets || presets.length === 0) return []
+
+  const matched: Array<{ preset: TrustGatePolicyPreset; specificity: number; index: number }> = []
+
+  for (let index = 0; index < presets.length; index += 1) {
+    const preset = presets[index]
+    if (!preset?.branch) continue
+
+    const regex = branchPatternToRegExp(preset.branch)
+    if (!regex.test(branchName)) continue
+
+    matched.push({ preset, specificity: patternSpecificity(preset.branch), index })
+  }
+
+  matched.sort((a, b) => a.specificity - b.specificity || a.index - b.index)
+  return matched.map((entry) => entry.preset)
+}
+
+function normalizeMinTrust(value: unknown): number | undefined {
+  return typeof value === 'number' && !Number.isNaN(value) ? value : undefined
+}
+
+function normalizeMaxRisk(value: unknown): MergeRiskLevel | undefined {
+  if (typeof value !== 'string') return undefined
+  return normalizeMergeRiskLevel(value)
+}
+
+export function detectBranchName(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  for (const key of BRANCH_ENV_CANDIDATES) {
+    const value = env[key]?.trim()
+    if (value) return value
+  }
+
+  return undefined
+}
+
+export function resolveTrustGatePolicy(config: DriftConfig | undefined, branchName?: string): TrustGateOptions {
+  const policy = config?.trustGate
+  if (!policy) return {}
+
+  const resolved: TrustGateOptions = {
+    enabled: typeof policy.enabled === 'boolean' ? policy.enabled : undefined,
+    minTrust: normalizeMinTrust(policy.minTrust),
+    maxRisk: normalizeMaxRisk(policy.maxRisk),
+  }
+
+  const normalizedBranch = branchName?.trim()
+  if (!normalizedBranch) {
+    return resolved
+  }
+
+  const matchedPresets = resolvePresetsForBranch(normalizedBranch, policy.presets)
+  if (matchedPresets.length === 0) {
+    return resolved
+  }
+
+  let merged = { ...resolved }
+  for (const preset of matchedPresets) {
+    merged = {
+      enabled: typeof preset.enabled === 'boolean' ? preset.enabled : merged.enabled,
+      minTrust: normalizeMinTrust(preset.minTrust) ?? merged.minTrust,
+      maxRisk: normalizeMaxRisk(preset.maxRisk) ?? merged.maxRisk,
+    }
+  }
+
+  return merged
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -304,6 +399,10 @@ export function shouldFailByMaxRisk(actual: MergeRiskLevel, allowedMaxRisk: Merg
 }
 
 export function shouldFailTrustGate(trust: DriftTrustReport, options: TrustGateOptions): boolean {
+  if (options.enabled === false) {
+    return false
+  }
+
   if (typeof options.minTrust === 'number' && !Number.isNaN(options.minTrust) && trust.trust_score < options.minTrust) {
     return true
   }

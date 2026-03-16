@@ -37,13 +37,18 @@ export {
   defaultSaasStorePath,
   resolveSaasPolicy,
   ingestSnapshotFromReport,
+  listSaasSnapshots,
   getSaasSummary,
   generateSaasDashboardHtml,
 } from './saas.js'
 export type {
+  SaasRole,
+  SaasPlan,
   SaasPolicy,
+  SaasPolicyOverrides,
   SaasStore,
   SaasSummary,
   SaasSnapshot,
+  SaasQueryOptions,
   IngestOptions,
 } from './saas.js'

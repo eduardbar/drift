@@ -7,7 +7,11 @@ export interface SaasPolicy {
   maxRunsPerWorkspacePerMonth: number
   maxReposPerWorkspace: number
   retentionDays: number
+  maxWorkspacesPerOrganizationByPlan: Record<SaasPlan, number>
 }
+
+export type SaasRole = 'owner' | 'member' | 'viewer'
+export type SaasPlan = 'free' | 'sponsor' | 'team' | 'business'
 
 export interface SaasUser {
   id: string
@@ -15,8 +19,17 @@ export interface SaasUser {
   lastSeenAt: string
 }
 
+export interface SaasOrganization {
+  id: string
+  plan: SaasPlan
+  createdAt: string
+  lastSeenAt: string
+  workspaceIds: string[]
+}
+
 export interface SaasWorkspace {
   id: string
+  organizationId: string
   createdAt: string
   lastSeenAt: string
   userIds: string[]
@@ -25,8 +38,19 @@ export interface SaasWorkspace {
 
 export interface SaasRepo {
   id: string
+  organizationId: string
   workspaceId: string
   name: string
+  createdAt: string
+  lastSeenAt: string
+}
+
+export interface SaasMembership {
+  id: string
+  organizationId: string
+  workspaceId: string
+  userId: string
+  role: SaasRole
   createdAt: string
   lastSeenAt: string
 }
@@ -35,8 +59,11 @@ export interface SaasSnapshot {
   id: string
   createdAt: string
   scannedAt: string
+  organizationId: string
   workspaceId: string
   userId: string
+  role: SaasRole
+  plan: SaasPlan
   repoId: string
   repoName: string
   targetPath: string
@@ -54,7 +81,9 @@ export interface SaasStore {
   version: number
   policy: SaasPolicy
   users: Record<string, SaasUser>
+  organizations: Record<string, SaasOrganization>
   workspaces: Record<string, SaasWorkspace>
+  memberships: Record<string, SaasMembership>
   repos: Record<string, SaasRepo>
   snapshots: SaasSnapshot[]
 }
@@ -71,28 +100,62 @@ export interface SaasSummary {
   freeUsersRemaining: number
 }
 
-export interface IngestOptions {
-  workspaceId: string
-  userId: string
-  repoName?: string
-  storeFile?: string
-  policy?: Partial<SaasPolicy>
+export interface SaasPolicyOverrides {
+  freeUserThreshold?: number
+  maxRunsPerWorkspacePerMonth?: number
+  maxReposPerWorkspace?: number
+  retentionDays?: number
+  maxWorkspacesPerOrganizationByPlan?: Partial<Record<SaasPlan, number>>
 }
 
-const STORE_VERSION = 1
+export interface SaasQueryOptions {
+  storeFile?: string
+  policy?: SaasPolicyOverrides
+  organizationId?: string
+  workspaceId?: string
+}
+
+export interface IngestOptions {
+  organizationId?: string
+  workspaceId: string
+  userId: string
+  role?: SaasRole
+  plan?: SaasPlan
+  repoName?: string
+  storeFile?: string
+  policy?: SaasPolicyOverrides
+}
+
+const STORE_VERSION = 2
 const ACTIVE_WINDOW_DAYS = 30
+const DEFAULT_ORGANIZATION_ID = 'default-org'
+const VALID_ROLES: SaasRole[] = ['owner', 'member', 'viewer']
+const VALID_PLANS: SaasPlan[] = ['free', 'sponsor', 'team', 'business']
 
 export const DEFAULT_SAAS_POLICY: SaasPolicy = {
   freeUserThreshold: 7500,
   maxRunsPerWorkspacePerMonth: 500,
   maxReposPerWorkspace: 20,
   retentionDays: 90,
+  maxWorkspacesPerOrganizationByPlan: {
+    free: 20,
+    sponsor: 50,
+    team: 200,
+    business: 1000,
+  },
 }
 
-export function resolveSaasPolicy(policy?: Partial<SaasPolicy> | DriftConfig['saas']): SaasPolicy {
+export function resolveSaasPolicy(policy?: SaasPolicyOverrides | DriftConfig['saas']): SaasPolicy {
+  const customPlanLimits = (policy && 'maxWorkspacesPerOrganizationByPlan' in policy)
+    ? (policy.maxWorkspacesPerOrganizationByPlan ?? {})
+    : {}
   return {
     ...DEFAULT_SAAS_POLICY,
     ...(policy ?? {}),
+    maxWorkspacesPerOrganizationByPlan: {
+      ...DEFAULT_SAAS_POLICY.maxWorkspacesPerOrganizationByPlan,
+      ...customPlanLimits,
+    },
   }
 }
 
@@ -100,7 +163,7 @@ export function defaultSaasStorePath(root = '.'): string {
   return resolve(root, '.drift-cloud', 'store.json')
 }
 
-function ensureStoreFile(storeFile: string, policy?: Partial<SaasPolicy>): void {
+function ensureStoreFile(storeFile: string, policy?: SaasPolicyOverrides): void {
   const dir = dirname(storeFile)
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   if (!existsSync(storeFile)) {
@@ -109,15 +172,39 @@ function ensureStoreFile(storeFile: string, policy?: Partial<SaasPolicy>): void 
   }
 }
 
-function createEmptyStore(policy?: Partial<SaasPolicy>): SaasStore {
+function createEmptyStore(policy?: SaasPolicyOverrides): SaasStore {
   return {
     version: STORE_VERSION,
     policy: resolveSaasPolicy(policy),
     users: {},
+    organizations: {},
     workspaces: {},
+    memberships: {},
     repos: {},
     snapshots: [],
   }
+}
+
+function normalizePlan(plan?: string): SaasPlan {
+  if (!plan) return 'free'
+  return VALID_PLANS.includes(plan as SaasPlan) ? (plan as SaasPlan) : 'free'
+}
+
+function normalizeRole(role?: string): SaasRole {
+  if (!role) return 'member'
+  return VALID_ROLES.includes(role as SaasRole) ? (role as SaasRole) : 'member'
+}
+
+function workspaceKey(organizationId: string, workspaceId: string): string {
+  return `${organizationId}:${workspaceId}`
+}
+
+function repoKey(organizationId: string, workspaceId: string, repoName: string): string {
+  return `${workspaceKey(organizationId, workspaceId)}:${repoName}`
+}
+
+function membershipKey(organizationId: string, workspaceId: string, userId: string): string {
+  return `${workspaceKey(organizationId, workspaceId)}:${userId}`
 }
 
 function monthKey(isoDate: string): string {
@@ -142,7 +229,7 @@ function saveStore(storeFile: string, store: SaasStore): void {
   writeFileSync(storeFile, JSON.stringify(store, null, 2), 'utf8')
 }
 
-function loadStoreInternal(storeFile: string, policy?: Partial<SaasPolicy>): SaasStore {
+function loadStoreInternal(storeFile: string, policy?: SaasPolicyOverrides): SaasStore {
   ensureStoreFile(storeFile, policy)
   const raw = readFileSync(storeFile, 'utf8')
   const parsed = JSON.parse(raw) as Partial<SaasStore>
@@ -150,10 +237,42 @@ function loadStoreInternal(storeFile: string, policy?: Partial<SaasPolicy>): Saa
   const merged = createEmptyStore(parsed.policy)
   merged.version = parsed.version ?? STORE_VERSION
   merged.users = parsed.users ?? {}
+  merged.organizations = parsed.organizations ?? {}
   merged.workspaces = parsed.workspaces ?? {}
+  merged.memberships = parsed.memberships ?? {}
   merged.repos = parsed.repos ?? {}
   merged.snapshots = parsed.snapshots ?? []
   merged.policy = resolveSaasPolicy({ ...merged.policy, ...policy })
+
+  for (const workspace of Object.values(merged.workspaces)) {
+    if (!workspace.organizationId) workspace.organizationId = DEFAULT_ORGANIZATION_ID
+  }
+  for (const repo of Object.values(merged.repos)) {
+    if (!repo.organizationId) repo.organizationId = DEFAULT_ORGANIZATION_ID
+  }
+  for (const snapshot of merged.snapshots) {
+    if (!snapshot.organizationId) snapshot.organizationId = DEFAULT_ORGANIZATION_ID
+    if (!snapshot.plan) snapshot.plan = 'free'
+    if (!snapshot.role) snapshot.role = 'member'
+  }
+
+  for (const workspace of Object.values(merged.workspaces)) {
+    const orgId = workspace.organizationId
+    const existingOrg = merged.organizations[orgId]
+    if (!existingOrg) {
+      merged.organizations[orgId] = {
+        id: orgId,
+        plan: 'free',
+        createdAt: workspace.createdAt,
+        lastSeenAt: workspace.lastSeenAt,
+        workspaceIds: [workspace.id],
+      }
+      continue
+    }
+    if (!existingOrg.workspaceIds.includes(workspace.id)) existingOrg.workspaceIds.push(workspace.id)
+    if (workspace.lastSeenAt > existingOrg.lastSeenAt) existingOrg.lastSeenAt = workspace.lastSeenAt
+  }
+
   applyRetention(merged)
 
   return merged
@@ -167,7 +286,36 @@ function isRepoActive(repo: SaasRepo): boolean {
   return new Date(repo.lastSeenAt).getTime() >= daysAgo(ACTIVE_WINDOW_DAYS)
 }
 
+function resolveScopedIdentity(options: IngestOptions): {
+  organizationId: string
+  workspaceId: string
+  workspaceKey: string
+  repoName: string
+  repoId: string
+} {
+  const organizationId = options.organizationId ?? DEFAULT_ORGANIZATION_ID
+  const workspaceId = options.workspaceId
+  const repoName = options.repoName ?? 'default'
+  return {
+    organizationId,
+    workspaceId,
+    workspaceKey: workspaceKey(organizationId, workspaceId),
+    repoName,
+    repoId: repoKey(organizationId, workspaceId, repoName),
+  }
+}
+
 function assertGuardrails(store: SaasStore, options: IngestOptions, nowIso: string): void {
+  const scoped = resolveScopedIdentity(options)
+  const organization = store.organizations[scoped.organizationId]
+  const effectivePlan = normalizePlan(options.plan ?? organization?.plan)
+  const workspaceLimit = store.policy.maxWorkspacesPerOrganizationByPlan[effectivePlan]
+  const workspaceExists = Boolean(store.workspaces[scoped.workspaceKey])
+  const workspaceCount = organization?.workspaceIds.length ?? 0
+  if (!workspaceExists && workspaceCount >= workspaceLimit) {
+    throw new Error(`Organization '${scoped.organizationId}' on plan '${effectivePlan}' reached max workspaces (${workspaceLimit}).`)
+  }
+
   const usersRegistered = Object.keys(store.users).length
   const isFreePhase = usersRegistered < store.policy.freeUserThreshold
   if (!isFreePhase) return
@@ -176,23 +324,25 @@ function assertGuardrails(store: SaasStore, options: IngestOptions, nowIso: stri
     throw new Error(`Free threshold reached (${store.policy.freeUserThreshold} users).`) 
   }
 
-  const workspace = store.workspaces[options.workspaceId]
-  const repoName = options.repoName ?? 'default'
-  const repoId = `${options.workspaceId}:${repoName}`
-  const repoExists = Boolean(store.repos[repoId])
+  const workspace = store.workspaces[scoped.workspaceKey]
+  const repoExists = Boolean(store.repos[scoped.repoId])
   const repoCount = workspace?.repoIds.length ?? 0
 
   if (!repoExists && repoCount >= store.policy.maxReposPerWorkspace) {
-    throw new Error(`Workspace '${options.workspaceId}' reached max repos (${store.policy.maxReposPerWorkspace}).`)
+    throw new Error(`Workspace '${scoped.workspaceId}' reached max repos (${store.policy.maxReposPerWorkspace}).`)
   }
 
   const currentMonth = monthKey(nowIso)
   const runsThisMonth = store.snapshots.filter((snapshot) => {
-    return snapshot.workspaceId === options.workspaceId && monthKey(snapshot.createdAt) === currentMonth
+    return (
+      snapshot.organizationId === scoped.organizationId
+      && snapshot.workspaceId === scoped.workspaceId
+      && monthKey(snapshot.createdAt) === currentMonth
+    )
   }).length
 
   if (runsThisMonth >= store.policy.maxRunsPerWorkspacePerMonth) {
-    throw new Error(`Workspace '${options.workspaceId}' reached max monthly runs (${store.policy.maxRunsPerWorkspacePerMonth}).`)
+    throw new Error(`Workspace '${scoped.workspaceId}' reached max monthly runs (${store.policy.maxRunsPerWorkspacePerMonth}).`)
   }
 }
 
@@ -200,6 +350,8 @@ export function ingestSnapshotFromReport(report: DriftReport, options: IngestOpt
   const storeFile = resolve(options.storeFile ?? defaultSaasStorePath())
   const store = loadStoreInternal(storeFile, options.policy)
   const nowIso = new Date().toISOString()
+  const scoped = resolveScopedIdentity(options)
+  const requestedPlan = normalizePlan(options.plan)
 
   assertGuardrails(store, options, nowIso)
 
@@ -214,45 +366,86 @@ export function ingestSnapshotFromReport(report: DriftReport, options: IngestOpt
     }
   }
 
-  const workspace = store.workspaces[options.workspaceId]
+  const existingOrg = store.organizations[scoped.organizationId]
+  const plan = normalizePlan(existingOrg?.plan ?? requestedPlan)
+
+  if (existingOrg) {
+    existingOrg.lastSeenAt = nowIso
+    if (options.plan) existingOrg.plan = requestedPlan
+  } else {
+    store.organizations[scoped.organizationId] = {
+      id: scoped.organizationId,
+      plan,
+      createdAt: nowIso,
+      lastSeenAt: nowIso,
+      workspaceIds: [],
+    }
+  }
+
+  const workspace = store.workspaces[scoped.workspaceKey]
   if (workspace) {
     workspace.lastSeenAt = nowIso
     if (!workspace.userIds.includes(options.userId)) workspace.userIds.push(options.userId)
   } else {
-    store.workspaces[options.workspaceId] = {
-      id: options.workspaceId,
+    store.workspaces[scoped.workspaceKey] = {
+      id: scoped.workspaceId,
+      organizationId: scoped.organizationId,
       createdAt: nowIso,
       lastSeenAt: nowIso,
       userIds: [options.userId],
       repoIds: [],
     }
+    const org = store.organizations[scoped.organizationId]
+    if (!org.workspaceIds.includes(scoped.workspaceId)) org.workspaceIds.push(scoped.workspaceId)
   }
 
-  const repoName = options.repoName ?? 'default'
-  const repoId = `${options.workspaceId}:${repoName}`
-  const repo = store.repos[repoId]
-  if (repo) {
-    repo.lastSeenAt = nowIso
+  const membershipId = membershipKey(scoped.organizationId, scoped.workspaceId, options.userId)
+  const membership = store.memberships[membershipId]
+  let role = normalizeRole(options.role)
+  if (!membership && !workspace) role = 'owner'
+  if (membership) {
+    membership.lastSeenAt = nowIso
+    if (options.role) membership.role = normalizeRole(options.role)
+    role = membership.role
   } else {
-    store.repos[repoId] = {
-      id: repoId,
-      workspaceId: options.workspaceId,
-      name: repoName,
+    store.memberships[membershipId] = {
+      id: membershipId,
+      organizationId: scoped.organizationId,
+      workspaceId: scoped.workspaceId,
+      userId: options.userId,
+      role,
       createdAt: nowIso,
       lastSeenAt: nowIso,
     }
-    const ws = store.workspaces[options.workspaceId]
-    if (!ws.repoIds.includes(repoId)) ws.repoIds.push(repoId)
+  }
+
+  const repo = store.repos[scoped.repoId]
+  if (repo) {
+    repo.lastSeenAt = nowIso
+  } else {
+    store.repos[scoped.repoId] = {
+      id: scoped.repoId,
+      organizationId: scoped.organizationId,
+      workspaceId: scoped.workspaceId,
+      name: scoped.repoName,
+      createdAt: nowIso,
+      lastSeenAt: nowIso,
+    }
+    const ws = store.workspaces[scoped.workspaceKey]
+    if (!ws.repoIds.includes(scoped.repoId)) ws.repoIds.push(scoped.repoId)
   }
 
   const snapshot: SaasSnapshot = {
     id: `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`,
     createdAt: nowIso,
     scannedAt: report.scannedAt,
-    workspaceId: options.workspaceId,
+    organizationId: scoped.organizationId,
+    workspaceId: scoped.workspaceId,
     userId: options.userId,
-    repoId,
-    repoName,
+    role,
+    plan: normalizePlan(store.organizations[scoped.organizationId]?.plan ?? requestedPlan),
+    repoId: scoped.repoId,
+    repoName: scoped.repoName,
     targetPath: report.targetPath,
     totalScore: report.totalScore,
     totalIssues: report.totalIssues,
@@ -271,17 +464,47 @@ export function ingestSnapshotFromReport(report: DriftReport, options: IngestOpt
   return snapshot
 }
 
-export function getSaasSummary(options?: { storeFile?: string; policy?: Partial<SaasPolicy> }): SaasSummary {
+function matchesTenantScope(snapshot: SaasSnapshot, options?: SaasQueryOptions): boolean {
+  if (!options?.organizationId && !options?.workspaceId) return true
+  if (options.organizationId && snapshot.organizationId !== options.organizationId) return false
+  if (options.workspaceId && snapshot.workspaceId !== options.workspaceId) return false
+  return true
+}
+
+export function listSaasSnapshots(options?: SaasQueryOptions): SaasSnapshot[] {
+  const storeFile = resolve(options?.storeFile ?? defaultSaasStorePath())
+  const store = loadStoreInternal(storeFile, options?.policy)
+  saveStore(storeFile, store)
+  return store.snapshots
+    .filter((snapshot) => matchesTenantScope(snapshot, options))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+}
+
+export function getSaasSummary(options?: SaasQueryOptions): SaasSummary {
   const storeFile = resolve(options?.storeFile ?? defaultSaasStorePath())
   const store = loadStoreInternal(storeFile, options?.policy)
   saveStore(storeFile, store)
 
-  const usersRegistered = Object.keys(store.users).length
-  const workspacesActive = Object.values(store.workspaces).filter(isWorkspaceActive).length
-  const reposActive = Object.values(store.repos).filter(isRepoActive).length
+  const scopedSnapshots = store.snapshots.filter((snapshot) => matchesTenantScope(snapshot, options))
+  const scopedWorkspaces = Object.values(store.workspaces).filter((workspace) => {
+    if (options?.organizationId && workspace.organizationId !== options.organizationId) return false
+    if (options?.workspaceId && workspace.id !== options.workspaceId) return false
+    return true
+  })
+  const scopedRepos = Object.values(store.repos).filter((repo) => {
+    if (options?.organizationId && repo.organizationId !== options.organizationId) return false
+    if (options?.workspaceId && repo.workspaceId !== options.workspaceId) return false
+    return true
+  })
+
+  const usersRegistered = options?.organizationId || options?.workspaceId
+    ? new Set(scopedSnapshots.map((snapshot) => snapshot.userId)).size
+    : Object.keys(store.users).length
+  const workspacesActive = scopedWorkspaces.filter(isWorkspaceActive).length
+  const reposActive = scopedRepos.filter(isRepoActive).length
 
   const runsPerMonth: Record<string, number> = {}
-  for (const snapshot of store.snapshots) {
+  for (const snapshot of scopedSnapshots) {
     const key = monthKey(snapshot.createdAt)
     runsPerMonth[key] = (runsPerMonth[key] ?? 0) + 1
   }
@@ -294,7 +517,7 @@ export function getSaasSummary(options?: { storeFile?: string; policy?: Partial<
     workspacesActive,
     reposActive,
     runsPerMonth,
-    totalSnapshots: store.snapshots.length,
+    totalSnapshots: scopedSnapshots.length,
     phase: thresholdReached ? 'paid' : 'free',
     thresholdReached,
     freeUsersRemaining: Math.max(0, store.policy.freeUserThreshold - usersRegistered),
@@ -310,20 +533,23 @@ function escapeHtml(value: string): string {
     .replaceAll("'", '&#39;')
 }
 
-export function generateSaasDashboardHtml(options?: { storeFile?: string; policy?: Partial<SaasPolicy> }): string {
+export function generateSaasDashboardHtml(options?: { storeFile?: string; policy?: SaasPolicyOverrides }): string {
   const storeFile = resolve(options?.storeFile ?? defaultSaasStorePath())
   const store = loadStoreInternal(storeFile, options?.policy)
   const summary = getSaasSummary(options)
 
   const workspaceStats = Object.values(store.workspaces)
     .map((workspace) => {
-      const snapshots = store.snapshots.filter((snapshot) => snapshot.workspaceId === workspace.id)
+      const snapshots = store.snapshots.filter((snapshot) => {
+        return snapshot.organizationId === workspace.organizationId && snapshot.workspaceId === workspace.id
+      })
       const runs = snapshots.length
       const avgScore = runs === 0
         ? 0
         : Math.round(snapshots.reduce((sum, snapshot) => sum + snapshot.totalScore, 0) / runs)
       const lastRun = snapshots.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]?.createdAt ?? 'n/a'
       return {
+        organizationId: workspace.organizationId,
         id: workspace.id,
         runs,
         avgScore,
@@ -358,7 +584,7 @@ export function generateSaasDashboardHtml(options?: { storeFile?: string; policy
     .join('')
 
   const workspaceRows = workspaceStats
-    .map((workspace) => `<tr><td>${escapeHtml(workspace.id)}</td><td>${workspace.runs}</td><td>${workspace.avgScore}</td><td>${escapeHtml(workspace.lastRun)}</td></tr>`)
+    .map((workspace) => `<tr><td>${escapeHtml(workspace.organizationId)}</td><td>${escapeHtml(workspace.id)}</td><td>${workspace.runs}</td><td>${workspace.avgScore}</td><td>${escapeHtml(workspace.lastRun)}</td></tr>`)
     .join('')
 
   const repoRows = repoStats
@@ -413,12 +639,12 @@ export function generateSaasDashboardHtml(options?: { storeFile?: string; policy
     </section>
 
     <section class="section">
-      <h2>Workspace Hotspots</h2>
-      <table>
-        <thead><tr><th>Workspace</th><th>Runs</th><th>Avg Score</th><th>Last Run</th></tr></thead>
-        <tbody>${workspaceRows || '<tr><td colspan="4">No workspace data</td></tr>'}</tbody>
-      </table>
-    </section>
+        <h2>Workspace Hotspots</h2>
+        <table>
+        <thead><tr><th>Organization</th><th>Workspace</th><th>Runs</th><th>Avg Score</th><th>Last Run</th></tr></thead>
+        <tbody>${workspaceRows || '<tr><td colspan="5">No workspace data</td></tr>'}</tbody>
+        </table>
+      </section>
 
     <section class="section">
       <h2>Repo Hotspots</h2>
