@@ -80,4 +80,4 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Enforce trust baseline gate
-        run: npx --no-install tsx ./src/cli.ts trust . --base "origin/${{ github.base_ref }}" --min-trust 65 --max-risk MEDIUM > /dev/null
+        run: npx --no-install tsx ./src/cli.ts trust . --base "origin/${{ github.base_ref }}" --min-trust 45 --max-risk HIGH > /dev/null

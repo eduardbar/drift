@@ -2,7 +2,7 @@
 // drift-ignore-file
 import { Command } from 'commander'
 import { writeFileSync } from 'node:fs'
-import { basename, resolve } from 'node:path'
+import { basename, relative, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { createInterface } from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
@@ -105,7 +105,7 @@ program
         ...baseReport,
         files: baseReport.files.map(f => ({
           ...f,
-          path: f.path.replace(tempDir!, projectPath),
+          path: resolve(projectPath, relative(tempDir!, f.path)),
         })),
       }
 
@@ -188,7 +188,7 @@ program
           ...baseReport,
           files: baseReport.files.map((file) => ({
             ...file,
-            path: file.path.replace(tempDir!, resolvedPath),
+            path: resolve(resolvedPath, relative(tempDir!, file.path)),
           })),
         }
         diff = computeDiff(remappedBase, report, options.base)

@@ -1,5 +1,9 @@
 import type { DriftReport, DriftDiff, FileDiff, DriftIssue } from './types.js'
 
+function normalizePath(filePath: string): string {
+  return filePath.replace(/\\/g, '/')
+}
+
 /**
  * Compute the diff between two DriftReports.
  *
@@ -48,12 +52,12 @@ export function computeDiff(
 ): DriftDiff {
   const fileDiffs: FileDiff[] = []
 
-  const baseByPath = new Map(base.files.map(f => [f.path, f]))
-  const currentByPath = new Map(current.files.map(f => [f.path, f]))
+  const baseByPath = new Map(base.files.map(f => [normalizePath(f.path), f]))
+  const currentByPath = new Map(current.files.map(f => [normalizePath(f.path), f]))
 
   const allPaths = new Set([
-    ...base.files.map(f => f.path),
-    ...current.files.map(f => f.path),
+    ...base.files.map(f => normalizePath(f.path)),
+    ...current.files.map(f => normalizePath(f.path)),
   ])
 
   for (const filePath of allPaths) {
