@@ -22,12 +22,14 @@ import { loadHistory, saveSnapshot, printHistory, printSnapshotDiff } from './sn
 import { generateReview } from './review.js'
 import { generateArchitectureMap } from './map.js'
 import { ingestSnapshotFromReport, getSaasSummary, generateSaasDashboardHtml } from './saas.js'
+import { buildTrustReport, formatTrustConsole, formatTrustMarkdown, shouldFailByMaxRisk } from './trust.js'
+import type { DriftDiff, MergeRiskLevel } from './types.js'
 
 const program = new Command()
 
 program
   .name('drift')
-  .description('Detect silent technical debt left by AI-generated code')
+  .description('AI Code Audit CLI for merge trust in AI-assisted PRs')
   .version(VERSION)
 
 program
@@ -148,6 +150,92 @@ program
       const message = err instanceof Error ? err.message : String(err)
       process.stderr.write(`\n  Error: ${message}\n\n`)
       process.exit(1)
+    }
+  })
+
+program
+  .command('trust [path]')
+  .description('Compute merge trust baseline from drift signals')
+  .option('--base <ref>', 'Git base ref for diff-aware trust scoring')
+  .option('--json', 'Output structured trust JSON')
+  .option('--markdown', 'Output trust report as markdown (PR comment ready)')
+  .option('-o, --output <file>', 'Write trust output to file')
+  .option('--min-trust <n>', 'Exit with code 1 if trust score is below threshold')
+  .option('--max-risk <level>', 'Exit with code 1 if merge risk exceeds level (LOW|MEDIUM|HIGH|CRITICAL)')
+  .action(async (
+    targetPath: string | undefined,
+    options: { base?: string; json?: boolean; markdown?: boolean; output?: string; minTrust?: string; maxRisk?: string },
+  ) => {
+    let tempDir: string | undefined
+
+    try {
+      const resolvedPath = resolve(targetPath ?? '.')
+
+      process.stderr.write(`\nScanning ${resolvedPath} for trust signals...\n`)
+      const config = await loadConfig(resolvedPath)
+      const files = analyzeProject(resolvedPath, config)
+      process.stderr.write(`  Found ${files.length} TypeScript file(s)\n\n`)
+
+      const report = buildReport(resolvedPath, files)
+
+      let diff: DriftDiff | undefined
+      if (options.base) {
+        process.stderr.write(`Computing diff signals against ${options.base}...\n`)
+        tempDir = extractFilesAtRef(resolvedPath, options.base)
+        const baseFiles = analyzeProject(tempDir, config)
+        const baseReport = buildReport(tempDir, baseFiles)
+        const remappedBase = {
+          ...baseReport,
+          files: baseReport.files.map((file) => ({
+            ...file,
+            path: file.path.replace(tempDir!, resolvedPath),
+          })),
+        }
+        diff = computeDiff(remappedBase, report, options.base)
+        process.stderr.write(`  Diff: ${diff.totalDelta >= 0 ? '+' : ''}${diff.totalDelta} score, +${diff.newIssuesCount} new / -${diff.resolvedIssuesCount} resolved\n\n`)
+      }
+
+      const trust = buildTrustReport(report, { diff })
+
+      const rendered = options.json
+        ? `${JSON.stringify(trust, null, 2)}\n`
+        : options.markdown
+          ? `${formatTrustMarkdown(trust)}\n`
+          : `${formatTrustConsole(trust)}\n`
+
+      process.stdout.write(rendered)
+
+      if (options.output) {
+        const outPath = resolve(options.output)
+        writeFileSync(outPath, rendered, 'utf8')
+        process.stderr.write(`Trust output saved to ${outPath}\n`)
+      }
+
+      if (options.minTrust) {
+        const minTrust = Number(options.minTrust)
+        if (!Number.isNaN(minTrust) && trust.trust_score < minTrust) {
+          process.exit(1)
+        }
+      }
+
+      if (options.maxRisk) {
+        const normalized = options.maxRisk.toUpperCase()
+        const allowed = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
+        if (!allowed.includes(normalized)) {
+          process.stderr.write(`\n  Error: --max-risk must be one of ${allowed.join(', ')}\n\n`)
+          process.exit(1)
+        }
+
+        if (shouldFailByMaxRisk(trust.merge_risk, normalized as MergeRiskLevel)) {
+          process.exit(1)
+        }
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      process.stderr.write(`\n  Error: ${message}\n\n`)
+      process.exit(1)
+    } finally {
+      if (tempDir) cleanupTempDir(tempDir)
     }
   })
 

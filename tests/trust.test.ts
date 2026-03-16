@@ -1,0 +1,322 @@
+import { describe, expect, it } from 'vitest'
+import { buildTrustReport, formatTrustMarkdown, shouldFailByMaxRisk } from '../src/trust.js'
+import type { DriftDiff, DriftReport } from '../src/types.js'
+
+function createBaseReport(overrides?: Partial<DriftReport>): DriftReport {
+  return {
+    scannedAt: new Date().toISOString(),
+    targetPath: '/tmp/repo',
+    files: [],
+    totalIssues: 0,
+    totalScore: 0,
+    totalFiles: 0,
+    summary: {
+      errors: 0,
+      warnings: 0,
+      infos: 0,
+      byRule: {},
+    },
+    quality: {
+      overall: 100,
+      dimensions: {
+        architecture: 100,
+        complexity: 100,
+        'ai-patterns': 100,
+        testing: 100,
+      },
+    },
+    maintenanceRisk: {
+      score: 0,
+      level: 'low',
+      hotspots: [],
+      signals: {
+        highComplexityFiles: 0,
+        filesWithoutNearbyTests: 0,
+        frequentChangeFiles: 0,
+      },
+    },
+    ...overrides,
+  }
+}
+
+describe('drift trust baseline', () => {
+  it('builds trust report contract with required fields', () => {
+    const report = createBaseReport({
+      totalIssues: 8,
+      totalScore: 52,
+      summary: {
+        errors: 2,
+        warnings: 5,
+        infos: 1,
+        byRule: {
+          'high-complexity': 2,
+          'debug-leftover': 3,
+          'layer-violation': 1,
+        },
+      },
+      maintenanceRisk: {
+        score: 70,
+        level: 'high',
+        hotspots: [{
+          file: '/tmp/repo/src/api/user.ts',
+          driftScore: 65,
+          complexityIssues: 2,
+          hasNearbyTests: false,
+          changeFrequency: 9,
+          risk: 82,
+          reasons: ['high complexity signals'],
+        }],
+        signals: {
+          highComplexityFiles: 1,
+          filesWithoutNearbyTests: 1,
+          frequentChangeFiles: 1,
+        },
+      },
+    })
+
+    const trust = buildTrustReport(report)
+    expect(trust.trust_score).toBeGreaterThanOrEqual(0)
+    expect(trust.trust_score).toBeLessThanOrEqual(100)
+    expect(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).toContain(trust.merge_risk)
+    expect(trust.top_reasons.length).toBeGreaterThan(0)
+    expect(trust.fix_priorities.length).toBeGreaterThan(0)
+    expect(trust.fix_priorities[0]?.rank).toBe(1)
+  })
+
+  it('includes architecture signal in top reasons when violations exist', () => {
+    const report = createBaseReport({
+      totalScore: 25,
+      summary: {
+        errors: 1,
+        warnings: 1,
+        infos: 0,
+        byRule: {
+          'layer-violation': 1,
+        },
+      },
+    })
+
+    const trust = buildTrustReport(report)
+    const reasonLabels = trust.top_reasons.map((reason) => reason.label)
+    expect(reasonLabels).toContain('Architecture signals')
+  })
+
+  it('compares merge risk thresholds for CI gating', () => {
+    expect(shouldFailByMaxRisk('CRITICAL', 'HIGH')).toBe(true)
+    expect(shouldFailByMaxRisk('HIGH', 'HIGH')).toBe(false)
+    expect(shouldFailByMaxRisk('LOW', 'MEDIUM')).toBe(false)
+  })
+
+  it('formats markdown output for PR comments', () => {
+    const report = createBaseReport({
+      targetPath: '/tmp/repo',
+      totalScore: 22,
+      summary: {
+        errors: 1,
+        warnings: 1,
+        infos: 0,
+        byRule: {
+          'high-complexity': 1,
+          'layer-violation': 1,
+        },
+      },
+    })
+
+    const diff: DriftDiff = {
+      baseRef: 'origin/main',
+      projectPath: '/tmp/repo',
+      scannedAt: new Date().toISOString(),
+      files: [
+        {
+          path: '/tmp/repo/src/a.ts',
+          scoreBefore: 10,
+          scoreAfter: 16,
+          scoreDelta: 6,
+          newIssues: [],
+          resolvedIssues: [],
+        },
+      ],
+      totalScoreBefore: 18,
+      totalScoreAfter: 24,
+      totalDelta: 6,
+      newIssuesCount: 2,
+      resolvedIssuesCount: 1,
+    }
+
+    const trust = buildTrustReport(report, { diff })
+    const markdown = formatTrustMarkdown(trust)
+
+    expect(markdown).toContain('## drift trust')
+    expect(markdown).toContain('Base ref: `origin/main`')
+    expect(markdown).toContain('### Top reasons')
+  })
+})
+
+describe('drift trust calibration (golden)', () => {
+  const scenarios: Array<{
+    name: string
+    report: DriftReport
+    expected: { trust: number; risk: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' }
+  }> = [
+    {
+      name: 'LOW - clean repo baseline',
+      report: createBaseReport(),
+      expected: { trust: 100, risk: 'LOW' },
+    },
+    {
+      name: 'MEDIUM - moderate pressure with one error',
+      report: createBaseReport({
+        totalScore: 20,
+        summary: {
+          errors: 1,
+          warnings: 2,
+          infos: 0,
+          byRule: {
+            'high-complexity': 1,
+            'debug-leftover': 2,
+          },
+        },
+        maintenanceRisk: {
+          score: 30,
+          level: 'medium',
+          hotspots: [],
+          signals: {
+            highComplexityFiles: 1,
+            filesWithoutNearbyTests: 0,
+            frequentChangeFiles: 0,
+          },
+        },
+      }),
+      expected: { trust: 77, risk: 'MEDIUM' },
+    },
+    {
+      name: 'HIGH - multiple risk vectors without collapse',
+      report: createBaseReport({
+        totalScore: 30,
+        summary: {
+          errors: 2,
+          warnings: 3,
+          infos: 0,
+          byRule: {
+            'high-complexity': 2,
+            'layer-violation': 1,
+          },
+        },
+        maintenanceRisk: {
+          score: 45,
+          level: 'medium',
+          hotspots: [
+            {
+              file: '/tmp/repo/src/risk.ts',
+              driftScore: 46,
+              complexityIssues: 2,
+              hasNearbyTests: false,
+              changeFrequency: 5,
+              risk: 50,
+              reasons: ['complexity and no tests'],
+            },
+          ],
+          signals: {
+            highComplexityFiles: 1,
+            filesWithoutNearbyTests: 1,
+            frequentChangeFiles: 1,
+          },
+        },
+      }),
+      expected: { trust: 56, risk: 'HIGH' },
+    },
+    {
+      name: 'CRITICAL - broad architecture and hotspot failure',
+      report: createBaseReport({
+        totalScore: 70,
+        summary: {
+          errors: 5,
+          warnings: 8,
+          infos: 2,
+          byRule: {
+            'high-complexity': 4,
+            'layer-violation': 2,
+            'circular-dependency': 1,
+            'debug-leftover': 3,
+          },
+        },
+        maintenanceRisk: {
+          score: 80,
+          level: 'critical',
+          hotspots: [
+            {
+              file: '/tmp/repo/src/critical.ts',
+              driftScore: 84,
+              complexityIssues: 6,
+              hasNearbyTests: false,
+              changeFrequency: 11,
+              risk: 90,
+              reasons: ['architecture collapse'],
+            },
+          ],
+          signals: {
+            highComplexityFiles: 3,
+            filesWithoutNearbyTests: 2,
+            frequentChangeFiles: 3,
+          },
+        },
+      }),
+      expected: { trust: 3, risk: 'CRITICAL' },
+    },
+  ]
+
+  it.each(scenarios)('$name', ({ report, expected }) => {
+    const trust = buildTrustReport(report)
+    expect(trust.trust_score).toBe(expected.trust)
+    expect(trust.merge_risk).toBe(expected.risk)
+  })
+
+  it('applies deterministic diff penalty when PR regresses', () => {
+    const report = createBaseReport({ totalScore: 20 })
+    const diff: DriftDiff = {
+      baseRef: 'origin/main',
+      projectPath: '/tmp/repo',
+      scannedAt: new Date().toISOString(),
+      files: [],
+      totalScoreBefore: 20,
+      totalScoreAfter: 30,
+      totalDelta: 10,
+      newIssuesCount: 3,
+      resolvedIssuesCount: 0,
+    }
+
+    const trust = buildTrustReport(report, { diff })
+    expect(trust.diff_context).toMatchObject({
+      baseRef: 'origin/main',
+      status: 'regressed',
+      penalty: 29,
+      bonus: 0,
+      netImpact: 29,
+    })
+  })
+
+  it('applies deterministic diff bonus when PR improves', () => {
+    const report = createBaseReport({ totalScore: 20 })
+    const diff: DriftDiff = {
+      baseRef: 'origin/main',
+      projectPath: '/tmp/repo',
+      scannedAt: new Date().toISOString(),
+      files: [],
+      totalScoreBefore: 35,
+      totalScoreAfter: 20,
+      totalDelta: -15,
+      newIssuesCount: 0,
+      resolvedIssuesCount: 4,
+    }
+
+    const trust = buildTrustReport(report, { diff })
+    expect(trust.diff_context).toMatchObject({
+      baseRef: 'origin/main',
+      status: 'improved',
+      penalty: 0,
+      bonus: 20,
+      netImpact: -20,
+    })
+    expect(trust.trust_score).toBe(100)
+  })
+})

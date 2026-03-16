@@ -97,6 +97,46 @@ export interface AIIssue {
   effort: 'low' | 'medium' | 'high'
 }
 
+export type MergeRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+
+export interface TrustReason {
+  label: string
+  detail: string
+  impact: number
+}
+
+export interface TrustFixPriority {
+  rank: number
+  rule: string
+  severity: DriftIssue['severity']
+  occurrences: number
+  estimated_trust_gain: number
+  effort: 'low' | 'medium' | 'high'
+  suggestion: string
+}
+
+export interface TrustDiffContext {
+  baseRef: string
+  status: 'improved' | 'regressed' | 'neutral'
+  scoreDelta: number
+  newIssues: number
+  resolvedIssues: number
+  filesChanged: number
+  penalty: number
+  bonus: number
+  netImpact: number
+}
+
+export interface DriftTrustReport {
+  scannedAt: string
+  targetPath: string
+  trust_score: number
+  merge_risk: MergeRiskLevel
+  top_reasons: TrustReason[]
+  fix_priorities: TrustFixPriority[]
+  diff_context?: TrustDiffContext
+}
+
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
