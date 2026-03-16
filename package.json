@@ -14,7 +14,8 @@
     "prepublishOnly": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "benchmark": "node --import tsx src/benchmark.ts"
   },
   "keywords": [
     "vibe-coding",
