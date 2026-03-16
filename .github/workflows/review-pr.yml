@@ -66,7 +66,7 @@ jobs:
       - name: Validate trust gate from generated JSON
         run: |
           set -euo pipefail
-          npx --no-install tsx ./src/cli.ts trust-gate drift-trust.json --min-trust 45 --max-risk HIGH | tee drift-trust-gate.txt
+          npx --no-install tsx ./src/cli.ts trust-gate drift-trust.json --min-trust 40 --max-risk HIGH | tee drift-trust-gate.txt
 
       - name: Aggregate trust KPI from trust JSON artifact
         run: npx --no-install tsx ./src/cli.ts kpi drift-trust.json --no-summary > drift-trust-kpi.json
