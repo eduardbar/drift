@@ -2,7 +2,16 @@ export { analyzeProject, analyzeFile, RULE_WEIGHTS } from './analyzer.js'
 export { buildReport, formatMarkdown } from './reporter.js'
 export { computeDiff } from './diff.js'
 export { generateReview, formatReviewMarkdown } from './review.js'
-export { buildTrustReport, formatTrustConsole, formatTrustMarkdown, shouldFailByMaxRisk } from './trust.js'
+export {
+  buildTrustReport,
+  formatTrustConsole,
+  formatTrustMarkdown,
+  formatTrustJson,
+  shouldFailByMaxRisk,
+  shouldFailTrustGate,
+  normalizeMergeRiskLevel,
+  MERGE_RISK_ORDER,
+} from './trust.js'
 export { generateArchitectureMap, generateArchitectureSvg } from './map.js'
 export type {
   DriftReport,

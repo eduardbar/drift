@@ -34,6 +34,23 @@ interface BuildTrustOptions {
   diff?: DriftDiff
 }
 
+interface TrustRenderOptions {
+  json?: boolean
+  markdown?: boolean
+}
+
+export interface TrustGateOptions {
+  minTrust?: number
+  maxRisk?: MergeRiskLevel
+}
+
+export const MERGE_RISK_ORDER: MergeRiskLevel[] = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
+
+export function normalizeMergeRiskLevel(value: string): MergeRiskLevel | undefined {
+  const normalized = value.toUpperCase()
+  return MERGE_RISK_ORDER.find((level) => level === normalized)
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }
@@ -272,7 +289,28 @@ export function formatTrustMarkdown(trust: DriftTrustReport): string {
   ].join('\n')
 }
 
+export function formatTrustJson(trust: DriftTrustReport): string {
+  return JSON.stringify(trust, null, 2)
+}
+
+export function renderTrustOutput(trust: DriftTrustReport, options?: TrustRenderOptions): string {
+  if (options?.json) return formatTrustJson(trust)
+  if (options?.markdown) return formatTrustMarkdown(trust)
+  return formatTrustConsole(trust)
+}
+
 export function shouldFailByMaxRisk(actual: MergeRiskLevel, allowedMaxRisk: MergeRiskLevel): boolean {
-  const order: MergeRiskLevel[] = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
-  return order.indexOf(actual) > order.indexOf(allowedMaxRisk)
+  return MERGE_RISK_ORDER.indexOf(actual) > MERGE_RISK_ORDER.indexOf(allowedMaxRisk)
+}
+
+export function shouldFailTrustGate(trust: DriftTrustReport, options: TrustGateOptions): boolean {
+  if (typeof options.minTrust === 'number' && !Number.isNaN(options.minTrust) && trust.trust_score < options.minTrust) {
+    return true
+  }
+
+  if (options.maxRisk && shouldFailByMaxRisk(trust.merge_risk, options.maxRisk)) {
+    return true
+  }
+
+  return false
 }

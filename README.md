@@ -177,6 +177,21 @@ drift trust ./src --max-risk HIGH
 
 ---
 
+### `drift trust-gate <trust-json-file>`
+
+Evaluate trust gate thresholds from a previously generated trust JSON file. This is ideal for CI workflows that already produced `drift-trust.json` and want a single source of truth for gate logic.
+
+```bash
+drift trust-gate drift-trust.json --min-trust 45 --max-risk HIGH
+```
+
+| Flag | Description |
+|------|-------------|
+| `--min-trust <n>` | Exit code 1 when trust score in JSON is below `n` |
+| `--max-risk <level>` | Exit code 1 when merge risk in JSON exceeds `LOW`, `MEDIUM`, `HIGH`, or `CRITICAL` |
+
+---
+
 ### `drift map [path]`
 
 Generate an `architecture.svg` map with inferred layer dependencies. When layer config is present, the SVG also highlights cycle edges and layer violations.
@@ -477,8 +492,9 @@ The repository includes `.github/workflows/review-pr.yml`, which:
 - generates a PR-ready markdown comment with `drift trust --markdown` first and `drift review --comment` as supplementary context
 - updates a single sticky comment (`<!-- drift-review -->`) on non-fork PRs
 - falls back to `$GITHUB_STEP_SUMMARY` for fork PRs
-- enforces a trust baseline gate with `drift trust --min-trust 45 --max-risk HIGH`
-- uploads `drift trust --json` as a CI artifact for manual KPI tracking
+- enforces a trust baseline gate with `drift trust-gate drift-trust.json --min-trust 45 --max-risk HIGH`
+- uploads `drift trust --json` as `drift-trust-json-pr-<PR_NUMBER>-run-<RUN_ATTEMPT>` for manual KPI tracking
+- publishes a compact trust KPI summary in `$GITHUB_STEP_SUMMARY` (score, merge risk, new/resolved issues when diff context is available)
 
 Default gate behavior in this repo:
 - fail when trust is below 45

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // drift-ignore-file
 import { Command } from 'commander'
-import { writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { basename, relative, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { createInterface } from 'node:readline/promises'
@@ -22,8 +22,8 @@ import { loadHistory, saveSnapshot, printHistory, printSnapshotDiff } from './sn
 import { generateReview } from './review.js'
 import { generateArchitectureMap } from './map.js'
 import { ingestSnapshotFromReport, getSaasSummary, generateSaasDashboardHtml } from './saas.js'
-import { buildTrustReport, formatTrustConsole, formatTrustMarkdown, shouldFailByMaxRisk } from './trust.js'
-import type { DriftDiff, MergeRiskLevel } from './types.js'
+import { buildTrustReport, formatTrustJson, renderTrustOutput, shouldFailTrustGate, normalizeMergeRiskLevel, MERGE_RISK_ORDER } from './trust.js'
+import type { DriftDiff, DriftTrustReport, MergeRiskLevel } from './types.js'
 
 const program = new Command()
 
@@ -160,11 +160,20 @@ program
   .option('--json', 'Output structured trust JSON')
   .option('--markdown', 'Output trust report as markdown (PR comment ready)')
   .option('-o, --output <file>', 'Write trust output to file')
+  .option('--json-output <file>', 'Write structured trust JSON to file without changing stdout format')
   .option('--min-trust <n>', 'Exit with code 1 if trust score is below threshold')
   .option('--max-risk <level>', 'Exit with code 1 if merge risk exceeds level (LOW|MEDIUM|HIGH|CRITICAL)')
   .action(async (
     targetPath: string | undefined,
-    options: { base?: string; json?: boolean; markdown?: boolean; output?: string; minTrust?: string; maxRisk?: string },
+    options: {
+      base?: string
+      json?: boolean
+      markdown?: boolean
+      output?: string
+      jsonOutput?: string
+      minTrust?: string
+      maxRisk?: string
+    },
   ) => {
     let tempDir: string | undefined
 
@@ -197,11 +206,7 @@ program
 
       const trust = buildTrustReport(report, { diff })
 
-      const rendered = options.json
-        ? `${JSON.stringify(trust, null, 2)}\n`
-        : options.markdown
-          ? `${formatTrustMarkdown(trust)}\n`
-          : `${formatTrustConsole(trust)}\n`
+      const rendered = `${renderTrustOutput(trust, options)}\n`
 
       process.stdout.write(rendered)
 
@@ -211,24 +216,29 @@ program
         process.stderr.write(`Trust output saved to ${outPath}\n`)
       }
 
-      if (options.minTrust) {
-        const minTrust = Number(options.minTrust)
-        if (!Number.isNaN(minTrust) && trust.trust_score < minTrust) {
+      if (options.jsonOutput) {
+        const jsonOutPath = resolve(options.jsonOutput)
+        writeFileSync(jsonOutPath, `${formatTrustJson(trust)}\n`, 'utf8')
+        process.stderr.write(`Trust JSON saved to ${jsonOutPath}\n`)
+      }
+
+      const minTrust = options.minTrust ? Number(options.minTrust) : undefined
+      if (options.minTrust && Number.isNaN(minTrust)) {
+        process.stderr.write('\n  Error: --min-trust must be a valid number\n\n')
+        process.exit(1)
+      }
+
+      let maxRisk: MergeRiskLevel | undefined
+      if (options.maxRisk) {
+        maxRisk = normalizeMergeRiskLevel(options.maxRisk)
+        if (!maxRisk) {
+          process.stderr.write(`\n  Error: --max-risk must be one of ${MERGE_RISK_ORDER.join(', ')}\n\n`)
           process.exit(1)
         }
       }
 
-      if (options.maxRisk) {
-        const normalized = options.maxRisk.toUpperCase()
-        const allowed = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
-        if (!allowed.includes(normalized)) {
-          process.stderr.write(`\n  Error: --max-risk must be one of ${allowed.join(', ')}\n\n`)
-          process.exit(1)
-        }
-
-        if (shouldFailByMaxRisk(trust.merge_risk, normalized as MergeRiskLevel)) {
-          process.exit(1)
-        }
+      if (shouldFailTrustGate(trust, { minTrust, maxRisk })) {
+        process.exit(1)
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -236,6 +246,70 @@ program
       process.exit(1)
     } finally {
       if (tempDir) cleanupTempDir(tempDir)
+    }
+  })
+
+program
+  .command('trust-gate <trustJsonFile>')
+  .description('Evaluate trust gate thresholds from an existing trust JSON file')
+  .option('--min-trust <n>', 'Fail if trust score is below threshold')
+  .option('--max-risk <level>', 'Fail if merge risk exceeds level (LOW|MEDIUM|HIGH|CRITICAL)')
+  .action((trustJsonFile: string, options: { minTrust?: string; maxRisk?: string }) => {
+    try {
+      const filePath = resolve(trustJsonFile)
+      const raw = readFileSync(filePath, 'utf8')
+      const parsed = JSON.parse(raw) as Partial<DriftTrustReport>
+
+      if (typeof parsed.trust_score !== 'number') {
+        process.stderr.write('\n  Error: trust JSON is missing numeric trust_score\n\n')
+        process.exit(1)
+      }
+
+      if (typeof parsed.merge_risk !== 'string') {
+        process.stderr.write('\n  Error: trust JSON is missing merge_risk\n\n')
+        process.exit(1)
+      }
+
+      const actualRisk = normalizeMergeRiskLevel(parsed.merge_risk)
+      if (!actualRisk) {
+        process.stderr.write(`\n  Error: trust JSON merge_risk must be one of ${MERGE_RISK_ORDER.join(', ')}\n\n`)
+        process.exit(1)
+      }
+
+      const minTrust = options.minTrust ? Number(options.minTrust) : undefined
+      if (options.minTrust && Number.isNaN(minTrust)) {
+        process.stderr.write('\n  Error: --min-trust must be a valid number\n\n')
+        process.exit(1)
+      }
+
+      let maxRisk: MergeRiskLevel | undefined
+      if (options.maxRisk) {
+        maxRisk = normalizeMergeRiskLevel(options.maxRisk)
+        if (!maxRisk) {
+          process.stderr.write(`\n  Error: --max-risk must be one of ${MERGE_RISK_ORDER.join(', ')}\n\n`)
+          process.exit(1)
+        }
+      }
+
+      const trust: DriftTrustReport = {
+        scannedAt: parsed.scannedAt ?? new Date().toISOString(),
+        targetPath: parsed.targetPath ?? '.',
+        trust_score: parsed.trust_score,
+        merge_risk: actualRisk,
+        top_reasons: parsed.top_reasons ?? [],
+        fix_priorities: parsed.fix_priorities ?? [],
+        diff_context: parsed.diff_context,
+      }
+
+      if (shouldFailTrustGate(trust, { minTrust, maxRisk })) {
+        process.exit(1)
+      }
+
+      process.stdout.write(`Trust gate passed: trust=${trust.trust_score} risk=${trust.merge_risk}\n`)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      process.stderr.write(`\n  Error: ${message}\n\n`)
+      process.exit(1)
     }
   })
 

@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { buildTrustReport, formatTrustMarkdown, shouldFailByMaxRisk } from '../src/trust.js'
+import {
+  buildTrustReport,
+  formatTrustJson,
+  formatTrustMarkdown,
+  renderTrustOutput,
+  shouldFailByMaxRisk,
+  shouldFailTrustGate,
+  normalizeMergeRiskLevel,
+} from '../src/trust.js'
 import type { DriftDiff, DriftReport } from '../src/types.js'
 
 function createBaseReport(overrides?: Partial<DriftReport>): DriftReport {
@@ -107,6 +115,22 @@ describe('drift trust baseline', () => {
     expect(shouldFailByMaxRisk('LOW', 'MEDIUM')).toBe(false)
   })
 
+  it('evaluates trust gate using combined thresholds', () => {
+    const trust = buildTrustReport(createBaseReport({ totalScore: 30 }))
+    const mediumTrust = { ...trust, trust_score: 65, merge_risk: 'HIGH' as const }
+
+    expect(shouldFailTrustGate(mediumTrust, { minTrust: 70 })).toBe(true)
+    expect(shouldFailTrustGate(mediumTrust, { minTrust: 60 })).toBe(false)
+    expect(shouldFailTrustGate(mediumTrust, { maxRisk: 'MEDIUM' })).toBe(true)
+    expect(shouldFailTrustGate(mediumTrust, { maxRisk: 'HIGH' })).toBe(false)
+  })
+
+  it('normalizes merge risk level inputs', () => {
+    expect(normalizeMergeRiskLevel('low')).toBe('LOW')
+    expect(normalizeMergeRiskLevel('MEDIUM')).toBe('MEDIUM')
+    expect(normalizeMergeRiskLevel('nope')).toBeUndefined()
+  })
+
   it('formats markdown output for PR comments', () => {
     const report = createBaseReport({
       targetPath: '/tmp/repo',
@@ -149,6 +173,15 @@ describe('drift trust baseline', () => {
     expect(markdown).toContain('## drift trust')
     expect(markdown).toContain('Base ref: `origin/main`')
     expect(markdown).toContain('### Top reasons')
+  })
+
+  it('renders selected trust output format deterministically', () => {
+    const report = createBaseReport()
+    const trust = buildTrustReport(report)
+
+    expect(renderTrustOutput(trust, { json: true })).toBe(formatTrustJson(trust))
+    expect(renderTrustOutput(trust, { markdown: true })).toBe(formatTrustMarkdown(trust))
+    expect(renderTrustOutput(trust, { json: true, markdown: true })).toBe(formatTrustJson(trust))
   })
 })
 

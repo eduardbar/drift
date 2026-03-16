@@ -7,7 +7,8 @@ Use this checklist before releasing the trust-core milestone.
 - [ ] `npm ci`
 - [ ] `npm test`
 - [ ] `npx @eduardbar/drift trust . --base origin/main --markdown`
-- [ ] `npx @eduardbar/drift trust . --base origin/main --json`
+- [ ] `npx @eduardbar/drift trust . --base origin/main --json-output drift-trust.json`
+- [ ] `npx @eduardbar/drift trust-gate drift-trust.json --min-trust 45 --max-risk HIGH`
 - [ ] `npx @eduardbar/drift review --base origin/main --comment`
 
 ## 2) CI workflow validation
@@ -15,7 +16,8 @@ Use this checklist before releasing the trust-core milestone.
 - [ ] Open or update a non-fork PR and confirm `.github/workflows/review-pr.yml` runs successfully.
 - [ ] Confirm sticky PR comment is updated once (marker: `<!-- drift-review -->`).
 - [ ] Confirm PR comment includes both sections in this order: `drift trust` then `drift review`.
-- [ ] Confirm `drift-trust-<PR_NUMBER>` artifact exists and contains `drift-trust.json`.
+- [ ] Confirm `drift-trust-json-pr-<PR_NUMBER>-run-<RUN_ATTEMPT>` artifact exists and contains `drift-trust.json`.
+- [ ] Confirm step summary shows trust KPI values: trust score, merge risk, new issues, resolved issues.
 
 Smoke PR runbook:
 

@@ -31,17 +31,45 @@ jobs:
         run: npx --no-install tsx ./src/cli.ts review --base "origin/${{ github.base_ref }}" --comment > drift-review.md
 
       - name: Generate drift trust markdown
-        run: npx --no-install tsx ./src/cli.ts trust . --base "origin/${{ github.base_ref }}" --markdown > drift-trust.md
+        run: npx --no-install tsx ./src/cli.ts trust . --base "origin/${{ github.base_ref }}" --markdown --json-output drift-trust.json > drift-trust.md
 
-      - name: Generate drift trust JSON artifact
-        run: npx --no-install tsx ./src/cli.ts trust . --base "origin/${{ github.base_ref }}" --json > drift-trust.json
+      - name: Extract trust KPI values
+        id: trust_kpi
+        run: |
+          node --input-type=module -e "
+            import fs from 'node:fs'
+            const payload = JSON.parse(fs.readFileSync('drift-trust.json', 'utf8'))
+            const score = payload.trust_score ?? 'n/a'
+            const risk = payload.merge_risk ?? 'n/a'
+            const diff = payload.diff_context ?? {}
+            const newIssues = diff.newIssues ?? 'n/a'
+            const resolvedIssues = diff.resolvedIssues ?? 'n/a'
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, [
+              'trust_score=' + score,
+              'merge_risk=' + risk,
+              'new_issues=' + newIssues,
+              'resolved_issues=' + resolvedIssues,
+            ].join('\\n') + '\\n')
+          "
+
+      - name: Publish trust KPI step summary
+        run: |
+          {
+            echo "## drift trust KPI"
+            echo
+            echo "- Trust score: **${{ steps.trust_kpi.outputs.trust_score }}**"
+            echo "- Merge risk: **${{ steps.trust_kpi.outputs.merge_risk }}**"
+            echo "- New issues vs base: **${{ steps.trust_kpi.outputs.new_issues }}**"
+            echo "- Resolved issues vs base: **${{ steps.trust_kpi.outputs.resolved_issues }}**"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload drift trust JSON artifact
         uses: actions/upload-artifact@v4
         with:
-          name: drift-trust-${{ github.event.pull_request.number }}
+          name: drift-trust-json-pr-${{ github.event.pull_request.number }}-run-${{ github.run_attempt }}
           path: drift-trust.json
           if-no-files-found: error
+          retention-days: 14
 
       - name: Post or update PR comment (non-fork only)
         if: github.event.pull_request.head.repo.fork == false
@@ -57,6 +85,8 @@ jobs:
           COMMENT_BODY+=$'\n\n'
           COMMENT_BODY+="## drift review"$'\n\n'
           COMMENT_BODY+="$(cat drift-review.md)"
+          COMMENT_BODY+=$'\n\n'
+          COMMENT_BODY+="<!-- drift-trust-kpi score=${{ steps.trust_kpi.outputs.trust_score }} risk=${{ steps.trust_kpi.outputs.merge_risk }} new=${{ steps.trust_kpi.outputs.new_issues }} resolved=${{ steps.trust_kpi.outputs.resolved_issues }} -->"
 
           EXISTING_ID=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --jq '.[] | select(.user.login == "github-actions[bot]") | select(.body | contains("<!-- drift-review -->")) | .id' | sed -n '1p')
 
@@ -80,4 +110,4 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Enforce trust baseline gate
-        run: npx --no-install tsx ./src/cli.ts trust . --base "origin/${{ github.base_ref }}" --min-trust 45 --max-risk HIGH > /dev/null
+        run: npx --no-install tsx ./src/cli.ts trust-gate drift-trust.json --min-trust 45 --max-risk HIGH
