@@ -63,11 +63,53 @@ jobs:
             echo "- Resolved issues vs base: **${{ steps.trust_kpi.outputs.resolved_issues }}**"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Validate trust gate from generated JSON
+        run: |
+          set -euo pipefail
+          npx --no-install tsx ./src/cli.ts trust-gate drift-trust.json --min-trust 45 --max-risk HIGH | tee drift-trust-gate.txt
+
+      - name: Aggregate trust KPI from trust JSON artifact
+        run: npx --no-install tsx ./src/cli.ts kpi drift-trust.json --no-summary > drift-trust-kpi.json
+
+      - name: Extract aggregated KPI values
+        id: trust_kpi_aggregate
+        run: |
+          node --input-type=module -e "
+            import fs from 'node:fs'
+            const payload = JSON.parse(fs.readFileSync('drift-trust-kpi.json', 'utf8'))
+            const files = payload.files ?? {}
+            const trustScore = payload.trustScore ?? {}
+            const highRiskRatio = payload.highRiskRatio
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, [
+              'matched=' + (files.matched ?? 'n/a'),
+              'parsed=' + (files.parsed ?? 'n/a'),
+              'malformed=' + (files.malformed ?? 'n/a'),
+              'prs=' + (payload.prsEvaluated ?? 'n/a'),
+              'avg=' + (trustScore.average ?? 'n/a'),
+              'high_risk_ratio=' + (highRiskRatio == null ? 'n/a' : Number(highRiskRatio * 100).toFixed(2) + '%'),
+            ].join('\\n') + '\\n')
+          "
+
+      - name: Publish trust KPI aggregate summary
+        run: |
+          {
+            echo
+            echo "## drift trust KPI aggregate"
+            echo
+            echo "- Files matched/parsed/malformed: **${{ steps.trust_kpi_aggregate.outputs.matched }} / ${{ steps.trust_kpi_aggregate.outputs.parsed }} / ${{ steps.trust_kpi_aggregate.outputs.malformed }}**"
+            echo "- PR samples evaluated: **${{ steps.trust_kpi_aggregate.outputs.prs }}**"
+            echo "- Aggregate trust score avg: **${{ steps.trust_kpi_aggregate.outputs.avg }}**"
+            echo "- High-risk ratio (HIGH+CRITICAL): **${{ steps.trust_kpi_aggregate.outputs.high_risk_ratio }}**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload drift trust JSON artifact
         uses: actions/upload-artifact@v4
         with:
           name: drift-trust-json-pr-${{ github.event.pull_request.number }}-run-${{ github.run_attempt }}
-          path: drift-trust.json
+          path: |
+            drift-trust.json
+            drift-trust-gate.txt
+            drift-trust-kpi.json
           if-no-files-found: error
           retention-days: 14
 
@@ -109,5 +151,3 @@ jobs:
             cat drift-review.md
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Enforce trust baseline gate
-        run: npx --no-install tsx ./src/cli.ts trust-gate drift-trust.json --min-trust 45 --max-risk HIGH

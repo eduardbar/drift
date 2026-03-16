@@ -16,8 +16,14 @@ Use this checklist before releasing the trust-core milestone.
 - [ ] Open or update a non-fork PR and confirm `.github/workflows/review-pr.yml` runs successfully.
 - [ ] Confirm sticky PR comment is updated once (marker: `<!-- drift-review -->`).
 - [ ] Confirm PR comment includes both sections in this order: `drift trust` then `drift review`.
-- [ ] Confirm `drift-trust-json-pr-<PR_NUMBER>-run-<RUN_ATTEMPT>` artifact exists and contains `drift-trust.json`.
+- [x] E2E: `trust-gate` runs from generated `drift-trust.json` in `review-pr` workflow.
+- [x] E2E: `kpi` aggregates over generated trust JSON artifact (`drift-trust-kpi.json`).
+- [x] E2E: `drift-trust-json-pr-<PR_NUMBER>-run-<RUN_ATTEMPT>` artifact now bundles:
+  - `drift-trust.json`
+  - `drift-trust-gate.txt`
+  - `drift-trust-kpi.json`
 - [ ] Confirm step summary shows trust KPI values: trust score, merge risk, new issues, resolved issues.
+- [x] E2E: step summary includes aggregate KPI block (matched/parsed/malformed, PR samples, avg trust, high-risk ratio).
 
 Smoke PR runbook:
 
