@@ -7,6 +7,7 @@ export interface SaasPolicy {
   maxRunsPerWorkspacePerMonth: number
   maxReposPerWorkspace: number
   retentionDays: number
+  strictActorEnforcement: boolean
   maxWorkspacesPerOrganizationByPlan: Record<SaasPlan, number>
 }
 
@@ -172,6 +173,7 @@ export interface SaasPolicyOverrides {
   maxRunsPerWorkspacePerMonth?: number
   maxReposPerWorkspace?: number
   retentionDays?: number
+  strictActorEnforcement?: boolean
   maxWorkspacesPerOrganizationByPlan?: Partial<Record<SaasPlan, number>>
 }
 
@@ -235,11 +237,30 @@ export class SaasPermissionError extends Error {
   }
 }
 
+export class SaasActorRequiredError extends Error {
+  readonly code = 'SAAS_ACTOR_REQUIRED'
+  readonly operation: SaasOperation
+  readonly organizationId: string
+  readonly workspaceId?: string
+
+  constructor(context: SaasPermissionContext) {
+    const workspaceSuffix = context.workspaceId ? ` workspace='${context.workspaceId}'` : ''
+    super(
+      `Actor is required for operation '${context.operation}'. organization='${context.organizationId}'${workspaceSuffix}.`,
+    )
+    this.name = 'SaasActorRequiredError'
+    this.operation = context.operation
+    this.organizationId = context.organizationId
+    this.workspaceId = context.workspaceId
+  }
+}
+
 export const DEFAULT_SAAS_POLICY: SaasPolicy = {
   freeUserThreshold: 7500,
   maxRunsPerWorkspacePerMonth: 500,
   maxReposPerWorkspace: 20,
   retentionDays: 90,
+  strictActorEnforcement: false,
   maxWorkspacesPerOrganizationByPlan: {
     free: 20,
     sponsor: 50,
@@ -325,6 +346,9 @@ function resolveActorRole(store: SaasStore, organizationId: string, actorUserId:
 function assertPermissionInStore(store: SaasStore, context: SaasPermissionContext): SaasPermissionResult {
   const requiredRole = REQUIRED_ROLE_BY_OPERATION[context.operation]
   if (!context.actorUserId) {
+    if (store.policy.strictActorEnforcement) {
+      throw new SaasActorRequiredError(context)
+    }
     return { requiredRole }
   }
 
@@ -632,6 +656,14 @@ export function ingestSnapshotFromReport(report: DriftReport, options: IngestOpt
   const scoped = resolveScopedIdentity(options)
   const requestedPlan = normalizePlan(options.plan)
 
+  if (store.policy.strictActorEnforcement && !options.actorUserId) {
+    throw new SaasActorRequiredError({
+      operation: 'snapshot:write',
+      organizationId: scoped.organizationId,
+      workspaceId: scoped.workspaceId,
+    })
+  }
+
   const workspaceExists = Boolean(store.workspaces[scoped.workspaceKey])
   const organizationExists = Boolean(store.organizations[scoped.organizationId])
   if (options.actorUserId) {
@@ -791,13 +823,14 @@ export function listSaasSnapshots(options?: SaasQueryOptions): SaasSnapshot[] {
   const storeFile = resolve(options?.storeFile ?? defaultSaasStorePath())
   const store = loadStoreInternal(storeFile, options?.policy)
 
-  if (options?.actorUserId) {
-    const organizationId = options.organizationId ?? DEFAULT_ORGANIZATION_ID
+  const shouldEnforceActorForScope = store.policy.strictActorEnforcement && Boolean(options?.organizationId || options?.workspaceId)
+  if (options?.actorUserId || shouldEnforceActorForScope) {
+    const organizationId = options?.organizationId ?? DEFAULT_ORGANIZATION_ID
     assertPermissionInStore(store, {
       operation: 'snapshot:read',
       organizationId,
-      workspaceId: options.workspaceId,
-      actorUserId: options.actorUserId,
+      workspaceId: options?.workspaceId,
+      actorUserId: options?.actorUserId,
     })
   }
 
@@ -811,13 +844,14 @@ export function getSaasSummary(options?: SaasQueryOptions): SaasSummary {
   const storeFile = resolve(options?.storeFile ?? defaultSaasStorePath())
   const store = loadStoreInternal(storeFile, options?.policy)
 
-  if (options?.actorUserId) {
-    const organizationId = options.organizationId ?? DEFAULT_ORGANIZATION_ID
+  const shouldEnforceActorForScope = store.policy.strictActorEnforcement && Boolean(options?.organizationId || options?.workspaceId)
+  if (options?.actorUserId || shouldEnforceActorForScope) {
+    const organizationId = options?.organizationId ?? DEFAULT_ORGANIZATION_ID
     assertPermissionInStore(store, {
       operation: 'summary:read',
       organizationId,
-      workspaceId: options.workspaceId,
-      actorUserId: options.actorUserId,
+      workspaceId: options?.workspaceId,
+      actorUserId: options?.actorUserId,
     })
   }
 

@@ -46,6 +46,7 @@ export {
   DEFAULT_SAAS_POLICY,
   defaultSaasStorePath,
   resolveSaasPolicy,
+  SaasActorRequiredError,
   SaasPermissionError,
   getRequiredRoleForOperation,
   assertSaasPermission,

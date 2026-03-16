@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { analyzeProject } from '../src/analyzer.js'
 import { buildReport } from '../src/reporter.js'
 import {
+  SaasActorRequiredError,
   SaasPermissionError,
   assertSaasPermission,
   changeOrganizationPlan,
@@ -382,5 +383,82 @@ describe('saas foundations', () => {
         storeFile,
       })
     }).toThrowError(SaasPermissionError)
+  })
+
+  it('enforces missing actor deterministically when strict actor mode is enabled', () => {
+    const projectDir = createProjectDir('drift-saas-strict-actor-')
+    dirs.push(projectDir)
+    const storeFile = join(projectDir, '.drift-cloud', 'store.json')
+    const report = createReport(projectDir)
+    const policy = { strictActorEnforcement: true }
+
+    expect(() => {
+      ingestSnapshotFromReport(report, {
+        organizationId: 'org-strict',
+        workspaceId: 'ws-strict',
+        userId: 'u-owner',
+        storeFile,
+        policy,
+      })
+    }).toThrowError(SaasActorRequiredError)
+
+    ingestSnapshotFromReport(report, {
+      organizationId: 'org-strict',
+      workspaceId: 'ws-strict',
+      userId: 'u-owner',
+      actorUserId: 'u-owner',
+      storeFile,
+      policy,
+    })
+
+    expect(() => {
+      getSaasSummary({
+        organizationId: 'org-strict',
+        workspaceId: 'ws-strict',
+        storeFile,
+        policy,
+      })
+    }).toThrowError(SaasActorRequiredError)
+
+    try {
+      getSaasSummary({
+        organizationId: 'org-strict',
+        workspaceId: 'ws-strict',
+        storeFile,
+        policy,
+      })
+    } catch (error) {
+      expect(error).toBeInstanceOf(SaasActorRequiredError)
+      const actorRequired = error as SaasActorRequiredError
+      expect(actorRequired.code).toBe('SAAS_ACTOR_REQUIRED')
+      expect(actorRequired.operation).toBe('summary:read')
+      expect(actorRequired.organizationId).toBe('org-strict')
+      expect(actorRequired.workspaceId).toBe('ws-strict')
+    }
+  })
+
+  it('keeps backward compatibility when strict actor mode is disabled', () => {
+    const projectDir = createProjectDir('drift-saas-compat-')
+    dirs.push(projectDir)
+    const storeFile = join(projectDir, '.drift-cloud', 'store.json')
+    const report = createReport(projectDir)
+
+    expect(() => {
+      ingestSnapshotFromReport(report, {
+        organizationId: 'org-compat',
+        workspaceId: 'ws-compat',
+        userId: 'u-owner',
+        storeFile,
+      })
+    }).not.toThrow()
+
+    const scopedSummary = getSaasSummary({
+      organizationId: 'org-compat',
+      workspaceId: 'ws-compat',
+      storeFile,
+    })
+
+    expect(scopedSummary.totalSnapshots).toBe(1)
+    expect(scopedSummary.usersRegistered).toBe(1)
   })
 })

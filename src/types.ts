@@ -269,6 +269,7 @@ export interface DriftConfig {
     maxRunsPerWorkspacePerMonth?: number
     maxReposPerWorkspace?: number
     retentionDays?: number
+    strictActorEnforcement?: boolean
     maxWorkspacesPerOrganizationByPlan?: {
       free?: number
       sponsor?: number

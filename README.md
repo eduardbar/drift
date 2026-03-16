@@ -390,6 +390,7 @@ drift cloud summary
 drift cloud summary --org acme --workspace core
 drift cloud summary --org acme --workspace core --actor u-owner
 drift cloud ingest ./src --org acme --workspace core --user u-member --actor u-owner
+drift cloud ingest ./src --org acme --workspace core --user u-member --actor u-member # strict actor mode ready
 drift cloud plan-set --org acme --plan team --actor u-owner --reason "annual upgrade"
 drift cloud plan-changes --org acme --actor u-owner
 drift cloud usage --org acme --actor u-owner
@@ -401,8 +402,8 @@ drift cloud dashboard --output drift-cloud-dashboard.html
 
 | Command | Description |
 |---------|-------------|
-| `drift cloud ingest [path] --org <id> --workspace <id> --user <id> [--role <owner\|member\|viewer>] [--plan <free\|sponsor\|team\|business>] [--repo <name>] [--actor <user>] [--store <file>]` | Scans the path and stores one tenant-scoped snapshot (actor is optional authz context for writes) |
-| `drift cloud summary [--json] [--org <id>] [--workspace <id>] [--actor <user>] [--store <file>]` | Shows users/workspaces/repos usage and runs per month, optionally scoped with actor-based read checks |
+| `drift cloud ingest [path] --org <id> --workspace <id> --user <id> [--role <owner\|member\|viewer>] [--plan <free\|sponsor\|team\|business>] [--repo <name>] [--actor <user>] [--store <file>]` | Scans the path and stores one tenant-scoped snapshot (`--actor` optional by default, required only when `saas.strictActorEnforcement=true`) |
+| `drift cloud summary [--json] [--org <id>] [--workspace <id>] [--actor <user>] [--store <file>]` | Shows users/workspaces/repos usage and runs per month; in strict mode, scoped reads (`--org`/`--workspace`) require `--actor` |
 | `drift cloud plan-set --org <id> --plan <free\|sponsor\|team\|business> --actor <user> [--reason <text>] [--store <file>]` | Updates organization plan and writes an audited plan-change event (owner-gated by actor) |
 | `drift cloud plan-changes --org <id> --actor <user> [--json] [--store <file>]` | Lists audited plan lifecycle events for the organization |
 | `drift cloud usage --org <id> --actor <user> [--month <yyyy-mm>] [--json] [--store <file>]` | Shows organization usage plus effective limits for current plan |
@@ -411,6 +412,16 @@ drift cloud dashboard --output drift-cloud-dashboard.html
 `drift cloud` ships with tenant identity boundaries (`organizationId` + `workspaceId`), role primitives (`owner`/`member`/`viewer`), and plan placeholders (`free`/`sponsor`/`team`/`business`). It is an infrastructure foundation, not a full auth/billing platform.
 
 By default, local guardrails enforce one plan-based limit: max workspaces per organization (`free:20`, `sponsor:50`, `team:200`, `business:1000`), plus existing free-phase limits (runs per workspace, repos per workspace, retention window).
+
+To require actor identity on scoped cloud operations, enable strict actor mode in `drift.config.*`:
+
+```ts
+export default {
+  saas: {
+    strictActorEnforcement: true,
+  },
+}
+```
 
 ---
 
