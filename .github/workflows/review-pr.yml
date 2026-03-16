@@ -26,8 +26,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Run directly from TypeScript source in this PR to avoid stale dist artifacts.
       - name: Generate drift review markdown
-        run: npx @eduardbar/drift review --base "origin/${{ github.base_ref }}" --comment > drift-review.md
+        run: npx --no-install tsx ./src/cli.ts review --base "origin/${{ github.base_ref }}" --comment > drift-review.md
+
+      - name: Generate drift trust markdown
+        run: npx --no-install tsx ./src/cli.ts trust . --base "origin/${{ github.base_ref }}" --markdown > drift-trust.md
+
+      - name: Generate drift trust JSON artifact
+        run: npx --no-install tsx ./src/cli.ts trust . --base "origin/${{ github.base_ref }}" --json > drift-trust.json
+
+      - name: Upload drift trust JSON artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-trust-${{ github.event.pull_request.number }}
+          path: drift-trust.json
+          if-no-files-found: error
 
       - name: Post or update PR comment (non-fork only)
         if: github.event.pull_request.head.repo.fork == false
@@ -38,6 +52,10 @@ jobs:
         run: |
           COMMENT_BODY="<!-- drift-review -->"
           COMMENT_BODY+=$'\n'
+          COMMENT_BODY+="## drift trust"$'\n\n'
+          COMMENT_BODY+="$(cat drift-trust.md)"
+          COMMENT_BODY+=$'\n\n'
+          COMMENT_BODY+="## drift review"$'\n\n'
           COMMENT_BODY+="$(cat drift-review.md)"
 
           EXISTING_ID=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --jq '.[] | select(.user.login == "github-actions[bot]") | select(.body | contains("<!-- drift-review -->")) | .id' | sed -n '1p')
@@ -52,10 +70,14 @@ jobs:
         if: github.event.pull_request.head.repo.fork == true
         run: |
           {
+            echo "## drift trust"
+            echo
+            cat drift-trust.md
+            echo
             echo "## drift review"
             echo
             cat drift-review.md
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Enforce drift threshold
-        run: npx @eduardbar/drift review --base "origin/${{ github.base_ref }}" --fail-on 5 --comment > /dev/null
+      - name: Enforce trust baseline gate
+        run: npx --no-install tsx ./src/cli.ts trust . --base "origin/${{ github.base_ref }}" --min-trust 65 --max-risk MEDIUM > /dev/null

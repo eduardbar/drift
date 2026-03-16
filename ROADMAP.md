@@ -21,19 +21,20 @@ drift's goal is to be the tool that sits between ESLint and SonarQube — lightw
 **What drift is not:**
 - Not an ESLint replacement for style or correctness rules
 - Not a SonarQube replacement for security scanning
-- Not a cloud product, not a SaaS, not freemium
+- Not a cloud-only product or mandatory hosted backend
 
 **What drift is:**
 - A zero-config static analysis CLI that scores your TypeScript project's structural health
-- A CI gate that blocks debt from accumulating silently
+- An AI code audit CLI that helps teams decide merge trust on AI-assisted PRs
+- A CI gate that blocks risky merges using trust thresholds
 - A shared language for teams to talk about code quality: "our drift score went from 40 to 18 this sprint"
-- Always free. MIT. No tiers.
+- Core CLI is free and MIT; premium governance/sponsor tiers are a product direction for teams
 
 ---
 
 ## Principles that don't change
 
-- **Always free for the developer.** MIT. Forever. No paid tier, no cloud lock-in.
+- **Core stays free for developers.** MIT for the OSS CLI, no backend lock-in for the core workflow.
 - **Zero config to start.** One command, one number. Config is optional and additive.
 - **Fast.** Results in under 3 seconds on any normal project.
 - **One actionable number, not 400 warnings nobody reads.**
@@ -153,7 +154,7 @@ A score of 45 means nothing without context. A score that went from 80 to 45 ove
 
 - **26 rules active** across 9 detection categories
 - **Self-scan score: 14/100 (LOW)**
-- Published on npm as `@eduardbar/drift` — MIT, always free
+- Published on npm as `@eduardbar/drift` — MIT core CLI, optional premium direction documented in PRD
 - Cross-platform: Windows / Linux / macOS via `npx`
 
 ---

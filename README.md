@@ -1,8 +1,8 @@
-![drift — technical debt detector for AI-generated code](./assets/og.png)
+![drift - AI Code Audit CLI for merge trust](./assets/og.png)
 
 # drift
 
-Detect technical debt in AI-generated TypeScript code. One command. Zero config.
+AI Code Audit CLI for AI-assisted PRs. Drift turns static signals into merge trust decisions before you merge.
 
 ![npm](https://img.shields.io/npm/v/@eduardbar/drift?color=6366f1&label=npm)
 ![license](https://img.shields.io/badge/license-MIT-green.svg)
@@ -20,7 +20,7 @@ AI coding tools ship code fast. They also leave behind consistent, predictable s
 
 GitClear's 2024 analysis of 211M lines of code found a **39.9% drop in refactoring activity** and an **8x increase in duplicated code blocks** since AI tools became mainstream. A senior engineer on r/vibecoding put it plainly: _"The code looks reviewed. It isn't. Nobody's reading 400-line files the AI dumped in one shot."_
 
-drift gives you a 0–100 score per file and project so you know what to look at before it reaches production.
+drift gives you debt signals (`scan`, `review`) and a trust decision layer (`trust`) so teams can merge with confidence instead of guesswork.
 
 **How drift compares to existing tools:**
 
@@ -50,6 +50,7 @@ npm install --save-dev @eduardbar/drift
 ## Product Docs
 
 - Product requirements and roadmap: [`docs/PRD.md`](./docs/PRD.md)
+- Trust core release checklist: [`docs/trust-core-release-checklist.md`](./docs/trust-core-release-checklist.md)
 - Contributor/agent workflow guide: [`docs/AGENTS.md`](./docs/AGENTS.md)
 
 ---
@@ -145,6 +146,34 @@ drift review --base origin/main --fail-on 5
 | `--json` | Output structured review JSON |
 | `--comment` | Print only the markdown body for PR comments |
 | `--fail-on <n>` | Exit code 1 when score delta is greater than or equal to `n` |
+
+`drift review` is best used as supplementary diff context alongside `drift trust` in pull-request workflows.
+
+---
+
+### `drift trust [path]`
+
+Compute merge trust baseline for local checks and CI merge gates.
+
+```bash
+drift trust
+drift trust ./src
+drift trust ./src --json
+drift trust ./src --base origin/main
+drift trust ./src --base origin/main --markdown
+drift trust ./src --markdown --output trust.md
+drift trust ./src --min-trust 65
+drift trust ./src --max-risk MEDIUM
+```
+
+| Flag | Description |
+|------|-------------|
+| `--base <ref>` | Compare against a git base ref and include deterministic diff-aware penalties/bonuses |
+| `--json` | Output structured trust JSON (`trust_score`, `merge_risk`, `top_reasons`, `fix_priorities`, optional `diff_context`) |
+| `--markdown` | Output PR-ready markdown trust summary |
+| `--output <file>` | Write selected trust output format to file |
+| `--min-trust <n>` | Exit code 1 when trust score is below `n` |
+| `--max-risk <level>` | Exit code 1 when computed merge risk exceeds `LOW`, `MEDIUM`, `HIGH`, or `CRITICAL` |
 
 ---
 
@@ -445,10 +474,15 @@ jobs:
 ### Auto PR comment with `drift review`
 
 The repository includes `.github/workflows/review-pr.yml`, which:
-- generates a PR-ready markdown comment from `drift review --comment`
+- generates a PR-ready markdown comment with `drift trust --markdown` first and `drift review --comment` as supplementary context
 - updates a single sticky comment (`<!-- drift-review -->`) on non-fork PRs
 - falls back to `$GITHUB_STEP_SUMMARY` for fork PRs
-- enforces a score delta threshold with `--fail-on`
+- enforces a trust baseline gate with `drift trust --min-trust 65 --max-risk MEDIUM`
+- uploads `drift trust --json` as a CI artifact for manual KPI tracking
+
+Default gate behavior in this repo:
+- fail when trust is below 65
+- fail when merge risk is above `MEDIUM` (that means `HIGH` and `CRITICAL` are blocked)
 
 ---
 
