@@ -1,6 +1,6 @@
 import { SourceFile, SyntaxKind } from 'ts-morph'
 import type { DriftIssue } from '../types.js'
-import { hasIgnoreComment, getSnippet, getFunctionLikeLines, type FunctionLike } from './shared.js'
+import { hasIgnoreComment, getSnippet, getFunctionLikeLines, collectFunctionLikes, getFileLines } from './shared.js'
 
 const LARGE_FILE_THRESHOLD = 300
 const LARGE_FUNCTION_THRESHOLD = 50
@@ -26,12 +26,7 @@ export function detectLargeFile(file: SourceFile): DriftIssue[] {
 
 export function detectLargeFunctions(file: SourceFile): DriftIssue[] {
   const issues: DriftIssue[] = []
-  const fns: FunctionLike[] = [
-    ...file.getFunctions(),
-    ...file.getDescendantsOfKind(SyntaxKind.ArrowFunction),
-    ...file.getDescendantsOfKind(SyntaxKind.FunctionExpression),
-    ...file.getClasses().flatMap((c) => c.getMethods()),
-  ]
+  const fns = collectFunctionLikes(file)
 
   for (const fn of fns) {
     const lines = getFunctionLikeLines(fn)
@@ -70,7 +65,7 @@ export function detectDebugLeftovers(file: SourceFile): DriftIssue[] {
     }
   }
 
-  const lines = file.getFullText().split('\n')
+  const lines = getFileLines(file)
   lines.forEach((lineContent, i) => {
     if (/\/\/\s*(TODO|FIXME|HACK|XXX|TEMP)\b/i.test(lineContent)) {
       if (hasIgnoreComment(file, i + 1)) return
@@ -90,14 +85,18 @@ export function detectDebugLeftovers(file: SourceFile): DriftIssue[] {
 
 export function detectDeadCode(file: SourceFile): DriftIssue[] {
   const issues: DriftIssue[] = []
+  const identifierCounts = new Map<string, number>()
+
+  for (const id of file.getDescendantsOfKind(SyntaxKind.Identifier)) {
+    const text = id.getText()
+    identifierCounts.set(text, (identifierCounts.get(text) ?? 0) + 1)
+  }
 
   for (const imp of file.getImportDeclarations()) {
     for (const named of imp.getNamedImports()) {
       const name = named.getName()
-      const refs = file.getDescendantsOfKind(SyntaxKind.Identifier).filter(
-        (id) => id.getText() === name && id !== named.getNameNode()
-      )
-      if (refs.length === 0) {
+      const refsCount = Math.max(0, (identifierCounts.get(name) ?? 0) - 1)
+      if (refsCount === 0) {
         issues.push({
           rule: 'dead-code',
           severity: 'warning',

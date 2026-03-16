@@ -1,6 +1,6 @@
 import { SourceFile } from 'ts-morph'
 import type { DriftIssue } from '../types.js'
-import { hasIgnoreComment } from './shared.js'
+import { hasIgnoreComment, getFileLines } from './shared.js'
 
 const TRIVIAL_COMMENT_PATTERNS = [
   { comment: /\/\/\s*return\b/i, code: /^\s*return\b/ },
@@ -41,7 +41,7 @@ function checkLineForContradiction(
 
 export function detectCommentContradiction(file: SourceFile): DriftIssue[] {
   const issues: DriftIssue[] = []
-  const lines = file.getFullText().split('\n')
+  const lines = getFileLines(file)
 
   for (let i = 0; i < lines.length - 1; i++) {
     const commentLine = lines[i].trim()

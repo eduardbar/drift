@@ -124,6 +124,17 @@ describe('dead-code', () => {
     const code = `import fs from 'fs'\nconst x = 1`
     expect(getRules(code)).not.toContain('dead-code')
   })
+
+  it('keeps used named imports clean even with many identifiers', () => {
+    const code = [
+      `import { join } from 'path'`,
+      `const a = 'x'`,
+      `const b = 'y'`,
+      `const c = 'z'`,
+      `const p = join(a, b + c)`,
+    ].join('\n')
+    expect(getRules(code)).not.toContain('dead-code')
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -262,6 +273,12 @@ describe('high-complexity', () => {
 }`
     expect(getRules(code)).toContain('high-complexity')
   })
+
+  it('detects high complexity in class methods', () => {
+    const ifs = Array.from({ length: 11 }, (_, i) => `      if (x === ${i}) return ${i}`).join('\n')
+    const code = `class C {\n  run(x: number): number {\n${ifs}\n    return -1\n  }\n}`
+    expect(getRules(code)).toContain('high-complexity')
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -342,6 +359,11 @@ describe('too-many-params', () => {
 
   it('detects arrow function with too many params', () => {
     const code = `const fn = (a: string, b: number, c: boolean, d: string, e: number): void => {}`
+    expect(getRules(code)).toContain('too-many-params')
+  })
+
+  it('detects class method with too many params', () => {
+    const code = `class C {\n  run(a: string, b: number, c: boolean, d: string, e: number): void {}\n}`
     expect(getRules(code)).toContain('too-many-params')
   })
 })
@@ -685,7 +707,7 @@ abstract class Processor {
   abstract process(x: number): void
 }
 `
-    expect(getRules(code2, 'src/processor.ts')).toContain('unnecessary-abstraction')
+    expect(getRules(code2, undefined, 'src/processor.ts')).toContain('unnecessary-abstraction')
   })
 })
 

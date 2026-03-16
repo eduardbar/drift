@@ -1,6 +1,6 @@
 import { SourceFile, SyntaxKind } from 'ts-morph'
 import type { DriftIssue } from '../types.js'
-import { hasIgnoreComment, getSnippet, type FunctionLike } from './shared.js'
+import { hasIgnoreComment, getSnippet, collectFunctionLikes, type FunctionLike } from './shared.js'
 
 const COMPLEXITY_THRESHOLD = 10
 
@@ -31,12 +31,7 @@ function getCyclomaticComplexity(fn: FunctionLike): number {
 
 export function detectHighComplexity(file: SourceFile): DriftIssue[] {
   const issues: DriftIssue[] = []
-  const fns: FunctionLike[] = [
-    ...file.getFunctions(),
-    ...file.getDescendantsOfKind(SyntaxKind.ArrowFunction),
-    ...file.getDescendantsOfKind(SyntaxKind.FunctionExpression),
-    ...file.getClasses().flatMap((c) => c.getMethods()),
-  ]
+  const fns: FunctionLike[] = collectFunctionLikes(file)
 
   for (const fn of fns) {
     const complexity = getCyclomaticComplexity(fn)

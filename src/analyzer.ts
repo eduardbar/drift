@@ -1,5 +1,6 @@
 // drift-ignore-file
 import * as path from 'node:path'
+import { readdirSync } from 'node:fs'
 import { Project } from 'ts-morph'
 import type { DriftIssue, FileReport, DriftConfig, LoadedPlugin, PluginRuleContext, PluginLoadError, PluginLoadWarning } from './types.js'
 
@@ -242,6 +243,49 @@ function pluginDiagnosticToIssue(
   }
 }
 
+const ANALYZABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx'])
+const EXCLUDED_DIR_NAMES = new Set(['node_modules', 'dist', '.next', 'build'])
+
+function shouldAnalyzeFile(fileName: string): boolean {
+  if (fileName.endsWith('.d.ts')) return false
+  if (/\.test\.[^.]+$/.test(fileName)) return false
+  if (/\.spec\.[^.]+$/.test(fileName)) return false
+  return ANALYZABLE_EXTENSIONS.has(path.extname(fileName))
+}
+
+function collectAnalyzableSourcePaths(targetPath: string): string[] {
+  const sourcePaths: string[] = []
+  const queue: string[] = [targetPath]
+
+  while (queue.length > 0) {
+    const currentDir = queue.pop()
+    if (!currentDir) continue
+
+    let entries: Array<import('node:fs').Dirent<string>>
+    try {
+      entries = readdirSync(currentDir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+
+    for (const entry of entries) {
+      const entryPath = path.join(currentDir, entry.name)
+      if (entry.isDirectory()) {
+        if (EXCLUDED_DIR_NAMES.has(entry.name)) continue
+        queue.push(entryPath)
+        continue
+      }
+
+      if (!entry.isFile()) continue
+      if (!shouldAnalyzeFile(entry.name)) continue
+      sourcePaths.push(entryPath)
+    }
+  }
+
+  sourcePaths.sort()
+  return sourcePaths
+}
+
 // ---------------------------------------------------------------------------
 // Per-file analysis
 // ---------------------------------------------------------------------------
@@ -321,36 +365,36 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
     compilerOptions: { allowJs: true, jsx: 1 },  // 1 = JsxEmit.Preserve
   })
 
-  project.addSourceFilesAtPaths([
-    `${targetPath}/**/*.ts`,
-    `${targetPath}/**/*.tsx`,
-    `${targetPath}/**/*.js`,
-    `${targetPath}/**/*.jsx`,
-    `!${targetPath}/**/node_modules/**`,
-    `!${targetPath}/**/dist/**`,
-    `!${targetPath}/**/.next/**`,
-    `!${targetPath}/**/build/**`,
-    `!${targetPath}/**/*.d.ts`,
-    `!${targetPath}/**/*.test.*`,
-    `!${targetPath}/**/*.spec.*`,
-  ])
+  const sourcePaths = collectAnalyzableSourcePaths(targetPath)
+  if (sourcePaths.length > 0) {
+    project.addSourceFilesAtPaths(sourcePaths)
+  }
 
   const sourceFiles = project.getSourceFiles()
   const pluginRuntime = loadPlugins(targetPath, config?.plugins)
 
   // Phase 1: per-file analysis
-  const reports: FileReport[] = sourceFiles.map((file) => analyzeFile(file, {
-    config,
-    loadedPlugins: pluginRuntime.plugins,
-    projectRoot: targetPath,
-  }))
+  const reports: FileReport[] = []
   const reportByPath = new Map<string, FileReport>()
-  for (const r of reports) reportByPath.set(r.path, r)
+  const ignoredPaths = new Set<string>()
 
-  // Build set of ignored paths so cross-file phases don't re-add issues
-  const ignoredPaths = new Set<string>(
-    sourceFiles.filter(sf => isFileIgnored(sf)).map(sf => sf.getFilePath())
-  )
+  for (const file of sourceFiles) {
+    const filePath = file.getFilePath()
+    const report = analyzeFile(file, {
+      config,
+      loadedPlugins: pluginRuntime.plugins,
+      projectRoot: targetPath,
+    })
+
+    reports.push(report)
+    reportByPath.set(report.path, report)
+    if (isFileIgnored(file)) ignoredPaths.add(filePath)
+  }
+
+  const getReport = (filePath: string): FileReport | undefined => {
+    if (ignoredPaths.has(filePath)) return undefined
+    return reportByPath.get(filePath)
+  }
 
   // ── Phase 2 setup: build import graph ──────────────────────────────────────
   const allImportedPaths = new Set<string>()
@@ -423,23 +467,19 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
   // ── Phase 2: dead-file + unused-export + unused-dependency ─────────────────
   const deadFiles = detectDeadFiles(sourceFiles, allImportedPaths, RULE_WEIGHTS)
   for (const [sfPath, issue] of deadFiles) {
-    if (ignoredPaths.has(sfPath)) continue
-    const report = reportByPath.get(sfPath)
+    const report = getReport(sfPath)
     if (report) {
       report.issues.push(issue)
-      report.score = calculateScore(report.issues, RULE_WEIGHTS)
     }
   }
 
   const unusedExports = detectUnusedExports(sourceFiles, allImportedNames, RULE_WEIGHTS)
   for (const [sfPath, issues] of unusedExports) {
-    if (ignoredPaths.has(sfPath)) continue
-    const report = reportByPath.get(sfPath)
+    const report = getReport(sfPath)
     if (report) {
       for (const issue of issues) {
         report.issues.push(issue)
       }
-      report.score = calculateScore(report.issues, RULE_WEIGHTS)
     }
   }
 
@@ -456,11 +496,9 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
   // ── Phase 3: circular-dependency ────────────────────────────────────────────
   const circularIssues = detectCircularDependencies(importGraph, RULE_WEIGHTS)
   for (const [filePath, issue] of circularIssues) {
-    if (ignoredPaths.has(filePath)) continue
-    const report = reportByPath.get(filePath)
+    const report = getReport(filePath)
     if (report) {
       report.issues.push(issue)
-      report.score = calculateScore(report.issues, RULE_WEIGHTS)
     }
   }
 
@@ -468,12 +506,10 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
   if (config?.layers && config.layers.length > 0) {
     const layerIssues = detectLayerViolations(importGraph, config.layers, targetPath, RULE_WEIGHTS)
     for (const [filePath, issues] of layerIssues) {
-      if (ignoredPaths.has(filePath)) continue
-      const report = reportByPath.get(filePath)
+      const report = getReport(filePath)
       if (report) {
         for (const issue of issues) {
           report.issues.push(issue)
-          report.score = Math.min(100, report.score + (RULE_WEIGHTS['layer-violation']?.weight ?? 5))
         }
       }
     }
@@ -483,12 +519,10 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
   if (config?.modules && config.modules.length > 0) {
     const boundaryIssues = detectCrossBoundaryImports(importGraph, config.modules, targetPath, RULE_WEIGHTS)
     for (const [filePath, issues] of boundaryIssues) {
-      if (ignoredPaths.has(filePath)) continue
-      const report = reportByPath.get(filePath)
+      const report = getReport(filePath)
       if (report) {
         for (const issue of issues) {
           report.issues.push(issue)
-          report.score = Math.min(100, report.score + (RULE_WEIGHTS['cross-boundary-import']?.weight ?? 5))
         }
       }
     }
@@ -496,6 +530,15 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
 
   // ── Phase 8: semantic-duplication ───────────────────────────────────────────
   const fingerprintMap = new Map<string, Array<{ filePath: string; name: string; line: number; col: number }>>()
+  const relativePathCache = new Map<string, string>()
+
+  const toRelativePath = (filePath: string): string => {
+    const cached = relativePathCache.get(filePath)
+    if (cached) return cached
+    const value = path.relative(targetPath, filePath).replace(/\\/g, '/')
+    relativePathCache.set(filePath, value)
+    return value
+  }
 
   for (const sf of sourceFiles) {
     if (isFileIgnored(sf)) continue
@@ -516,13 +559,9 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
 
       const others = entries
         .filter(e => e !== entry)
-        .map(e => {
-          const rel = path.relative(targetPath, e.filePath).replace(/\\/g, '/')
-          return `${rel}:${e.line} (${e.name})`
-        })
+        .map(e => `${toRelativePath(e.filePath)}:${e.line} (${e.name})`)
         .join(', ')
 
-      const weight = RULE_WEIGHTS['semantic-duplication']?.weight ?? 12
       report.issues.push({
         rule: 'semantic-duplication',
         severity: 'warning',
@@ -531,8 +570,11 @@ export function analyzeProject(targetPath: string, config?: DriftConfig): FileRe
         column: entry.col,
         snippet: `function ${entry.name} — duplicated in ${entries.length - 1} other location${entries.length > 2 ? 's' : ''}`,
       })
-      report.score = Math.min(100, report.score + weight)
     }
+  }
+
+  for (const report of reportByPath.values()) {
+    report.score = calculateScore(report.issues, RULE_WEIGHTS)
   }
 
   return reports

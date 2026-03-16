@@ -63,6 +63,18 @@ function extractFile(projectPath: string, ref: string, filePath: string, tempDir
   writeFileSync(destPath, content, 'utf-8')
 }
 
+function extractArchiveAtRef(projectPath: string, ref: string, tempDir: string): boolean {
+  try {
+    execSync(
+      `git archive --format=tar ${ref} | tar -x -C "${tempDir}"`,
+      { cwd: projectPath, stdio: 'pipe' }
+    )
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function extractFilesAtRef(projectPath: string, ref: string): string {
   verifyGitRepo(projectPath)
   verifyRefExists(projectPath, ref)
@@ -75,6 +87,10 @@ export function extractFilesAtRef(projectPath: string, ref: string): string {
 
   const tempDir = join(tmpdir(), `drift-diff-${randomUUID()}`)
   mkdirSync(tempDir, { recursive: true })
+
+  if (extractArchiveAtRef(projectPath, ref, tempDir)) {
+    return tempDir
+  }
 
   for (const filePath of tsFiles) {
     extractFile(projectPath, ref, filePath, tempDir)

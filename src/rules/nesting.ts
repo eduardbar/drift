@@ -1,6 +1,6 @@
 import { SourceFile, SyntaxKind, Node } from 'ts-morph'
 import type { DriftIssue } from '../types.js'
-import { hasIgnoreComment, getSnippet, type FunctionLike } from './shared.js'
+import { hasIgnoreComment, getSnippet, collectFunctionLikes, type FunctionLike } from './shared.js'
 
 const NESTING_THRESHOLD = 3
 const PARAMS_THRESHOLD = 4
@@ -35,12 +35,7 @@ function getMaxNestingDepth(fn: FunctionLike): number {
 
 export function detectDeepNesting(file: SourceFile): DriftIssue[] {
   const issues: DriftIssue[] = []
-  const fns: FunctionLike[] = [
-    ...file.getFunctions(),
-    ...file.getDescendantsOfKind(SyntaxKind.ArrowFunction),
-    ...file.getDescendantsOfKind(SyntaxKind.FunctionExpression),
-    ...file.getClasses().flatMap((c) => c.getMethods()),
-  ]
+  const fns: FunctionLike[] = collectFunctionLikes(file)
 
   for (const fn of fns) {
     const depth = getMaxNestingDepth(fn)
@@ -62,12 +57,7 @@ export function detectDeepNesting(file: SourceFile): DriftIssue[] {
 
 export function detectTooManyParams(file: SourceFile): DriftIssue[] {
   const issues: DriftIssue[] = []
-  const fns: FunctionLike[] = [
-    ...file.getFunctions(),
-    ...file.getDescendantsOfKind(SyntaxKind.ArrowFunction),
-    ...file.getDescendantsOfKind(SyntaxKind.FunctionExpression),
-    ...file.getClasses().flatMap((c) => c.getMethods()),
-  ]
+  const fns: FunctionLike[] = collectFunctionLikes(file)
 
   for (const fn of fns) {
     const paramCount = fn.getParameters().length
