@@ -208,12 +208,16 @@ async function runTrust(trustPath: string, baseRef: string): Promise<void> {
   buildTrustReport(report, { diff })
 }
 
+async function runReview(reviewPath: string, baseRef: string): Promise<void> {
+  await generateReview(reviewPath, baseRef)
+}
+
 async function main(): Promise<void> {
   const options = parseOptions(process.argv.slice(2))
 
   const results = [
     await runTask('scan', options.warmupRuns, options.measuredRuns, () => runScan(options.scanPath)),
-    await runTask('review', options.warmupRuns, options.measuredRuns, () => generateReview(options.reviewPath, options.baseRef).then(() => undefined)),
+    await runTask('review', options.warmupRuns, options.measuredRuns, () => runReview(options.reviewPath, options.baseRef)),
     await runTask('trust', options.warmupRuns, options.measuredRuns, () => runTrust(options.trustPath, options.baseRef)),
   ]
 
@@ -238,7 +242,11 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error) => {
-  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
-  process.exit(1)
-})
+void (async () => {
+  try {
+    await main()
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
+    process.exit(1)
+  }
+})()
