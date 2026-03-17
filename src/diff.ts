@@ -4,10 +4,23 @@ function normalizePath(filePath: string): string {
   return filePath.replace(/\\/g, '/')
 }
 
+function normalizeIssueText(value: string): string {
+  return value
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 /**
  * Compute the diff between two DriftReports.
  *
- * Issues are matched by (rule + line + column) as a unique key within a file.
+ * Issues are matched in two passes:
+ * 1) strict location key (rule + line + column)
+ * 2) normalized content key (rule + severity + line + message + snippet)
+ *
+ * This keeps deterministic matching while preventing false churn caused by
+ * cross-platform line ending changes and small column offset noise.
  * A "new" issue exists in `current` but not in `base`.
  * A "resolved" issue exists in `base` but not in `current`.
  */
@@ -23,13 +36,61 @@ function computeFileDiff(
   const baseIssues = baseFile?.issues ?? []
   const currentIssues = currentFile?.issues ?? []
 
-  const issueKey = (i: DriftIssue) => `${i.rule}:${i.line}:${i.column}`
+  const strictIssueKey = (i: DriftIssue) => `${i.rule}:${i.line}:${i.column}`
+  const normalizedIssueKey = (i: DriftIssue) => {
+    const normalizedMessage = normalizeIssueText(i.message)
+    const normalizedSnippetPrefix = normalizeIssueText(i.snippet).slice(0, 80)
+    return `${i.rule}:${i.severity}:${i.line}:${normalizedMessage}:${normalizedSnippetPrefix}`
+  }
 
-  const baseKeys = new Set(baseIssues.map(issueKey))
-  const currentKeys = new Set(currentIssues.map(issueKey))
+  const matchedBaseIndexes = new Set<number>()
+  const matchedCurrentIndexes = new Set<number>()
 
-  const newIssues = currentIssues.filter(i => !baseKeys.has(issueKey(i)))
-  const resolvedIssues = baseIssues.filter(i => !currentKeys.has(issueKey(i)))
+  const baseStrictIndex = new Map<string, number[]>()
+  for (const [index, issue] of baseIssues.entries()) {
+    const key = strictIssueKey(issue)
+    const bucket = baseStrictIndex.get(key)
+    if (bucket) bucket.push(index)
+    else baseStrictIndex.set(key, [index])
+  }
+
+  for (const [currentIndex, issue] of currentIssues.entries()) {
+    const key = strictIssueKey(issue)
+    const bucket = baseStrictIndex.get(key)
+    if (!bucket || bucket.length === 0) continue
+
+    const matchedIndex = bucket.shift()
+    if (matchedIndex === undefined) continue
+
+    matchedBaseIndexes.add(matchedIndex)
+    matchedCurrentIndexes.add(currentIndex)
+  }
+
+  const baseNormalizedIndex = new Map<string, number[]>()
+  for (const [index, issue] of baseIssues.entries()) {
+    if (matchedBaseIndexes.has(index)) continue
+    const key = normalizedIssueKey(issue)
+    const bucket = baseNormalizedIndex.get(key)
+    if (bucket) bucket.push(index)
+    else baseNormalizedIndex.set(key, [index])
+  }
+
+  for (const [currentIndex, issue] of currentIssues.entries()) {
+    if (matchedCurrentIndexes.has(currentIndex)) continue
+
+    const key = normalizedIssueKey(issue)
+    const bucket = baseNormalizedIndex.get(key)
+    if (!bucket || bucket.length === 0) continue
+
+    const matchedIndex = bucket.shift()
+    if (matchedIndex === undefined) continue
+
+    matchedBaseIndexes.add(matchedIndex)
+    matchedCurrentIndexes.add(currentIndex)
+  }
+
+  const newIssues = currentIssues.filter((_, index) => !matchedCurrentIndexes.has(index))
+  const resolvedIssues = baseIssues.filter((_, index) => !matchedBaseIndexes.has(index))
 
   if (scoreDelta !== 0 || newIssues.length > 0 || resolvedIssues.length > 0) {
     return {
