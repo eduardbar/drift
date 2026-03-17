@@ -15,7 +15,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "benchmark": "node --import tsx src/benchmark.ts"
+    "benchmark": "node --import tsx src/benchmark.ts",
+    "smoke:repo": "node ./scripts/smoke-repo.mjs"
   },
   "keywords": [
     "vibe-coding",

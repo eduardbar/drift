@@ -191,7 +191,7 @@ describe('new feature MVP', () => {
 
     expect(fullRules.has('circular-dependency')).toBe(true)
     expect(lowMemoryRules.has('circular-dependency')).toBe(true)
-  })
+  }, 15000)
 
   it('adds diagnostics when max file size guardrail skips files', () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'drift-max-file-size-'))

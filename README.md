@@ -57,6 +57,17 @@ npm install --save-dev @eduardbar/drift
 
 ## Commands
 
+### Repository smoke (local source CLI)
+
+Run a non-destructive end-to-end smoke suite against any repository path using local source commands (`node --import tsx ./src/cli.ts ...`).
+
+```bash
+npm run smoke:repo -- ../target-repo --base origin/main
+npm run smoke:repo -- ../target-repo --dry-run
+```
+
+The script writes JSON + Markdown summaries and command logs under `.drift-smoke/<repo>-<timestamp>/`.
+
 ### `drift scan [path]`
 
 Scan a directory and print a scored report to stdout.
