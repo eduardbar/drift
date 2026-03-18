@@ -7,6 +7,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  security-events: write
 
 jobs:
   drift-review:
@@ -37,6 +38,9 @@ jobs:
           max-risk: HIGH
           fail-on-gate: true
           include-review: true
+
+      - name: Generate drift SARIF
+        run: npx --no-install tsx ./src/cli.ts scan . --format sarif > drift.sarif
 
       - name: Publish trust KPI step summary
         run: |
@@ -92,8 +96,15 @@ jobs:
             ${{ steps.drift_review.outputs.trust-markdown }}
             ${{ steps.drift_review.outputs.review-markdown }}
             drift-trust-kpi.json
+            drift.sarif
           if-no-files-found: error
           retention-days: 14
+
+      - name: Upload SARIF to GitHub Code Scanning (non-fork only)
+        if: github.event.pull_request.head.repo.fork == false
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: drift.sarif
 
       - name: Post or update PR comment (non-fork only)
         if: github.event.pull_request.head.repo.fork == false

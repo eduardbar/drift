@@ -659,6 +659,13 @@ The repository includes `.github/workflows/review-pr.yml`, which:
 - enforces a trust baseline gate with `drift trust-gate drift-trust.json --min-trust 45 --max-risk HIGH`
 - uploads `drift trust --json` as `drift-trust-json-pr-<PR_NUMBER>-run-<RUN_ATTEMPT>` for manual KPI tracking
 - publishes a compact trust KPI summary in `$GITHUB_STEP_SUMMARY` (score, merge risk, new/resolved issues when diff context is available)
+- generates `drift.sarif` via `drift scan --format sarif`, uploads it to GitHub Code Scanning on non-fork PRs, and stores the SARIF file as workflow artifact for traceability
+
+Quick local SARIF export:
+
+```bash
+drift scan ./src --format sarif > drift.sarif
+```
 
 Default gate behavior in this repo:
 - fail when trust is below 45
