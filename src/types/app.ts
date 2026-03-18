@@ -4,6 +4,8 @@ import type { TrustGatePolicyConfig } from './trust.js'
 export interface DriftConfig {
   layers?: LayerDefinition[]
   modules?: ModuleBoundary[]
+  moduleBoundaries?: ModuleBoundary[]
+  boundaries?: ModuleBoundary[]
   plugins?: string[]
   performance?: DriftPerformanceConfig
   architectureRules?: {
