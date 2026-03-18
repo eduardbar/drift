@@ -5,70 +5,17 @@ import { loadConfig } from './config.js'
 import { computeDiff } from './diff.js'
 import { cleanupTempDir, extractFilesAtRef } from './git.js'
 import { buildReport } from './reporter.js'
-import type { DriftAnalysisOptions, DriftDiff, DriftIssue, DriftReport } from './types.js'
-
-type IssueSeverity = DriftIssue['severity']
-
-export interface GuardBaseline {
-  score?: number
-  totalIssues?: number
-  errors?: number
-  warnings?: number
-  infos?: number
-  bySeverity?: Partial<Record<IssueSeverity, number>>
-  summary?: {
-    errors?: number
-    warnings?: number
-    infos?: number
-  }
-}
-
-export interface GuardThresholds {
-  error?: number
-  warning?: number
-  info?: number
-}
-
-export interface GuardOptions {
-  baseRef?: string
-  baselinePath?: string
-  baseline?: GuardBaseline
-  budget?: number
-  bySeverity?: GuardThresholds
-  analysis?: DriftAnalysisOptions
-}
-
-export interface GuardMetrics {
-  scoreDelta: number
-  totalIssuesDelta: number
-  severityDelta: Record<IssueSeverity, number>
-}
-
-export interface GuardCheck {
-  id: string
-  passed: boolean
-  actual: number
-  limit: number
-  message: string
-}
-
-export interface GuardEvaluation {
-  passed: boolean
-  checks: GuardCheck[]
-}
-
-export interface GuardResult {
-  scannedAt: string
-  projectPath: string
-  mode: 'diff' | 'baseline'
-  passed: boolean
-  baseRef?: string
-  baselinePath?: string
-  metrics: GuardMetrics
-  checks: GuardCheck[]
-  current: DriftReport
-  diff?: DriftDiff
-}
+import type { DriftDiff, DriftReport } from './types.js'
+import type {
+  GuardBaseline,
+  GuardCheck,
+  GuardEvaluation,
+  GuardMetrics,
+  GuardOptions,
+  GuardResult,
+  GuardThresholds,
+  IssueSeverity,
+} from './guard-types.js'
 
 interface NormalizedBaseline {
   score?: number
@@ -84,6 +31,29 @@ interface GuardEvalInput {
     score: boolean
     totalIssues: boolean
   }
+}
+
+interface GuardRuntimeState {
+  currentReport: DriftReport
+  config: Awaited<ReturnType<typeof loadConfig>>
+  projectPath: string
+}
+
+interface DiffGuardResultInput {
+  projectPath: string
+  currentReport: DriftReport
+  options: GuardOptions
+  tempDir: string
+  config: Awaited<ReturnType<typeof loadConfig>>
+  baseRef: string
+}
+
+interface BaselineGuardResultInput {
+  projectPath: string
+  currentReport: DriftReport
+  options: GuardOptions
+  baseline: NormalizedBaseline
+  baselinePath?: string
 }
 
 function parseNumber(value: unknown): number | undefined {
@@ -178,13 +148,20 @@ function buildMetricsFromBaseline(current: DriftReport, baseline: NormalizedBase
   }
 }
 
-function addCheck(checks: GuardCheck[], id: string, actual: number, limit: number, message: string): void {
+interface GuardCheckInput {
+  id: string
+  actual: number
+  limit: number
+  message: string
+}
+
+function addCheck(checks: GuardCheck[], input: GuardCheckInput): void {
   checks.push({
-    id,
-    passed: actual <= limit,
-    actual,
-    limit,
-    message,
+    id: input.id,
+    passed: input.actual <= input.limit,
+    actual: input.actual,
+    limit: input.limit,
+    message: input.message,
   })
 }
 
@@ -192,15 +169,30 @@ export function evaluateGuard(input: GuardEvalInput): GuardEvaluation {
   const checks: GuardCheck[] = []
 
   if (input.enforceNoRegression.score) {
-    addCheck(checks, 'no-regression-score', input.metrics.scoreDelta, 0, 'Score delta must be <= 0.')
+    addCheck(checks, {
+      id: 'no-regression-score',
+      actual: input.metrics.scoreDelta,
+      limit: 0,
+      message: 'Score delta must be <= 0.',
+    })
   }
 
   if (input.enforceNoRegression.totalIssues) {
-    addCheck(checks, 'no-regression-total-issues', input.metrics.totalIssuesDelta, 0, 'Total issues delta must be <= 0.')
+    addCheck(checks, {
+      id: 'no-regression-total-issues',
+      actual: input.metrics.totalIssuesDelta,
+      limit: 0,
+      message: 'Total issues delta must be <= 0.',
+    })
   }
 
   if (typeof input.budget === 'number' && !Number.isNaN(input.budget)) {
-    addCheck(checks, 'budget-total-delta', input.metrics.scoreDelta, input.budget, `Score delta must be <= budget (${input.budget}).`)
+    addCheck(checks, {
+      id: 'budget-total-delta',
+      actual: input.metrics.scoreDelta,
+      limit: input.budget,
+      message: `Score delta must be <= budget (${input.budget}).`,
+    })
   }
 
   const severityThresholds = input.bySeverity
@@ -209,13 +201,12 @@ export function evaluateGuard(input: GuardEvalInput): GuardEvaluation {
     for (const severity of severities) {
       const threshold = severityThresholds[severity]
       if (typeof threshold !== 'number' || Number.isNaN(threshold)) continue
-      addCheck(
-        checks,
-        `severity-${severity}`,
-        input.metrics.severityDelta[severity],
-        threshold,
-        `${severity} delta must be <= ${threshold}.`,
-      )
+      addCheck(checks, {
+        id: `severity-${severity}`,
+        actual: input.metrics.severityDelta[severity],
+        limit: threshold,
+        message: `${severity} delta must be <= ${threshold}.`,
+      })
     }
   }
 
@@ -226,42 +217,21 @@ export function evaluateGuard(input: GuardEvalInput): GuardEvaluation {
 }
 
 export async function runGuard(targetPath: string, options: GuardOptions = {}): Promise<GuardResult> {
-  const projectPath = resolve(targetPath)
-  const config = await loadConfig(projectPath)
-
-  const currentFiles = analyzeProject(projectPath, config, options.analysis)
-  const currentReport = buildReport(projectPath, currentFiles)
+  const runtimeState = await initializeGuardRuntime(targetPath, options)
+  const { projectPath, config, currentReport } = runtimeState
 
   let tempDir: string | undefined
   try {
     if (options.baseRef) {
       tempDir = extractFilesAtRef(projectPath, options.baseRef)
-      const baseFiles = analyzeProject(tempDir, config, options.analysis)
-      const baseReport = buildReport(tempDir, baseFiles)
-      const remappedBase = remapBaseReportPaths(baseReport, tempDir, projectPath)
-      const diff = computeDiff(remappedBase, currentReport, options.baseRef)
-      const metrics = buildMetricsFromDiff(diff)
-      const evaluation = evaluateGuard({
-        metrics,
-        budget: options.budget,
-        bySeverity: options.bySeverity,
-        enforceNoRegression: {
-          score: true,
-          totalIssues: true,
-        },
-      })
-
-      return {
-        scannedAt: new Date().toISOString(),
+      return createDiffGuardResult({
         projectPath,
-        mode: 'diff',
-        passed: evaluation.passed,
+        currentReport,
+        options,
+        tempDir,
+        config,
         baseRef: options.baseRef,
-        metrics,
-        checks: evaluation.checks,
-        current: currentReport,
-        diff,
-      }
+      })
     }
 
     const inlineBaseline = options.baseline ? normalizeBaseline(options.baseline) : undefined
@@ -273,28 +243,82 @@ export async function runGuard(targetPath: string, options: GuardOptions = {}): 
       throw new Error('Guard requires a comparison point: provide baseRef or a baseline (inline or file).')
     }
 
-    const metrics = buildMetricsFromBaseline(currentReport, baseline)
-    const evaluation = evaluateGuard({
-      metrics,
-      budget: options.budget,
-      bySeverity: options.bySeverity,
-      enforceNoRegression: {
-        score: baseline.score !== undefined,
-        totalIssues: baseline.totalIssues !== undefined,
-      },
-    })
-
-    return {
-      scannedAt: new Date().toISOString(),
+    return createBaselineGuardResult({
       projectPath,
-      mode: 'baseline',
-      passed: evaluation.passed,
+      currentReport,
+      options,
+      baseline,
       baselinePath,
-      metrics,
-      checks: evaluation.checks,
-      current: currentReport,
-    }
+    })
   } finally {
     if (tempDir) cleanupTempDir(tempDir)
+  }
+}
+
+async function initializeGuardRuntime(targetPath: string, options: GuardOptions): Promise<GuardRuntimeState> {
+  const projectPath = resolve(targetPath)
+  const config = await loadConfig(projectPath)
+  const currentFiles = analyzeProject(projectPath, config, options.analysis)
+  const currentReport = buildReport(projectPath, currentFiles)
+
+  return {
+    projectPath,
+    config,
+    currentReport,
+  }
+}
+
+function createDiffGuardResult(input: DiffGuardResultInput): GuardResult {
+  const { projectPath, currentReport, options, tempDir, config, baseRef } = input
+  const baseFiles = analyzeProject(tempDir, config, options.analysis)
+  const baseReport = buildReport(tempDir, baseFiles)
+  const remappedBase = remapBaseReportPaths(baseReport, tempDir, projectPath)
+  const diff = computeDiff(remappedBase, currentReport, baseRef)
+  const metrics = buildMetricsFromDiff(diff)
+  const evaluation = evaluateGuard({
+    metrics,
+    budget: options.budget,
+    bySeverity: options.bySeverity,
+    enforceNoRegression: {
+      score: true,
+      totalIssues: true,
+    },
+  })
+
+  return {
+    scannedAt: new Date().toISOString(),
+    projectPath,
+    mode: 'diff',
+    passed: evaluation.passed,
+    baseRef,
+    metrics,
+    checks: evaluation.checks,
+    current: currentReport,
+    diff,
+  }
+}
+
+function createBaselineGuardResult(input: BaselineGuardResultInput): GuardResult {
+  const { projectPath, currentReport, options, baseline, baselinePath } = input
+  const metrics = buildMetricsFromBaseline(currentReport, baseline)
+  const evaluation = evaluateGuard({
+    metrics,
+    budget: options.budget,
+    bySeverity: options.bySeverity,
+    enforceNoRegression: {
+      score: baseline.score !== undefined,
+      totalIssues: baseline.totalIssues !== undefined,
+    },
+  })
+
+  return {
+    scannedAt: new Date().toISOString(),
+    projectPath,
+    mode: 'baseline',
+    passed: evaluation.passed,
+    baselinePath,
+    metrics,
+    checks: evaluation.checks,
+    current: currentReport,
   }
 }

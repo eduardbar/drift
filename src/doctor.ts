@@ -25,6 +25,9 @@ interface DoctorReport {
 
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx'])
 const IGNORED_DIRECTORIES = new Set(['node_modules', '.git', 'dist', '.next', 'coverage'])
+const DECIMAL_RADIX = 10
+const MIN_SUPPORTED_NODE_MAJOR = 18
+const LOW_MEMORY_SOURCE_FILE_THRESHOLD = 500
 const DRIFT_CONFIG_CANDIDATES = [
   'drift.config.ts',
   'drift.config.js',
@@ -34,7 +37,7 @@ const DRIFT_CONFIG_CANDIDATES = [
 ] as const
 
 function parseNodeMajor(version: string): number {
-  const parsed = Number.parseInt(version.replace(/^v/, '').split('.')[0] ?? '0', 10)
+  const parsed = Number.parseInt(version.replace(/^v/, '').split('.')[0] ?? '0', DECIMAL_RADIX)
   return Number.isFinite(parsed) ? parsed : 0
 }
 
@@ -57,10 +60,12 @@ function countSourceFiles(projectPath: string): number {
 
     const entries = readdirSync(currentDir, { withFileTypes: true })
     for (const entry of entries) {
+      if (entry.isDirectory() && !IGNORED_DIRECTORIES.has(entry.name)) {
+        stack.push(join(currentDir, entry.name))
+        continue
+      }
+
       if (entry.isDirectory()) {
-        if (!IGNORED_DIRECTORIES.has(entry.name)) {
-          stack.push(join(currentDir, entry.name))
-        }
         continue
       }
 
@@ -97,14 +102,14 @@ function buildDoctorReport(projectPath: string): DoctorReport {
     node: {
       version: process.version,
       major: nodeMajor,
-      supported: nodeMajor >= 18,
+      supported: nodeMajor >= MIN_SUPPORTED_NODE_MAJOR,
     },
     project: {
       packageJsonFound,
       esm,
       tsconfigFound: existsSync(join(projectPath, 'tsconfig.json')),
       sourceFilesCount,
-      lowMemorySuggested: sourceFilesCount > 500,
+      lowMemorySuggested: sourceFilesCount > LOW_MEMORY_SOURCE_FILE_THRESHOLD,
       driftConfigFile: detectDriftConfig(projectPath),
     },
   }

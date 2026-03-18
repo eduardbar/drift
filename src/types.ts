@@ -67,7 +67,7 @@ export type {
   GuardCheck,
   GuardEvaluation,
   GuardResult,
-} from './guard.js'
+} from './guard-types.js'
 
 export type {
   SarifLevel,
