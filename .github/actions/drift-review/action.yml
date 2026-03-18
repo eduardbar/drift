@@ -78,15 +78,19 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        npm exec --yes --package=@eduardbar/drift@${{ inputs.version }} -- drift --version
-        npm exec --yes --package=@eduardbar/drift@${{ inputs.version }} -- drift trust "${{ inputs.path }}" --base "${{ inputs.base-ref }}" --markdown --json-output "${{ steps.files.outputs.trust_json }}" > "${{ steps.files.outputs.trust_md }}"
+        EXEC_PREFIX="$RUNNER_TEMP/drift-cli"
+        mkdir -p "$EXEC_PREFIX"
+        npm exec --yes --prefix "$EXEC_PREFIX" --package=@eduardbar/drift@${{ inputs.version }} -- drift --version
+        npm exec --yes --prefix "$EXEC_PREFIX" --package=@eduardbar/drift@${{ inputs.version }} -- drift trust "${{ inputs.path }}" --base "${{ inputs.base-ref }}" --markdown --json-output "${{ steps.files.outputs.trust_json }}" > "${{ steps.files.outputs.trust_md }}"
 
     - name: Generate review markdown
       if: inputs.include-review == 'true'
       shell: bash
       run: |
         set -euo pipefail
-        npm exec --yes --package=@eduardbar/drift@${{ inputs.version }} -- drift review --base "${{ inputs.base-ref }}" --comment > "${{ steps.files.outputs.review_md }}"
+        EXEC_PREFIX="$RUNNER_TEMP/drift-cli"
+        mkdir -p "$EXEC_PREFIX"
+        npm exec --yes --prefix "$EXEC_PREFIX" --package=@eduardbar/drift@${{ inputs.version }} -- drift review --base "${{ inputs.base-ref }}" --comment > "${{ steps.files.outputs.review_md }}"
 
     - name: Extract trust outputs
       id: extract
@@ -122,4 +126,6 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        npm exec --yes --package=@eduardbar/drift@${{ inputs.version }} -- drift trust-gate "${{ steps.files.outputs.trust_json }}" --min-trust "${{ inputs.min-trust }}" --max-risk "${{ inputs.max-risk }}"
+        EXEC_PREFIX="$RUNNER_TEMP/drift-cli"
+        mkdir -p "$EXEC_PREFIX"
+        npm exec --yes --prefix "$EXEC_PREFIX" --package=@eduardbar/drift@${{ inputs.version }} -- drift trust-gate "${{ steps.files.outputs.trust_json }}" --min-trust "${{ inputs.min-trust }}" --max-risk "${{ inputs.max-risk }}"

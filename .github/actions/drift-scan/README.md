@@ -4,7 +4,8 @@ Composite action to run `drift scan` in CI without global installs.
 
 ## Contract highlights
 
-- Runtime strategy: `npm exec --yes --package=@eduardbar/drift@<version> -- drift ...` (no `npm install -g`)
+- Runtime strategy: `npm exec --yes --prefix "$RUNNER_TEMP/drift-cli" --package=@eduardbar/drift@<version> -- drift ...` (no `npm install -g`)
+- Uses isolated `--prefix` under `$RUNNER_TEMP` to avoid bin resolution conflicts in self-hosting repository workflows
 - Default drift version is pinned (`1.3.0`) for deterministic runs
 - Uses `drift scan --json` and extracts typed outputs
 - Critical command/parse failures are not silenced (step fails immediately)

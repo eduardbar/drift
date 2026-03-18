@@ -2,6 +2,8 @@
 
 Composite action for PR workflows that wraps `drift trust`, optional `drift review`, and `drift trust-gate`.
 
+The action runs drift via `npm exec` with an isolated prefix under `$RUNNER_TEMP/drift-cli` to avoid local bin resolution conflicts when workflows execute inside the `@eduardbar/drift` repository.
+
 ## Why this action exists
 
 The repository workflow (`.github/workflows/review-pr.yml`) uses trust as the merge gate and review markdown as complementary context. This action packages that flow as a reusable contract:

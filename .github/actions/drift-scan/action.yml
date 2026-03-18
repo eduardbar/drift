@@ -59,9 +59,11 @@ runs:
       run: |
         set -euo pipefail
         TMPFILE=$(mktemp)
+        EXEC_PREFIX="$RUNNER_TEMP/drift-cli"
+        mkdir -p "$EXEC_PREFIX"
 
-        npm exec --yes --package=@eduardbar/drift@${{ inputs.version }} -- drift --version
-        npm exec --yes --package=@eduardbar/drift@${{ inputs.version }} -- drift scan "${{ inputs.path }}" --json > "$TMPFILE"
+        npm exec --yes --prefix "$EXEC_PREFIX" --package=@eduardbar/drift@${{ inputs.version }} -- drift --version
+        npm exec --yes --prefix "$EXEC_PREFIX" --package=@eduardbar/drift@${{ inputs.version }} -- drift scan "${{ inputs.path }}" --json > "$TMPFILE"
 
         TMPFILE_PATH="$TMPFILE" GITHUB_OUTPUT_PATH="$GITHUB_OUTPUT" node --input-type=module -e "
           import fs from 'node:fs'
