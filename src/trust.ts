@@ -193,7 +193,7 @@ export function formatTrustMarkdown(trust: DriftTrustReport): string {
   return sections.join('\n')
 }
 
-export function formatTrustJsonObject(trust: DriftTrustReport): DriftTrustReportJson {
+function formatTrustJsonObject(trust: DriftTrustReport): DriftTrustReportJson {
   return withOutputMetadata(trust, OUTPUT_SCHEMA.trust)
 }
 

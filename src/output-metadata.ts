@@ -3,7 +3,7 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
 
-export const TOOL_VERSION = version
+const TOOL_VERSION = version
 
 export const OUTPUT_SCHEMA = {
   report: 'schemas/drift-report.v1.json',
@@ -16,7 +16,7 @@ type OutputMetadata = {
   toolVersion: string
 }
 
-export type JsonOutputWithMetadata<T extends object> = T & OutputMetadata
+type JsonOutputWithMetadata<T extends object> = T & OutputMetadata
 
 export function withOutputMetadata<T extends object>(
   payload: T,

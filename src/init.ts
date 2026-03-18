@@ -5,14 +5,14 @@ import { buildReport } from './reporter.js'
 import { loadConfig } from './config.js'
 import { scoreToGrade } from './utils.js'
 
-export interface InitOptions {
+interface InitOptions {
   preset?: string
   ci?: boolean
   baseline?: boolean
 }
 
 export const INIT_PRESETS = ['node-backend', 'react-app', 'hexagonal', 'monorepo'] as const
-export type InitPreset = (typeof INIT_PRESETS)[number]
+type InitPreset = (typeof INIT_PRESETS)[number]
 
 type InitBaselineGrade = 'CLEAN' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
 

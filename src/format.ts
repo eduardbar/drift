@@ -1,6 +1,6 @@
-export const UNIFIED_FORMAT_VALUES = ['console', 'json', 'markdown', 'ai', 'sarif'] as const
+const UNIFIED_FORMAT_VALUES = ['console', 'json', 'markdown', 'ai', 'sarif'] as const
 
-export type UnifiedOutputFormat = (typeof UNIFIED_FORMAT_VALUES)[number]
+type UnifiedOutputFormat = (typeof UNIFIED_FORMAT_VALUES)[number]
 
 type LegacyAlias = {
   flag: string
@@ -8,7 +8,7 @@ type LegacyAlias = {
   mapsTo: UnifiedOutputFormat
 }
 
-export interface ResolveOutputFormatOptions {
+interface ResolveOutputFormatOptions {
   command: string
   format?: string
   supported: readonly UnifiedOutputFormat[]
