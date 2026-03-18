@@ -4,7 +4,7 @@ Composite action to run `drift scan` in CI without global installs.
 
 ## Contract highlights
 
-- Runtime strategy: `npx --yes @eduardbar/drift@<version>` (no `npm install -g`)
+- Runtime strategy: `npm exec --yes --package=@eduardbar/drift@<version> -- drift ...` (no `npm install -g`)
 - Default drift version is pinned (`1.3.0`) for deterministic runs
 - Uses `drift scan --json` and extracts typed outputs
 - Critical command/parse failures are not silenced (step fails immediately)
@@ -29,7 +29,7 @@ Composite action to run `drift scan` in CI without global installs.
 | `path` | Path to scan | `.` |
 | `min-score` | Fail if score exceeds this | `80` |
 | `fail-on-threshold` | Whether to fail on threshold | `true` |
-| `version` | drift version for `npx` execution | `1.3.0` |
+| `version` | drift version for `npm exec` execution | `1.3.0` |
 
 ## Outputs
 
