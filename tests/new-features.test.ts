@@ -4,9 +4,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { analyzeProject } from '../src/analyzer.js'
 import { buildReport, formatAIOutput } from '../src/reporter.js'
-import { formatReviewMarkdown, type DriftReview } from '../src/review.js'
+import { formatReviewMarkdown } from '../src/review.js'
 import { generateArchitectureSvg } from '../src/map.js'
 import { applyFixes } from '../src/fix.js'
+
+type DriftReview = Parameters<typeof formatReviewMarkdown>[0]
 
 describe('new feature MVP', () => {
   let tmpDir = ''
@@ -36,6 +38,12 @@ describe('new feature MVP', () => {
     expect(Array.isArray(ai.files_suspected)).toBe(true)
     expect(ai.maintenance_risk).toBeDefined()
     expect(ai.quality).toBeDefined()
+    expect(ai.$schema).toBe('schemas/drift-ai-output.v1.json')
+    expect(typeof ai.toolVersion).toBe('string')
+    expect(ai.toolVersion.length).toBeGreaterThan(0)
+    expect(report.$schema).toBe('schemas/drift-report.v1.json')
+    expect(typeof report.toolVersion).toBe('string')
+    expect(report.toolVersion.length).toBeGreaterThan(0)
   })
 
   it('formats review markdown for PR comments', () => {

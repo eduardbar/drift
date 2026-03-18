@@ -16,6 +16,8 @@ describe('trust KPI aggregation', () => {
     tempDir = mkdtempSync(join(tmpdir(), 'drift-kpi-aggregate-'))
 
     writeFileSync(join(tempDir, 'trust-a.json'), JSON.stringify({
+      $schema: 'schemas/drift-trust.v1.json',
+      toolVersion: '1.3.0',
       trust_score: 80,
       merge_risk: 'LOW',
       diff_context: {
@@ -32,6 +34,8 @@ describe('trust KPI aggregation', () => {
     }, null, 2))
 
     writeFileSync(join(tempDir, 'trust-b.json'), JSON.stringify({
+      $schema: 'schemas/drift-trust.v1.json',
+      toolVersion: '1.3.0',
       trust_score: 60,
       merge_risk: 'MEDIUM',
       diff_context: {
@@ -48,6 +52,8 @@ describe('trust KPI aggregation', () => {
     }, null, 2))
 
     writeFileSync(join(tempDir, 'trust-c.json'), JSON.stringify({
+      $schema: 'schemas/drift-trust.v1.json',
+      toolVersion: '1.3.0',
       trust_score: 30,
       merge_risk: 'HIGH',
     }, null, 2))
@@ -72,6 +78,8 @@ describe('trust KPI aggregation', () => {
     tempDir = mkdtempSync(join(tmpdir(), 'drift-kpi-parse-'))
 
     writeFileSync(join(tempDir, 'valid.json'), JSON.stringify({
+      $schema: 'schemas/drift-trust.v1.json',
+      toolVersion: '1.3.0',
       trust_score: 70,
       merge_risk: 'MEDIUM',
       diff_context: {
@@ -84,16 +92,25 @@ describe('trust KPI aggregation', () => {
     writeFileSync(join(tempDir, 'broken.json'), '{"trust_score":70')
     writeFileSync(join(tempDir, 'invalid-shape.json'), JSON.stringify({ trust_score: 70 }, null, 2))
     writeFileSync(join(tempDir, 'bad-diff.json'), JSON.stringify({
+      $schema: 'schemas/drift-trust.v1.json',
+      toolVersion: '1.3.0',
       trust_score: 50,
       merge_risk: 'HIGH',
       diff_context: 'oops',
     }, null, 2))
 
+    writeFileSync(join(tempDir, 'wrong-schema.json'), JSON.stringify({
+      $schema: 'schemas/drift-report.v1.json',
+      toolVersion: '1.3.0',
+      trust_score: 65,
+      merge_risk: 'MEDIUM',
+    }, null, 2))
+
     const kpi = computeTrustKpis(tempDir)
 
-    expect(kpi.files.matched).toBe(4)
+    expect(kpi.files.matched).toBe(5)
     expect(kpi.files.parsed).toBe(2)
-    expect(kpi.files.malformed).toBe(2)
+    expect(kpi.files.malformed).toBe(3)
     expect(kpi.prsEvaluated).toBe(2)
 
     const byCode = new Set(kpi.diagnostics.map((diagnostic) => diagnostic.code))
@@ -106,8 +123,18 @@ describe('trust KPI aggregation', () => {
     tempDir = mkdtempSync(join(tmpdir(), 'drift-kpi-glob-'))
     mkdirSync(join(tempDir, 'nested'))
 
-    writeFileSync(join(tempDir, 'trust-1.json'), JSON.stringify({ trust_score: 90, merge_risk: 'LOW' }))
-    writeFileSync(join(tempDir, 'nested', 'trust-2.json'), JSON.stringify({ trust_score: 20, merge_risk: 'CRITICAL' }))
+    writeFileSync(join(tempDir, 'trust-1.json'), JSON.stringify({
+      $schema: 'schemas/drift-trust.v1.json',
+      toolVersion: '1.3.0',
+      trust_score: 90,
+      merge_risk: 'LOW',
+    }))
+    writeFileSync(join(tempDir, 'nested', 'trust-2.json'), JSON.stringify({
+      $schema: 'schemas/drift-trust.v1.json',
+      toolVersion: '1.3.0',
+      trust_score: 20,
+      merge_risk: 'CRITICAL',
+    }))
     writeFileSync(join(tempDir, 'other.json'), JSON.stringify({ trust_score: 55, merge_risk: 'MEDIUM' }))
 
     const pattern = join(tempDir, '**', 'trust-*.json')

@@ -1,6 +1,15 @@
-import type { FileReport, DriftReport, DriftIssue, AIOutput, AIIssue } from './types.js'
+import type {
+  FileReport,
+  DriftReport,
+  DriftIssue,
+  AIOutput,
+  AIIssue,
+  AIOutputJson,
+  DriftReportJson,
+} from './types.js'
 import { scoreToGradeText, severityIcon } from './utils.js'
 import { computeRepoQuality, computeMaintenanceRisk } from './metrics.js'
+import { OUTPUT_SCHEMA, withOutputMetadata } from './output-metadata.js'
 
 const FIX_SUGGESTIONS: Record<string, string> = {
   'large-file': 'Consider splitting this file into smaller modules with single responsibility',
@@ -64,10 +73,10 @@ function calculateTotalScore(files: FileReport[]): number {
   return Math.round(files.reduce((sum, file) => sum + file.score, 0) / files.length)
 }
 
-function baseReportDefaults(summary: DriftReport['summary'], targetPath: string, files: FileReport[]): DriftReport {
+function baseReportDefaults(summary: DriftReport['summary'], targetPath: string, files: FileReport[]): DriftReportJson {
   const filesWithIssues = files.filter((file) => file.issues.length > 0).sort((a, b) => b.score - a.score)
 
-  return {
+  const report: DriftReport = {
     scannedAt: new Date().toISOString(),
     targetPath,
     files: filesWithIssues,
@@ -95,12 +104,14 @@ function baseReportDefaults(summary: DriftReport['summary'], targetPath: string,
       },
     },
   }
+
+  return withOutputMetadata(report, OUTPUT_SCHEMA.report)
 }
 
-export function buildReport(targetPath: string, files: FileReport[]): DriftReport {
+export function buildReport(targetPath: string, files: FileReport[]): DriftReportJson {
   const allIssues = files.flatMap((f) => f.issues)
   const summary = summarizeIssues(allIssues)
-  const baseReport: DriftReport = baseReportDefaults(summary, targetPath, files)
+  const baseReport = baseReportDefaults(summary, targetPath, files)
 
   baseReport.quality = computeRepoQuality(targetPath, files)
   baseReport.maintenanceRisk = computeMaintenanceRisk(baseReport)
@@ -265,7 +276,7 @@ function computeAILikelihood(report: DriftReport): {
   }
 }
 
-export function formatAIOutput(report: DriftReport): AIOutput {
+export function formatAIOutput(report: DriftReport): AIOutputJson {
   const allIssues = collectAllIssues(report)
   const sortedIssues = sortIssues(allIssues)
   const priorityOrder = sortedIssues.map((item, i) => buildAIIssue(item, i + 1))
@@ -273,7 +284,7 @@ export function formatAIOutput(report: DriftReport): AIOutput {
   const grade = scoreToGradeText(report.totalScore)
   const aiLikelihood = computeAILikelihood(report)
 
-  return {
+  const output: AIOutput = {
     summary: {
       score: report.totalScore,
       grade: grade.label.toUpperCase(),
@@ -294,4 +305,6 @@ export function formatAIOutput(report: DriftReport): AIOutput {
       recommended_action: buildRecommendedAction(priorityOrder),
     },
   }
+
+  return withOutputMetadata(output, OUTPUT_SCHEMA.ai)
 }

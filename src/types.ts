@@ -6,7 +6,10 @@ export type {
   MaintenanceRiskMetrics,
   AIIssue,
   AIOutput,
+  AIOutputJson,
   DriftReport,
+  DriftReportJson,
+  DriftOutputMetadata,
 } from './types/core.js'
 
 export type {
@@ -20,6 +23,7 @@ export type {
   TrustAdvancedContext,
   TrustDiffContext,
   DriftTrustReport,
+  DriftTrustReportJson,
   TrustKpiDiagnostic,
   TrustScoreStats,
   TrustDiffTrendSummary,

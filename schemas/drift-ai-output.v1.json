@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/drift-ai-output.v1.json",
+  "title": "drift ai output v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "toolVersion",
+    "summary",
+    "files_suspected",
+    "priority_order",
+    "maintenance_risk",
+    "quality",
+    "context_for_ai"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "schemas/drift-ai-output.v1.json"
+    },
+    "toolVersion": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "score",
+        "grade",
+        "total_issues",
+        "files_affected",
+        "files_clean",
+        "ai_likelihood",
+        "ai_code_smell_score"
+      ],
+      "properties": {
+        "score": { "type": "number" },
+        "grade": { "type": "string" },
+        "total_issues": { "type": "number" },
+        "files_affected": { "type": "number" },
+        "files_clean": { "type": "number" },
+        "ai_likelihood": { "type": "number" },
+        "ai_code_smell_score": { "type": "number" }
+      }
+    },
+    "files_suspected": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "ai_likelihood", "triggers"],
+        "properties": {
+          "path": { "type": "string" },
+          "ai_likelihood": { "type": "number" },
+          "triggers": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    },
+    "priority_order": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rank", "file", "line", "rule", "severity", "message", "snippet", "fix_suggestion", "effort"],
+        "properties": {
+          "rank": { "type": "number" },
+          "file": { "type": "string" },
+          "line": { "type": "number" },
+          "rule": { "type": "string" },
+          "severity": { "type": "string" },
+          "message": { "type": "string" },
+          "snippet": { "type": "string" },
+          "fix_suggestion": { "type": "string" },
+          "effort": { "enum": ["low", "medium", "high"] }
+        }
+      }
+    },
+    "maintenance_risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score", "level", "hotspots", "signals"],
+      "properties": {
+        "score": { "type": "number" },
+        "level": { "enum": ["low", "medium", "high", "critical"] },
+        "hotspots": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "file",
+              "driftScore",
+              "complexityIssues",
+              "hasNearbyTests",
+              "changeFrequency",
+              "risk",
+              "reasons"
+            ],
+            "properties": {
+              "file": { "type": "string" },
+              "driftScore": { "type": "number" },
+              "complexityIssues": { "type": "number" },
+              "hasNearbyTests": { "type": "boolean" },
+              "changeFrequency": { "type": "number" },
+              "risk": { "type": "number" },
+              "reasons": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          }
+        },
+        "signals": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["highComplexityFiles", "filesWithoutNearbyTests", "frequentChangeFiles"],
+          "properties": {
+            "highComplexityFiles": { "type": "number" },
+            "filesWithoutNearbyTests": { "type": "number" },
+            "frequentChangeFiles": { "type": "number" }
+          }
+        }
+      }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["overall", "dimensions"],
+      "properties": {
+        "overall": { "type": "number" },
+        "dimensions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["architecture", "complexity", "ai-patterns", "testing"],
+          "properties": {
+            "architecture": { "type": "number" },
+            "complexity": { "type": "number" },
+            "ai-patterns": { "type": "number" },
+            "testing": { "type": "number" }
+          }
+        }
+      }
+    },
+    "context_for_ai": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project_type", "scan_path", "rules_detected", "recommended_action"],
+      "properties": {
+        "project_type": { "type": "string" },
+        "scan_path": { "type": "string" },
+        "rules_detected": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "recommended_action": { "type": "string" }
+      }
+    }
+  }
+}

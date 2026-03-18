@@ -6,6 +6,7 @@ import {
   formatTrustGatePolicyExplanation,
   explainTrustGatePolicy,
   formatTrustJson,
+  formatTrustJsonObject,
   formatTrustMarkdown,
   normalizeMergeRiskLevel,
   renderTrustOutput,
@@ -199,6 +200,23 @@ describe('drift trust baseline', () => {
     expect(renderTrustOutput(trust, { json: true })).toBe(formatTrustJson(trust))
     expect(renderTrustOutput(trust, { markdown: true })).toBe(formatTrustMarkdown(trust))
     expect(renderTrustOutput(trust, { json: true, markdown: true })).toBe(formatTrustJson(trust))
+  })
+
+  it('adds schema metadata in trust JSON output without breaking trust payload', () => {
+    const report = createBaseReport({ targetPath: '/tmp/metadata' })
+    const trust = buildTrustReport(report)
+
+    const jsonObject = formatTrustJsonObject(trust)
+    expect(jsonObject.$schema).toBe('schemas/drift-trust.v1.json')
+    expect(typeof jsonObject.toolVersion).toBe('string')
+    expect(jsonObject.toolVersion.length).toBeGreaterThan(0)
+    expect(jsonObject.trust_score).toBe(trust.trust_score)
+    expect(jsonObject.merge_risk).toBe(trust.merge_risk)
+    expect(jsonObject.targetPath).toBe('/tmp/metadata')
+
+    const parsed = JSON.parse(formatTrustJson(trust)) as Record<string, unknown>
+    expect(parsed.$schema).toBe('schemas/drift-trust.v1.json')
+    expect(typeof parsed.toolVersion).toBe('string')
   })
 
   it('keeps baseline trust contract unchanged when advanced mode is disabled', () => {

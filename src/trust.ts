@@ -2,6 +2,7 @@ import type {
   DriftDiff,
   DriftReport,
   DriftTrustReport,
+  DriftTrustReportJson,
   MergeRiskLevel,
 } from './types.js'
 import type { SnapshotEntry } from './snapshot.js'
@@ -26,6 +27,7 @@ import {
   renderTrustPriorities,
   renderTrustReasons,
 } from './trust-render.js'
+import { OUTPUT_SCHEMA, withOutputMetadata } from './output-metadata.js'
 
 export {
   MERGE_RISK_ORDER,
@@ -191,8 +193,12 @@ export function formatTrustMarkdown(trust: DriftTrustReport): string {
   return sections.join('\n')
 }
 
+export function formatTrustJsonObject(trust: DriftTrustReport): DriftTrustReportJson {
+  return withOutputMetadata(trust, OUTPUT_SCHEMA.trust)
+}
+
 export function formatTrustJson(trust: DriftTrustReport): string {
-  return JSON.stringify(trust, null, 2)
+  return JSON.stringify(formatTrustJsonObject(trust), null, 2)
 }
 
 export function renderTrustOutput(trust: DriftTrustReport, options?: TrustRenderOptions): string {
