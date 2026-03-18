@@ -1,13 +1,13 @@
-import { existsSync, readFileSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import { analyzeProject } from './analyzer.js'
 import { loadConfig } from './config.js'
 import { computeDiff } from './diff.js'
 import { cleanupTempDir, extractFilesAtRef } from './git.js'
+import { normalizeBaseline, readBaselineFromFile } from './guard-baseline.js'
+import { buildMetricsFromBaseline, buildMetricsFromDiff } from './guard-metrics.js'
 import { buildReport } from './reporter.js'
-import type { DriftDiff, DriftReport } from './types.js'
+import type { DriftReport } from './types.js'
 import type {
-  GuardBaseline,
   GuardCheck,
   GuardEvaluation,
   GuardMetrics,
@@ -16,12 +16,7 @@ import type {
   GuardThresholds,
   IssueSeverity,
 } from './guard-types.js'
-
-interface NormalizedBaseline {
-  score?: number
-  totalIssues?: number
-  bySeverity: Partial<Record<IssueSeverity, number>>
-}
+import type { NormalizedBaseline } from './guard-baseline.js'
 
 interface GuardEvalInput {
   metrics: GuardMetrics
@@ -56,49 +51,6 @@ interface BaselineGuardResultInput {
   baselinePath?: string
 }
 
-function parseNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && !Number.isNaN(value) ? value : undefined
-}
-
-function normalizeBaseline(baseline: GuardBaseline): NormalizedBaseline {
-  const bySeverityFromRoot = baseline.bySeverity
-  const bySeverity = {
-    error: parseNumber(bySeverityFromRoot?.error) ?? parseNumber(baseline.errors) ?? parseNumber(baseline.summary?.errors),
-    warning: parseNumber(bySeverityFromRoot?.warning) ?? parseNumber(baseline.warnings) ?? parseNumber(baseline.summary?.warnings),
-    info: parseNumber(bySeverityFromRoot?.info) ?? parseNumber(baseline.infos) ?? parseNumber(baseline.summary?.infos),
-  }
-
-  const normalized: NormalizedBaseline = {
-    score: parseNumber(baseline.score),
-    totalIssues: parseNumber(baseline.totalIssues),
-    bySeverity,
-  }
-
-  const hasAnyAnchor =
-    normalized.score !== undefined ||
-    normalized.totalIssues !== undefined ||
-    normalized.bySeverity.error !== undefined ||
-    normalized.bySeverity.warning !== undefined ||
-    normalized.bySeverity.info !== undefined
-
-  if (!hasAnyAnchor) {
-    throw new Error('Invalid guard baseline: expected score, totalIssues, or severity counters (error/warning/info).')
-  }
-
-  return normalized
-}
-
-function readBaselineFromFile(projectPath: string, baselinePath?: string): { baseline: NormalizedBaseline; path: string } | undefined {
-  const resolvedBaselinePath = resolve(projectPath, baselinePath ?? 'drift-baseline.json')
-  if (!existsSync(resolvedBaselinePath)) return undefined
-
-  const raw = JSON.parse(readFileSync(resolvedBaselinePath, 'utf8')) as GuardBaseline
-  return {
-    baseline: normalizeBaseline(raw),
-    path: resolvedBaselinePath,
-  }
-}
-
 function remapBaseReportPaths(baseReport: DriftReport, tempDir: string, projectPath: string): DriftReport {
   return {
     ...baseReport,
@@ -109,44 +61,6 @@ function remapBaseReportPaths(baseReport: DriftReport, tempDir: string, projectP
   }
 }
 
-function countSeverityDeltaFromDiff(diff: DriftDiff): Record<IssueSeverity, number> {
-  const severityDelta: Record<IssueSeverity, number> = {
-    error: 0,
-    warning: 0,
-    info: 0,
-  }
-
-  for (const file of diff.files) {
-    for (const issue of file.newIssues) {
-      severityDelta[issue.severity] += 1
-    }
-    for (const issue of file.resolvedIssues) {
-      severityDelta[issue.severity] -= 1
-    }
-  }
-
-  return severityDelta
-}
-
-function buildMetricsFromDiff(diff: DriftDiff): GuardMetrics {
-  return {
-    scoreDelta: diff.totalDelta,
-    totalIssuesDelta: diff.newIssuesCount - diff.resolvedIssuesCount,
-    severityDelta: countSeverityDeltaFromDiff(diff),
-  }
-}
-
-function buildMetricsFromBaseline(current: DriftReport, baseline: NormalizedBaseline): GuardMetrics {
-  return {
-    scoreDelta: current.totalScore - (baseline.score ?? current.totalScore),
-    totalIssuesDelta: current.totalIssues - (baseline.totalIssues ?? current.totalIssues),
-    severityDelta: {
-      error: current.summary.errors - (baseline.bySeverity.error ?? current.summary.errors),
-      warning: current.summary.warnings - (baseline.bySeverity.warning ?? current.summary.warnings),
-      info: current.summary.infos - (baseline.bySeverity.info ?? current.summary.infos),
-    },
-  }
-}
 
 interface GuardCheckInput {
   id: string
