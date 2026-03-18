@@ -14,6 +14,7 @@ import { printConsole, printDiff } from './printer.js'
 import { loadConfig } from './config.js'
 import { extractFilesAtRef, cleanupTempDir } from './git.js'
 import { computeDiff } from './diff.js'
+import { runGuard } from './guard.js'
 import { generateHtmlReport } from './report.js'
 import { generateBadge } from './badge.js'
 import { emitCIAnnotations, printCISummary } from './ci.js'
@@ -45,7 +46,7 @@ import { computeTrustKpis, formatTrustKpiConsole, formatTrustKpiJson } from './t
 import { runBenchmarkCli } from './benchmark.js'
 import { runInit, INIT_PRESETS } from './init.js'
 import { runDoctor } from './doctor.js'
-import type { DriftDiff, DriftTrustReport, DriftAnalysisOptions, MergeRiskLevel } from './types.js'
+import type { DriftDiff, DriftTrustReport, DriftAnalysisOptions, MergeRiskLevel, GuardResult, GuardThresholds } from './types.js'
 import type { TrustGatePolicyExplanation } from './trust.js'
 import type { SnapshotHistory } from './snapshot.js'
 const program = new Command()
@@ -84,6 +85,96 @@ function addResourceOptions(command: Command): Command {
     .option('--max-files <n>', 'Maximum files to analyze before soft-skipping extras')
     .option('--max-file-size-kb <n>', 'Skip files above this size and report diagnostics')
     .option('--with-semantic-duplication', 'Keep semantic-duplication rule enabled in low-memory mode')
+}
+
+function parseOptionalNumber(rawValue: string | undefined, flagName: string): number | undefined {
+  if (rawValue == null) return undefined
+  const value = Number(rawValue)
+  if (!Number.isFinite(value)) {
+    throw new Error(`${flagName} must be a valid number`)
+  }
+  return value
+}
+
+function parseBySeverity(rawValue: string | undefined): GuardThresholds | undefined {
+  if (rawValue == null) return undefined
+
+  const spec = rawValue.trim()
+  if (!spec) {
+    throw new Error('--by-severity must not be empty. Expected format: error=0,warning=2,info=5')
+  }
+
+  const thresholds: GuardThresholds = {}
+  const seen = new Set<string>()
+
+  for (const segment of spec.split(',')) {
+    const pair = segment.trim()
+    if (!pair) continue
+
+    const equalIndex = pair.indexOf('=')
+    if (equalIndex <= 0 || equalIndex === pair.length - 1) {
+      throw new Error(`Invalid --by-severity entry '${pair}'. Expected key=value (e.g. warning=2).`)
+    }
+
+    const key = pair.slice(0, equalIndex).trim().toLowerCase()
+    const rawThreshold = pair.slice(equalIndex + 1).trim()
+
+    if (key !== 'error' && key !== 'warning' && key !== 'info') {
+      throw new Error(`Invalid --by-severity key '${key}'. Allowed keys: error, warning, info.`)
+    }
+
+    if (seen.has(key)) {
+      throw new Error(`Duplicate --by-severity key '${key}'.`)
+    }
+
+    const threshold = Number(rawThreshold)
+    if (!Number.isFinite(threshold)) {
+      throw new Error(`Invalid --by-severity value for '${key}': '${rawThreshold}'. Must be a valid number.`)
+    }
+
+    const severityKey: keyof GuardThresholds = key
+    thresholds[severityKey] = threshold
+    seen.add(severityKey)
+  }
+
+  if (seen.size === 0) {
+    throw new Error('--by-severity must include at least one threshold. Example: error=0,warning=2')
+  }
+
+  return thresholds
+}
+
+function formatSigned(value: number): string {
+  return value > 0 ? `+${value}` : `${value}`
+}
+
+function printGuardSummary(result: GuardResult): void {
+  const modeLabel = result.mode === 'diff' ? `diff (${result.baseRef ?? 'unknown base'})` : 'baseline'
+  const statusLabel = result.passed ? 'PASS' : 'FAIL'
+
+  process.stdout.write('\n')
+  process.stdout.write(`Guard mode: ${modeLabel}\n`)
+  process.stdout.write(`Result: ${statusLabel}\n`)
+  process.stdout.write(`Score delta: ${formatSigned(result.metrics.scoreDelta)}\n`)
+  process.stdout.write(`Total issues delta: ${formatSigned(result.metrics.totalIssuesDelta)}\n`)
+  process.stdout.write(
+    `Severity delta: error=${formatSigned(result.metrics.severityDelta.error)}, warning=${formatSigned(result.metrics.severityDelta.warning)}, info=${formatSigned(result.metrics.severityDelta.info)}\n`,
+  )
+  if (result.mode === 'baseline' && result.baselinePath) {
+    process.stdout.write(`Baseline file: ${result.baselinePath}\n`)
+  }
+
+  if (result.checks.length === 0) {
+    process.stdout.write('Checks: none configured\n')
+    return
+  }
+
+  process.stdout.write('Checks:\n')
+  for (const check of result.checks) {
+    process.stdout.write(
+      `  - [${check.passed ? 'PASS' : 'FAIL'}] ${check.id}: ${check.message} (actual=${check.actual}, limit=${check.limit})\n`,
+    )
+  }
 }
 
 function parseTrustGateOverrides(options: { minTrust?: string; maxRisk?: string }): { minTrust?: number; maxRisk?: MergeRiskLevel } {
@@ -248,6 +339,55 @@ addResourceOptions(
       process.exit(1)
     } finally {
       if (tempDir) cleanupTempDir(tempDir)
+    }
+  }),
+)
+
+addResourceOptions(
+  program
+    .command('guard [path]')
+  .description('Evaluate drift guard thresholds against diff or baseline')
+  .option('--base <ref>', 'Git base ref for diff guard mode')
+  .option('--baseline <file>', 'Baseline file path (default: drift-baseline.json)')
+  .option('--budget <n>', 'Allowed score delta budget')
+  .option('--by-severity <spec>', 'Severity thresholds: error=0,warning=2,info=5')
+  .option('--json', 'Output raw JSON guard result')
+  .action(async (
+    targetPath: string | undefined,
+    options: {
+      base?: string
+      baseline?: string
+      budget?: string
+      bySeverity?: string
+      json?: boolean
+    } & ResourceOptionFlags,
+  ) => {
+    try {
+      const resolvedPath = resolve(targetPath ?? '.')
+      const budget = parseOptionalNumber(options.budget, '--budget')
+      const bySeverity = parseBySeverity(options.bySeverity)
+
+      const result = await runGuard(resolvedPath, {
+        baseRef: options.base,
+        baselinePath: options.baseline,
+        budget,
+        bySeverity,
+        analysis: resolveAnalysisOptions(options),
+      })
+
+      if (options.json) {
+        process.stdout.write(JSON.stringify(result, null, 2) + '\n')
+      } else {
+        printGuardSummary(result)
+      }
+
+      if (!result.passed) {
+        process.exit(1)
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      process.stderr.write(`\n  Error: ${message}\n\n`)
+      process.exit(1)
     }
   }),
 )

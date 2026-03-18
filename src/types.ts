@@ -53,3 +53,13 @@ export type {
   DriftTrendReport,
   DriftBlameReport,
 } from './types/diff.js'
+
+export type {
+  GuardBaseline,
+  GuardThresholds,
+  GuardOptions,
+  GuardMetrics,
+  GuardCheck,
+  GuardEvaluation,
+  GuardResult,
+} from './guard.js'
