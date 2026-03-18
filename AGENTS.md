@@ -2,294 +2,118 @@
 
 ## Qué es drift
 
-`@eduardbar/drift` es un CLI TypeScript que escanea proyectos TypeScript con análisis AST (ts-morph) y asigna un score de 0 a 100 a cada archivo según la cantidad de deuda técnica AI-generada que contiene.
+`@eduardbar/drift` es un CLI de auditoría estática para repos TypeScript/JavaScript orientado a deuda estructural y confianza de merge en PRs asistidas por AI.
 
-- **0** = código limpio
-- **100** = reescribí esto antes de que alguien lo vea
-
-Publicado en npm como `@eduardbar/drift`. MIT.
+- Publicado en npm como `@eduardbar/drift`
+- Licencia MIT
+- Versión del paquete: `1.3.0` (`package.json`)
 
 ---
 
-## Stack técnico
+## Stack y runtime
 
 | Dep | Rol |
 |-----|-----|
-| `ts-morph ^27` | Motor AST — traversal de nodos TypeScript |
-| `commander ^14` | CLI flags y subcomandos |
-| `kleur ^4` | Colores en consola (sin dependencias) |
-| `typescript ^5.9` | Dev — compilación |
-| `@types/node ^25` | Dev — tipos Node.js |
-| `vitest ^4` | Testing |
+| `ts-morph ^27` | análisis AST |
+| `commander ^14` | CLI y flags |
+| `kleur ^4` | salida con color |
+| `typescript ^5.9` | compilación |
+| `vitest ^4` | testing |
 
-**Runtime:** Node.js 18+, ES Modules (`"type": "module"`).
-
----
-
-## Estructura del proyecto
-
-```
-drift/
-├── bin/
-│   └── drift.js          ← wrapper cross-platform (Windows npx fix)
-├── src/
-│   ├── analyzer.ts       ← motor AST + 26 reglas + drift-ignore
-│   ├── types.ts         ← interfaces: DriftIssue, FileReport, DriftReport, AIOutput
-│   ├── reporter.ts      ← buildReport(), formatMarkdown(), formatAIOutput()
-│   ├── printer.ts       ← salida consola con colores y score bar ASCII
-│   ├── utils.ts         ← scoreToGrade, severityIcon, scoreBar
-│   ├── index.ts         ← re-exports públicos (librería)
-│   ├── cli.ts           ← entry point Commander.js
-│   ├── config.ts        ← drift.config.ts support
-│   ├── fix.ts           ← drift fix command
-│   ├── ci.ts            ← drift ci command
-│   ├── diff.ts          ← drift diff command
-│   ├── report.ts        ← drift report command
-│   ├── badge.ts         ← drift badge command
-│   ├── snapshot.ts      ← drift snapshot command
-│   ├── git.ts           ← re-exports git analyzers
-│   ├── git/
-│   │   ├── trend.ts     ← drift trend (historial de scores)
-│   │   ├── blame.ts     ← drift blame (atribución de deuda)
-│   │   └── helpers.ts
-│   └── rules/           ← reglas modularizadas por fase
-│       ├── phase0-basic.ts
-│       ├── phase1-complexity.ts
-│       ├── phase2-crossfile.ts    ← dead-file, unused-export, unused-dependency
-│       ├── phase3-arch.ts          ← circular-dependency, layer-violation
-│       ├── phase5-ai.ts
-│       ├── phase8-semantic.ts     ← semantic-duplication
-│       ├── complexity.ts
-│       ├── coupling.ts
-│       ├── nesting.ts
-│       ├── promise.ts
-│       ├── magic.ts
-│       ├── comments.ts
-│       └── shared.ts
-├── packages/
-│   ├── eslint-plugin-drift/       ← ESLint plugin oficial
-│   └── vscode-drift/              ← VS Code extension
-├── dist/                 ← output tsc (no editar a mano)
-├── assets/
-│   ├── og.svg / og.png
-│   ├── og-v030-linkedin.svg/png
-│   └── og-v030-x.svg/png
-├── .github/workflows/publish.yml
-├── package.json
-├── tsconfig.json
-└── AGENTS.md             ← este archivo
-```
+Runtime: Node.js 18+, ES Modules (`"type": "module"`).
 
 ---
 
-## Comandos de desarrollo
+## Comandos CLI actuales
 
-```bash
-npm run build       # tsc — compila src/ → dist/
-npm run dev         # tsc --watch
-npm start           # node dist/cli.js (desarrollo local)
-npm test            # vitest run
-npm run test:watch # vitest (watch mode)
-```
+Comandos top-level definidos en `src/cli.ts`:
 
-**Pre-publicación:** `prepublishOnly` corre `build` automáticamente.
-
----
-
-## CLI — flags disponibles
-
-| Flag | Tipo | Descripción |
-|------|------|-------------|
-| `scan <path>` | positional | Ruta a escanear (requerido) |
-| `--output <file>` / `-o` | string | Escribe reporte Markdown a archivo |
-| `--json` | boolean | Imprime `DriftReport` crudo como JSON |
-| `--ai` | boolean | JSON optimizado para LLMs (`AIOutput`) |
-| `--fix` | boolean | Muestra sugerencias de fix en consola |
-| `--min-score <n>` | number | Exit code 1 si score supera umbral (CI) |
-| `--low-memory` | boolean | Activa análisis por chunks para bajar el pico de RAM |
-| `--chunk-size <n>` | number | Cantidad de archivos por chunk en low-memory mode |
-| `--max-files <n>` | number | Límite blando de archivos analizados (el resto se reporta como skip) |
-| `--max-file-size-kb <n>` | number | Saltea archivos grandes y agrega diagnóstico de skip |
-| `--with-semantic-duplication` | boolean | Rehabilita semantic-duplication en low-memory mode |
-
-**Uso básico:**
-```bash
-npx @eduardbar/drift scan .
-npx @eduardbar/drift scan ./src --min-score 60
-npx @eduardbar/drift scan ./src --ai | pbcopy   # pegar en Claude/GPT
-npx @eduardbar/drift scan ./src --fix           # ver sugerencias inline
-npx @eduardbar/drift scan ./src -o report.md    # exportar Markdown
-npx @eduardbar/drift scan ./src --low-memory --max-file-size-kb 1024
-```
+- `scan [path]`
+- `init`
+- `diff [ref]`
+- `guard [path]`
+- `benchmark`
+- `review`
+- `trust [path]`
+- `trust-gate <trustJsonFile>`
+- `doctor`
+- `kpi <path>`
+- `map [path]`
+- `report [path]`
+- `badge [path]`
+- `ci [path]`
+- `trend [period]`
+- `blame [target]`
+- `fix [path]`
+- `snapshot [path]`
+- `cloud` (con subcomandos: `ingest`, `summary`, `plan-set`, `plan-changes`, `usage`, `dashboard`)
 
 ---
 
-## Reglas del analyzer
+## Reglas y scoring (estado real)
 
-| Regla | Severidad | Peso |
-|-------|-----------|------|
-| `large-file` | error | 20 |
-| `large-function` | error | 15 |
-| `duplicate-function-name` | error | 18 |
-| `high-complexity` | error | 15 |
-| `circular-dependency` | error | 14 |
-| `layer-violation` | error | 16 |
-| `comment-contradiction` | warning | 12 |
-| `deep-nesting` | warning | 12 |
-| `semantic-duplication` | warning | 12 |
-| `debug-leftover` | warning | 10 |
-| `catch-swallow` | warning | 10 |
-| `high-coupling` | warning | 10 |
-| `dead-file` | warning | 10 |
-| `hardcoded-config` | warning | 10 |
-| `cross-boundary-import` | warning | 10 |
-| `dead-code` | warning | 8 |
-| `any-abuse` | warning | 8 |
-| `too-many-params` | warning | 8 |
-| `unused-export` | warning | 8 |
-| `inconsistent-error-handling` | warning | 8 |
-| `promise-style-mix` | warning | 7 |
-| `unnecessary-abstraction` | warning | 7 |
-| `naming-inconsistency` | warning | 6 |
-| `unused-dependency` | warning | 6 |
-| `no-return-type` | info | 5 |
-| `over-commented` | info | 4 |
-| `magic-number` | info | 3 |
+- La fuente de verdad de reglas/pesos/severidad es `RULE_WEIGHTS` en `src/analyzer.ts`.
+- Estado actual: **35 rule IDs** (incluye reglas de detección, reglas configurables, meta-reglas y diagnósticos de plugins/guardrails de análisis).
+- Score por archivo: suma de pesos cap a 100.
+- Score de proyecto: promedio de scores por archivo.
 
-**Score = suma de pesos capped a 100. Score del proyecto = promedio de archivos.**
+Catálogo completo actualizado en `docs/rules-catalog.md`.
 
 ---
 
-## drift-ignore
+## Configuración soportada (`drift.config.*`)
 
-**Por línea** (`// drift-ignore`):
-- Suprime el issue en la línea actual o en la línea inmediatamente superior al problema.
-- Funciona para cualquier regla.
+`DriftConfig` actual (ver `src/types/app.ts`):
 
-**Por archivo** (`// drift-ignore-file`):
-- Se coloca en las primeras 10 líneas del archivo.
-- `analyzeFile()` devuelve reporte vacío (score 0, cero issues) para ese archivo.
-- Usar en archivos con `console.log` intencional (ej: `printer.ts`).
+- `layers`: capas para `layer-violation`
+- `modules`: boundaries para `cross-boundary-import`
+- `moduleBoundaries` / `boundaries`: alias legacy normalizados a `modules`
+- `plugins`: plugins drift
+- `performance`: `lowMemory`, `chunkSize`, `maxFiles`, `maxFileSizeKb`, `includeSemanticDuplication`
+- `architectureRules`: `controllerNoDb`, `serviceNoHttp`, `maxFunctionLines`
+- `saas`: límites/política local multi-tenant (`strictActorEnforcement` incluido)
+- `trustGate`: políticas de gating para `trust` / `trust-gate`
 
----
+Notas:
 
-## Formato `--ai` (`AIOutput`)
-
-```typescript
-interface AIOutput {
-  summary: {
-    score: number
-    grade: string          // "CLEAN" | "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"
-    total_issues: number
-    files_affected: number
-    files_clean: number
-  }
-  priority_order: Array<{
-    rank: number
-    file: string
-    line: number
-    rule: string
-    severity: "error" | "warning" | "info"
-    message: string
-    snippet: string
-    fix_suggestion: string
-    effort: "low" | "medium" | "high"
-  }>
-  context_for_ai: {
-    project_type: "typescript"
-    scan_path: string
-    rules_detected: string[]
-    recommended_action: string
-  }
-}
-```
-
-Los issues se ordenan: error > warning > info, luego low effort primero (quick wins).
+- Sin config, reglas puramente configurables/arquitectónicas se omiten.
+- `exclude` y overrides tipo `rules: { ... }` **no** forman parte del contrato tipado actual de `DriftConfig`.
 
 ---
 
-## Formato `--fix` en consola
+## Flags transversales de recursos
 
-```
-       ┌──────────────────────────────────────────────────────┐
-       │  - console.log(userData)
-       │  + Remove this console.log statement
-       │  + Or replace with a proper logging library
-       └──────────────────────────────────────────────────────┘
-```
+`scan`, `diff`, `guard`, `trust`, `report`, `badge`, `ci`, `snapshot` comparten:
 
-Las sugerencias por regla están hardcodeadas en `src/printer.ts`.
+- `--low-memory`
+- `--chunk-size <n>`
+- `--max-files <n>`
+- `--max-file-size-kb <n>`
+- `--with-semantic-duplication`
 
 ---
 
-## CI/CD — GitHub Actions
+## Comandos incorporados recientes (operativos)
 
-Workflow en `.github/workflows/publish.yml`:
-- **Trigger único:** `release: published` (evita doble publish)
-- **Fallback manual:** `workflow_dispatch` con input `tag`
-- **Guard:** verifica `npm view @eduardbar/drift@$VERSION` antes de publicar
-
-**Integración CI en proyectos externos:**
-```yaml
-- name: Check drift score
-  run: npx @eduardbar/drift scan ./src --min-score 60
-```
+- `init`: scaffolding de `drift.config.ts`, workflow CI y baseline (`drift-baseline.json`)
+- `doctor`: diagnóstico de entorno/proyecto (`--json` opcional)
+- `guard`: evaluación de regresión por diff (`--base`) o baseline (`--baseline`) con `--budget` y `--by-severity`
 
 ---
 
-## Compatibilidad Windows
+## Convenciones de contribución (rápidas)
 
-`bin/drift.js` es el wrapper cross-platform:
-```javascript
-#!/usr/bin/env node
-import('../dist/cli.js')
-```
-
-`package.json` apunta `bin.drift` a `bin/drift.js`, **no** a `dist/cli.js`.
-Sin esto, Windows no ejecuta el shebang correctamente con ES modules.
+- Evitar drift real en el propio repo (drift se corre sobre sí mismo).
+- Mantener README + AGENTS + catálogo de reglas sincronizados cuando cambian reglas/CLI.
+- Usar Conventional Commits.
 
 ---
 
-## Versiones
+## Archivos clave
 
-| Versión | Cambios principales |
-|---------|---------------------|
-| **1.0.0** | 26 reglas, 131 tests, modular rules, JS/JSX, drift fix/report/diff/ci/badge/trend/blame, VS Code extension |
-| **0.3.0** | `--ai` (LLM-optimized JSON output) + `--fix` (inline suggestions) |
-| **0.2.3** | Fix: bin wrapper para compatibilidad Windows npx |
-| **0.2.2** | Refactor: `formatMarkdown` dividido en helpers + fix CI doble publish |
-| **0.2.1** | `drift-ignore` por línea y por archivo + fix console output propio |
-| **0.2.0** | Score bar ASCII + header hierarchy + DRY utils + file count en CLI |
-| **0.1.x** | Bootstrap: tipos, analyzer (10 reglas), reporter, printer, CLI, CI/CD |
-
----
-
-## Estado actual (feb 2026)
-
-- **Versión publicada:** `1.0.0`
-- **Branch:** `master`, sincronizado con `origin`
-- **Self-scan score:** 5/100 (LOW)
-- **Top issues:** 51× magic-number, 2× deep-nesting, 2× catch-swallow
-- **26 reglas activas** organizadas en fases
-
----
-
-## Convenciones de código
-
-- Todo en TypeScript — sin `any` explícito (drift se corre sobre sí mismo)
-- ES Modules — `import/export`, sin CommonJS
-- Conventional Commits obligatorios (ver AGENTS.md global)
-- `// drift-ignore-file` en `printer.ts` — sus `console.log` son output intencional
-- `scoreToGrade`, `severityIcon`, `scoreBar` viven en `utils.ts` — no duplicar
-- Nuevas reglas: agregar entrada en `RULE_WEIGHTS` en `analyzer.ts` + lógica de detección AST
-
----
-
-## Agregar una nueva regla — checklist
-
-1. Agregar `"rule-name": <peso>` a `RULE_WEIGHTS` en `src/analyzer.ts`
-2. Implementar la lógica de detección AST usando ts-morph en `analyzeFile()`
-3. Agregar `fix_suggestion` para la regla en `src/printer.ts` (objeto de sugerencias por regla)
-4. Actualizar `README.md` — tabla de reglas
-5. Actualizar este `AGENTS.md` — tabla de reglas
-6. Commit: `feat(analyzer): add <rule-name> rule`
+- `src/cli.ts` — contrato de comandos y flags
+- `src/analyzer.ts` — orquestación de análisis + `RULE_WEIGHTS`
+- `src/rules/*.ts` — detecciones por fase
+- `src/config.ts` y `src/types/*.ts` — contrato de configuración
+- `README.md` — documentación de uso pública
+- `docs/rules-catalog.md` — inventario completo de reglas

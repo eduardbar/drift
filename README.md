@@ -51,11 +51,49 @@ npm install --save-dev @eduardbar/drift
 
 - Product requirements and roadmap: [`docs/PRD.md`](./docs/PRD.md)
 - Trust core release checklist: [`docs/trust-core-release-checklist.md`](./docs/trust-core-release-checklist.md)
+- Rules catalog (source-of-truth snapshot): [`docs/rules-catalog.md`](./docs/rules-catalog.md)
 - Contributor/agent workflow guide: [`docs/AGENTS.md`](./docs/AGENTS.md)
 
 ---
 
 ## Commands
+
+### `drift init`
+
+Scaffold first-run setup for drift in an existing repository.
+
+```bash
+drift init
+drift init --preset node-backend
+drift init --preset react-app --ci --baseline
+```
+
+| Flag | Description |
+|------|-------------|
+| `--preset <type>` | Generate `drift.config.ts` using one of: `node-backend`, `react-app`, `hexagonal`, `monorepo` |
+| `--ci` | Generate `.github/workflows/drift-review.yml` |
+| `--baseline` | Generate `drift-baseline.json` from the current scan |
+
+`drift init` is non-destructive for pre-existing targets: drift skips generation when an output file already exists and prints a warning.
+
+---
+
+### `drift doctor`
+
+Run environment diagnostics for Node/runtime and project readiness.
+
+```bash
+drift doctor
+drift doctor --json
+```
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Output structured doctor report JSON |
+
+Checks include Node major version support (`>=18`), `package.json`, ESM mode, `tsconfig.json`, source file count, optional `--low-memory` recommendation, and `drift.config.*` detection.
+
+---
 
 ### Repository smoke (local source CLI)
 
@@ -91,12 +129,14 @@ drift scan ./src --low-memory --max-file-size-kb 1024
 | `--json` | Output raw `DriftReport` JSON |
 | `--ai` | Output structured JSON optimized for LLM consumption (Claude, GPT, etc.) |
 | `--fix` | Print inline fix suggestions for each detected issue |
-| `--min-score <n>` | Exit with code 1 if the overall score meets or exceeds this threshold |
+| `--min-score <n>` | Exit with code 1 if the overall score strictly exceeds this threshold |
 | `--low-memory` | Analyze files in bounded chunks to reduce peak RAM |
 | `--chunk-size <n>` | Files per chunk in low-memory mode (default: 40) |
 | `--max-files <n>` | Soft cap on analyzed files; extra files are skipped with diagnostics |
 | `--max-file-size-kb <n>` | Skip oversized files with diagnostics to avoid OOM |
 | `--with-semantic-duplication` | Keep semantic duplication rule enabled in low-memory mode |
+
+`--min-score` currently fails when `totalScore > n` (strictly greater than), matching CLI behavior.
 
 **Example output:**
 
@@ -121,6 +161,33 @@ drift scan ./src --low-memory --max-file-size-kb 1024
     ✖ L12   duplicate-function-name 'formatDate' looks like a duplicate
     ▲ L55   dead-code               Unused import 'debounce'
 ```
+
+---
+
+### `drift guard [path]`
+
+Evaluate drift regression guardrails against a git diff (`--base`) or a baseline file/object.
+
+```bash
+drift guard ./src --base origin/main
+drift guard ./src --baseline drift-baseline.json
+drift guard ./src --base origin/main --budget 3 --by-severity error=0,warning=2,info=5
+drift guard ./src --base origin/main --json
+```
+
+| Flag | Description |
+|------|-------------|
+| `--base <ref>` | Diff mode: compare current state vs git ref |
+| `--baseline <file>` | Baseline mode: compare against baseline JSON (default file name: `drift-baseline.json`) |
+| `--budget <n>` | Maximum allowed score delta |
+| `--by-severity <spec>` | Severity thresholds as CSV `key=value` pairs (`error`, `warning`, `info`) |
+| `--json` | Output full `GuardResult` JSON |
+| `--low-memory` / `--chunk-size <n>` / `--max-files <n>` / `--max-file-size-kb <n>` / `--with-semantic-duplication` | Analysis resource controls shared with scan/diff/report/badge/ci/trust |
+
+Behavior:
+- With `--base`, guard enforces no-regression checks for score and total issues, then applies optional budget/severity thresholds.
+- Without `--base`, guard requires a baseline (inline or file) and compares only against available baseline anchors.
+- Exit code is `1` when any guard check fails.
 
 ---
 
@@ -326,7 +393,7 @@ drift ci ./src --min-score 60
 
 | Flag | Description |
 |------|-------------|
-| `--min-score <n>` | Exit with code 1 if the overall score meets or exceeds this threshold |
+| `--min-score <n>` | Exit with code 1 if the overall score strictly exceeds this threshold |
 
 Outputs `::error` and `::warning` annotations visible in the PR diff. Writes a markdown summary to `$GITHUB_STEP_SUMMARY`.
 
@@ -438,36 +505,28 @@ export default {
 
 ## Rules
 
-26 rules across three severity levels. All run automatically unless marked as requiring configuration.
+drift currently defines **35 rule IDs** in `RULE_WEIGHTS` (`src/analyzer.ts`): core detections, configurable architecture checks, AI/meta aggregation, plugin diagnostics, and analysis guardrail diagnostics.
+
+For the complete up-to-date catalog (id, severity, weight, phase/origin, note), see [`docs/rules-catalog.md`](./docs/rules-catalog.md).
+
+Highlights:
 
 | Rule | Severity | Weight | What it detects |
 |------|----------|--------|-----------------|
-| `large-file` | error | 20 | Files exceeding 300 lines — AI generates monolithic files instead of splitting responsibility |
-| `large-function` | error | 15 | Functions exceeding 50 lines — AI avoids decomposing logic into smaller units |
-| `duplicate-function-name` | error | 18 | Function names that appear more than once (case-insensitive) — AI regenerates helpers instead of reusing them |
-| `high-complexity` | error | 15 | Cyclomatic complexity above 10 — AI produces correct code, not necessarily simple code |
-| `circular-dependency` | error | 14 | Circular import chains between modules — AI doesn't reason about module topology |
-| `layer-violation` | error | 16 | Imports that cross architectural layers in the wrong direction (e.g., domain importing from infra) — requires `drift.config.ts` |
-| `debug-leftover` | warning | 10 | `console.log`, `console.warn`, `console.error`, and `TODO` / `FIXME` / `HACK` comments — AI leaves scaffolding in place |
-| `dead-code` | warning | 8 | Named imports that are never used in the file — AI imports broadly |
-| `any-abuse` | warning | 8 | Explicit `any` type annotations — AI defaults to `any` when type inference is unclear |
-| `catch-swallow` | warning | 10 | Empty `catch` blocks — AI makes code not throw without handling the error |
-| `comment-contradiction` | warning | 12 | Comments that restate what the surrounding code already expresses — AI over-documents the obvious |
-| `deep-nesting` | warning | 12 | Control flow nested more than 3 levels deep — results in code that is difficult to follow |
-| `too-many-params` | warning | 8 | Functions with more than 4 parameters — AI avoids grouping related arguments into objects |
-| `high-coupling` | warning | 10 | Files importing from more than 10 distinct modules — AI imports broadly without encapsulation |
-| `promise-style-mix` | warning | 7 | `async/await` and `.then()` / `.catch()` used together in the same file — AI combines styles inconsistently |
-| `unused-export` | warning | 8 | Named exports that are never imported anywhere in the project — cross-file dead code ESLint cannot detect |
-| `dead-file` | warning | 10 | Files never imported by any other file in the project — invisible dead code |
-| `unused-dependency` | warning | 6 | Packages listed in `package.json` with no corresponding import in source files |
-| `cross-boundary-import` | warning | 10 | Imports that cross module boundaries outside the allowed list — requires `drift.config.ts` |
-| `hardcoded-config` | warning | 10 | Hardcoded URLs, IP addresses, secrets, or connection strings — AI skips environment variable abstraction |
-| `inconsistent-error-handling` | warning | 8 | Mixed `try/catch` and `.catch()` patterns in the same file — AI combines approaches without a consistent strategy |
-| `unnecessary-abstraction` | warning | 7 | Wrapper functions or helpers that add no logic over what they wrap — AI over-engineers simple calls |
-| `naming-inconsistency` | warning | 6 | Mixed `camelCase` and `snake_case` in the same module — AI forgets project conventions mid-generation |
-| `semantic-duplication` | warning | 12 | Functions with structurally identical logic despite different names — detected via AST fingerprinting, not text comparison |
-| `no-return-type` | info | 5 | Functions missing an explicit return type annotation |
-| `magic-number` | info | 3 | Numeric literals used directly in logic without a named constant |
+| `large-file` | error | 20 | Files exceeding 300 lines |
+| `duplicate-function-name` | error | 18 | Same function name repeated across a file |
+| `high-complexity` | error | 15 | Cyclomatic complexity above threshold |
+| `layer-violation` | error | 16 | Invalid layer import direction (requires `layers` config) |
+| `cross-boundary-import` | warning | 10 | Invalid module boundary import (requires `modules`/legacy boundaries config) |
+| `controller-no-db` | warning | 11 | Controller touching DB directly (configurable architecture rule) |
+| `service-no-http` | warning | 11 | Service layer coupled to HTTP concerns (configurable architecture rule) |
+| `max-function-lines` | warning | 9 | Function line cap enforced by `architectureRules.maxFunctionLines` |
+| `semantic-duplication` | warning | 12 | AST-level semantic function duplication |
+| `ai-code-smell` | warning | 12 | Aggregated AI-smell signal from multiple heuristics in a file |
+| `plugin-error` | warning | 4 | Plugin load/contract/runtime failure surfaced as issue |
+| `plugin-warning` | info | 0 | Non-fatal plugin validation warning |
+| `analysis-skip-max-files` | info | 0 | File skipped by `maxFiles` guardrail |
+| `analysis-skip-file-size` | info | 0 | File skipped by `maxFileSizeKb` guardrail |
 
 ---
 
@@ -487,7 +546,7 @@ export default {
 
 ## Configuration
 
-drift runs with zero configuration. Architectural rules (`layer-violation`, `cross-boundary-import`) require a `drift.config.ts` (or `.js` / `.json`) at your project root:
+drift runs with zero configuration. Architectural rules (`layer-violation`, `cross-boundary-import`) and configurable architecture checks use `drift.config.ts` (or `.js` / `.json`) at project root:
 
 ```typescript
 import type { DriftConfig } from '@eduardbar/drift'
@@ -520,22 +579,16 @@ export default {
     { name: 'app',     patterns: ['src/app/**'],     canImportFrom: ['domain'] },
     { name: 'infra',   patterns: ['src/infra/**'],   canImportFrom: ['domain', 'app'] },
   ],
-  boundaries: [
+  modules: [
     { name: 'auth',    root: 'src/modules/auth',    allowedExternalImports: ['src/shared'] },
     { name: 'billing', root: 'src/modules/billing', allowedExternalImports: ['src/shared'] },
   ],
-  exclude: [
-    'src/generated/**',
-    '**/*.spec.ts',
-  ],
-  rules: {
-    'large-file': { threshold: 400 },   // override default 300
-    'magic-number': 'off',              // disable a rule
-  },
 } satisfies DriftConfig
 ```
 
-Without a config file, `layer-violation` and `cross-boundary-import` are silently skipped. All other rules run with their defaults.
+For backwards compatibility, `moduleBoundaries` and `boundaries` are normalized to `modules`.
+
+Without a config file, `layer-violation`, `cross-boundary-import`, and configurable architecture checks (`controller-no-db`, `service-no-http`, `max-function-lines`) are skipped. All other rules run with defaults.
 
 ### Memory guardrails (recommended for large repos)
 
@@ -574,7 +627,7 @@ jobs:
         run: npx @eduardbar/drift scan ./src --min-score 60
 ```
 
-Exit code is `1` if the score meets or exceeds `--min-score`. Exit code `0` otherwise.
+Exit code is `1` if the score is strictly greater than `--min-score`. Exit code `0` otherwise.
 
 ### Annotations and step summary with `drift ci`
 
