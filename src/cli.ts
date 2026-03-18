@@ -47,7 +47,7 @@ import { runBenchmarkCli } from './benchmark.js'
 import { runInit, INIT_PRESETS } from './init.js'
 import { runDoctor } from './doctor.js'
 import { resolveOutputFormat } from './format.js'
-import { toSarif } from './sarif.js'
+import { toSarif, diffToSarif } from './sarif.js'
 import type { DriftDiff, DriftTrustReport, DriftAnalysisOptions, MergeRiskLevel, GuardResult, GuardThresholds } from './types.js'
 import type { TrustGatePolicyExplanation } from './trust.js'
 import type { SnapshotHistory } from './snapshot.js'
@@ -334,7 +334,7 @@ addResourceOptions(
       const format = resolveOutputFormat({
         command: 'diff',
         format: options.format,
-        supported: ['console', 'json'],
+        supported: ['console', 'json', 'sarif'],
         legacyAliases: [{ flag: 'json', used: options.json, mapsTo: 'json' }],
         onWarning: (message) => process.stderr.write(`${message}\n`),
       })
@@ -361,7 +361,9 @@ addResourceOptions(
 
       const diff = computeDiff(remappedBase, currentReport, baseRef)
 
-      if (format === 'json') {
+      if (format === 'sarif') {
+        process.stdout.write(`${JSON.stringify(diffToSarif(diff), null, 2)}\n`)
+      } else if (format === 'json') {
         process.stdout.write(JSON.stringify(diff, null, 2) + '\n')
       } else {
         printDiff(diff)
@@ -447,7 +449,7 @@ program
       const format = resolveOutputFormat({
         command: 'review',
         format: options.format,
-        supported: ['console', 'json', 'markdown'],
+        supported: ['console', 'json', 'markdown', 'sarif'],
         legacyAliases: [
           { flag: 'json', used: options.json, mapsTo: 'json' },
           { flag: 'comment', used: options.comment, mapsTo: 'markdown' },
@@ -455,7 +457,9 @@ program
         onWarning: (message) => process.stderr.write(`${message}\n`),
       })
 
-      if (format === 'json') {
+      if (format === 'sarif') {
+        process.stdout.write(`${JSON.stringify(diffToSarif(review.diff), null, 2)}\n`)
+      } else if (format === 'json') {
         process.stdout.write(JSON.stringify(review, null, 2) + '\n')
       } else if (format === 'markdown') {
         process.stdout.write(`${review.markdown}\n`)
@@ -587,7 +591,7 @@ addResourceOptions(
       const format = resolveOutputFormat({
         command: 'trust',
         format: options.format,
-        supported: ['console', 'json', 'markdown'],
+        supported: ['console', 'json', 'markdown', 'sarif'],
         legacyAliases: [
           { flag: 'json', used: options.json, mapsTo: 'json' },
           { flag: 'markdown', used: options.markdown, mapsTo: 'markdown' },
@@ -595,10 +599,12 @@ addResourceOptions(
         onWarning: (message) => process.stderr.write(`${message}\n`),
       })
 
-      const rendered = `${renderTrustOutput(trust, {
-        json: format === 'json',
-        markdown: format === 'markdown',
-      })}\n`
+      const rendered = format === 'sarif'
+        ? `${JSON.stringify(toSarif(report), null, 2)}\n`
+        : `${renderTrustOutput(trust, {
+          json: format === 'json',
+          markdown: format === 'markdown',
+        })}\n`
 
       process.stdout.write(rendered)
 

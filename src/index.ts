@@ -29,7 +29,7 @@ export {
   formatTrustKpiConsole,
   formatTrustKpiJson,
 } from './trust-kpi.js'
-export { toSarif } from './sarif.js'
+export { toSarif, diffToSarif } from './sarif.js'
 export type {
   SarifLevel,
   DriftSarifRule,

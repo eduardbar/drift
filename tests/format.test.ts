@@ -47,7 +47,7 @@ describe('resolveOutputFormat', () => {
     expect(
       resolveOutputFormat({
         command: 'trust',
-        supported: ['console', 'json', 'markdown'],
+        supported: ['console', 'json', 'markdown', 'sarif'],
         legacyAliases: [{ flag: 'markdown', used: true, mapsTo: 'markdown' }],
       }),
     ).toBe('markdown')
@@ -55,7 +55,7 @@ describe('resolveOutputFormat', () => {
     expect(
       resolveOutputFormat({
         command: 'diff',
-        supported: ['console', 'json'],
+        supported: ['console', 'json', 'sarif'],
         legacyAliases: [{ flag: 'json', used: true, mapsTo: 'json' }],
       }),
     ).toBe('json')
@@ -85,6 +85,30 @@ describe('resolveOutputFormat', () => {
         supported: ['console', 'json', 'sarif'],
       }),
     ).toBe('sarif')
+
+    expect(
+      resolveOutputFormat({
+        command: 'diff',
+        format: 'sarif',
+        supported: ['console', 'json', 'sarif'],
+      }),
+    ).toBe('sarif')
+
+    expect(
+      resolveOutputFormat({
+        command: 'review',
+        format: 'sarif',
+        supported: ['console', 'json', 'markdown', 'sarif'],
+      }),
+    ).toBe('sarif')
+
+    expect(
+      resolveOutputFormat({
+        command: 'trust',
+        format: 'sarif',
+        supported: ['console', 'json', 'markdown', 'sarif'],
+      }),
+    ).toBe('sarif')
   })
 
   it('fails on unsupported format per command', () => {
@@ -92,19 +116,19 @@ describe('resolveOutputFormat', () => {
       resolveOutputFormat({
         command: 'diff',
         format: 'markdown',
-        supported: ['console', 'json'],
+        supported: ['console', 'json', 'sarif'],
       }),
-    ).toThrow("Format 'markdown' is not supported for 'diff'. Supported formats: console, json.")
+    ).toThrow("Format 'markdown' is not supported for 'diff'. Supported formats: console, json, sarif.")
   })
 
   it('fails when sarif is not supported by the command', () => {
     expect(() =>
       resolveOutputFormat({
-        command: 'trust',
+        command: 'guard',
         format: 'sarif',
-        supported: ['console', 'json', 'markdown'],
+        supported: ['console', 'json'],
       }),
-    ).toThrow("Format 'sarif' is not supported for 'trust'. Supported formats: console, json, markdown.")
+    ).toThrow("Format 'sarif' is not supported for 'guard'. Supported formats: console, json.")
   })
 
   it('fails when legacy aliases conflict', () => {
@@ -125,7 +149,7 @@ describe('resolveOutputFormat', () => {
       resolveOutputFormat({
         command: 'trust',
         format: 'json',
-        supported: ['console', 'json', 'markdown'],
+        supported: ['console', 'json', 'markdown', 'sarif'],
         legacyAliases: [{ flag: 'markdown', used: true, mapsTo: 'markdown' }],
       }),
     ).toThrow("Conflicting format flags for 'trust': --format json and legacy alias for markdown.")

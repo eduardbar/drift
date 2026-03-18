@@ -54,4 +54,17 @@ describe('cli sarif output', () => {
     expect(sarif.version).toBe('2.1.0')
     expect(sarif.runs[0].tool.driver.name).toBe('drift')
   })
+
+  it('serializes trust --format sarif output as SARIF JSON', () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'drift-cli-sarif-trust-'))
+    writeFileSync(join(tmpDir, 'sample.ts'), 'export const value = 1\n')
+
+    const result = runCli(['trust', tmpDir, '--format', 'sarif'])
+    expect(result.status).toBe(0)
+
+    const sarif = JSON.parse(result.stdout)
+    expect(sarif.version).toBe('2.1.0')
+    expect(sarif.runs[0].tool.driver.name).toBe('drift')
+  })
+
 })

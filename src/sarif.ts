@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module'
 import type { DriftIssue, DriftReport } from './types.js'
+import type { DriftDiff } from './types.js'
 import { RULE_WEIGHTS } from './analyzer.js'
 
 const require = createRequire(import.meta.url)
@@ -42,6 +43,11 @@ export interface DriftSarifResult {
     weight?: number
     fileScore?: number
     driftSeverity: DriftIssue['severity']
+    baseRef?: string
+    scoreBefore?: number
+    scoreAfter?: number
+    scoreDelta?: number
+    changeType?: 'new-issue'
   }
 }
 
@@ -61,6 +67,10 @@ export interface DriftSarifRun {
     totalIssues: number
     totalScore: number
     totalFiles: number
+    baseRef?: string
+    totalDelta?: number
+    newIssuesCount?: number
+    resolvedIssuesCount?: number
   }
 }
 
@@ -68,6 +78,18 @@ export interface DriftSarifLog {
   $schema: 'https://json.schemastore.org/sarif-2.1.0.json'
   version: '2.1.0'
   runs: DriftSarifRun[]
+}
+
+interface SarifRunMetrics {
+  scannedAt: string
+  targetPath: string
+  totalIssues: number
+  totalScore: number
+  totalFiles: number
+  baseRef?: string
+  totalDelta?: number
+  newIssuesCount?: number
+  resolvedIssuesCount?: number
 }
 
 function mapSeverityToSarifLevel(severity: DriftIssue['severity']): SarifLevel {
@@ -85,7 +107,12 @@ function normalizeArtifactUri(filePath: string): string {
   return filePath.replaceAll('\\', '/')
 }
 
-function toSarifResult(filePath: string, fileScore: number, issue: DriftIssue): DriftSarifResult {
+function toSarifResult(
+  filePath: string,
+  fileScore: number,
+  issue: DriftIssue,
+  extraProperties?: Omit<NonNullable<DriftSarifResult['properties']>, 'weight' | 'fileScore' | 'driftSeverity'>,
+): DriftSarifResult {
   const line = Math.max(issue.line, 1)
   const column = Math.max(issue.column, 1)
   const weight = RULE_WEIGHTS[issue.rule]?.weight
@@ -111,6 +138,7 @@ function toSarifResult(filePath: string, fileScore: number, issue: DriftIssue): 
       weight,
       fileScore,
       driftSeverity: issue.severity,
+      ...extraProperties,
     },
   }
 }
@@ -139,9 +167,7 @@ function buildRules(results: DriftSarifResult[]): DriftSarifRule[] {
   return [...byRule.values()]
 }
 
-export function toSarif(report: DriftReport): DriftSarifLog {
-  const results = report.files.flatMap((file) => file.issues.map((issue) => toSarifResult(file.path, file.score, issue)))
-
+function buildSarifLog(results: DriftSarifResult[], metrics: SarifRunMetrics): DriftSarifLog {
   return {
     $schema: 'https://json.schemastore.org/sarif-2.1.0.json',
     version: '2.1.0',
@@ -155,13 +181,45 @@ export function toSarif(report: DriftReport): DriftSarifLog {
         },
       },
       results,
-      properties: {
-        scannedAt: report.scannedAt,
-        targetPath: report.targetPath,
-        totalIssues: report.totalIssues,
-        totalScore: report.totalScore,
-        totalFiles: report.totalFiles,
-      },
+      properties: metrics,
     }],
   }
+}
+
+export function toSarif(report: DriftReport): DriftSarifLog {
+  const results = report.files.flatMap((file) => file.issues.map((issue) => toSarifResult(file.path, file.score, issue)))
+
+  return buildSarifLog(results, {
+    scannedAt: report.scannedAt,
+    targetPath: report.targetPath,
+    totalIssues: report.totalIssues,
+    totalScore: report.totalScore,
+    totalFiles: report.totalFiles,
+  })
+}
+
+export function diffToSarif(diff: DriftDiff): DriftSarifLog {
+  const results = diff.files.flatMap((file) =>
+    file.newIssues.map((issue) =>
+      toSarifResult(file.path, file.scoreAfter, issue, {
+        baseRef: diff.baseRef,
+        scoreBefore: file.scoreBefore,
+        scoreAfter: file.scoreAfter,
+        scoreDelta: file.scoreDelta,
+        changeType: 'new-issue',
+      }),
+    ),
+  )
+
+  return buildSarifLog(results, {
+    scannedAt: diff.scannedAt,
+    targetPath: diff.projectPath,
+    totalIssues: diff.newIssuesCount,
+    totalScore: diff.totalScoreAfter,
+    totalFiles: diff.files.length,
+    baseRef: diff.baseRef,
+    totalDelta: diff.totalDelta,
+    newIssuesCount: diff.newIssuesCount,
+    resolvedIssuesCount: diff.resolvedIssuesCount,
+  })
 }

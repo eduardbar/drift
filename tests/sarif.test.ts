@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { toSarif } from '../src/sarif.js'
-import type { DriftReport } from '../src/types.js'
+import { diffToSarif, toSarif } from '../src/sarif.js'
+import type { DriftDiff, DriftReport } from '../src/types.js'
 
 describe('toSarif', () => {
   function createReport(): DriftReport {
@@ -102,5 +102,59 @@ describe('toSarif', () => {
     expect(result?.locations[0].physicalLocation.region.startColumn).toBe(3)
     expect(result?.properties?.weight).toBe(20)
     expect(result?.properties?.fileScore).toBe(72)
+  })
+
+  it('maps diff newIssues to SARIF results', () => {
+    const diff: DriftDiff = {
+      baseRef: 'origin/main',
+      projectPath: '/repo',
+      scannedAt: '2026-03-17T10:20:30.000Z',
+      files: [
+        {
+          path: 'src/app.ts',
+          scoreBefore: 60,
+          scoreAfter: 72,
+          scoreDelta: 12,
+          newIssues: [
+            {
+              rule: 'debug-leftover',
+              severity: 'warning',
+              message: 'console.log detected',
+              line: 22,
+              column: 1,
+              snippet: 'console.log(value)',
+            },
+          ],
+          resolvedIssues: [
+            {
+              rule: 'magic-number',
+              severity: 'info',
+              message: 'legacy issue resolved',
+              line: 10,
+              column: 5,
+              snippet: '42',
+            },
+          ],
+        },
+      ],
+      totalScoreBefore: 60,
+      totalScoreAfter: 72,
+      totalDelta: 12,
+      newIssuesCount: 1,
+      resolvedIssuesCount: 1,
+    }
+
+    const sarif = diffToSarif(diff)
+
+    expect(sarif.version).toBe('2.1.0')
+    expect(sarif.runs[0].results).toHaveLength(1)
+    expect(sarif.runs[0].results[0]?.ruleId).toBe('debug-leftover')
+    expect(sarif.runs[0].results[0]?.locations[0]?.physicalLocation?.artifactLocation?.uri).toBe('src/app.ts')
+    expect(sarif.runs[0].results[0]?.properties?.baseRef).toBe('origin/main')
+    expect(sarif.runs[0].results[0]?.properties?.scoreDelta).toBe(12)
+    expect(sarif.runs[0].results[0]?.properties?.changeType).toBe('new-issue')
+    expect(sarif.runs[0].properties.baseRef).toBe('origin/main')
+    expect(sarif.runs[0].properties.newIssuesCount).toBe(1)
+    expect(sarif.runs[0].properties.resolvedIssuesCount).toBe(1)
   })
 })
