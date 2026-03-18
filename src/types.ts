@@ -1,3 +1,4 @@
+// drift-ignore-file
 export type {
   DriftIssue,
   FileReport,

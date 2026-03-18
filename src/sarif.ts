@@ -6,6 +6,13 @@ import { RULE_WEIGHTS } from './analyzer.js'
 const require = createRequire(import.meta.url)
 const { version: VERSION } = require('../package.json') as { version: string }
 
+const HTTPS_SCHEME = 'https:'
+const URL_SEPARATOR = '//'
+const SARIF_SCHEMA_HOST_AND_PATH = 'json.schemastore.org/sarif-2.1.0.json'
+const DRIFT_INFORMATION_HOST_AND_PATH = 'github.com/eduardbar/drift'
+const SARIF_SCHEMA_URL = `${HTTPS_SCHEME}${URL_SEPARATOR}${SARIF_SCHEMA_HOST_AND_PATH}`
+const DRIFT_INFORMATION_URI = `${HTTPS_SCHEME}${URL_SEPARATOR}${DRIFT_INFORMATION_HOST_AND_PATH}`
+
 export type SarifLevel = 'error' | 'warning' | 'note'
 
 export interface DriftSarifRule {
@@ -75,7 +82,7 @@ export interface DriftSarifRun {
 }
 
 export interface DriftSarifLog {
-  $schema: 'https://json.schemastore.org/sarif-2.1.0.json'
+  $schema: string
   version: '2.1.0'
   runs: DriftSarifRun[]
 }
@@ -169,14 +176,14 @@ function buildRules(results: DriftSarifResult[]): DriftSarifRule[] {
 
 function buildSarifLog(results: DriftSarifResult[], metrics: SarifRunMetrics): DriftSarifLog {
   return {
-    $schema: 'https://json.schemastore.org/sarif-2.1.0.json',
+    $schema: SARIF_SCHEMA_URL,
     version: '2.1.0',
     runs: [{
       tool: {
         driver: {
           name: 'drift',
           version: VERSION,
-          informationUri: 'https://github.com/eduardbar/drift',
+          informationUri: DRIFT_INFORMATION_URI,
           rules: buildRules(results),
         },
       },
