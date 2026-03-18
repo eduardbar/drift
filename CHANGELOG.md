@@ -18,6 +18,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+- No unreleased changes yet.
+
+---
+
+## [1.4.0] - 2026-03-18
+
 ### Added
 
 - `drift init`: project scaffolding command for `drift.config.ts`, optional CI workflow, and baseline generation.
