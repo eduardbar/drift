@@ -1,7 +1,19 @@
 export { analyzeProject, analyzeFile, RULE_WEIGHTS } from './analyzer.js'
 export { buildReport, formatMarkdown } from './reporter.js'
 export { computeDiff } from './diff.js'
+export { runGuard, evaluateGuard } from './guard.js'
+export type {
+  GuardBaseline,
+  GuardThresholds,
+  GuardOptions,
+  GuardMetrics,
+  GuardCheck,
+  GuardEvaluation,
+  GuardResult,
+} from './guard-types.js'
 export { generateReview, formatReviewMarkdown } from './review.js'
+export { runDoctor } from './doctor.js'
+export type { DoctorOptions } from './doctor.js'
 export {
   buildTrustReport,
   formatTrustConsole,
@@ -26,6 +38,14 @@ export {
   formatTrustKpiConsole,
   formatTrustKpiJson,
 } from './trust-kpi.js'
+export { toSarif, diffToSarif } from './sarif.js'
+export type {
+  SarifLevel,
+  DriftSarifRule,
+  DriftSarifResult,
+  DriftSarifRun,
+  DriftSarifLog,
+} from './sarif.js'
 export { generateArchitectureMap, generateArchitectureSvg } from './map.js'
 export type {
   DriftReport,

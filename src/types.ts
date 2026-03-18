@@ -1,3 +1,4 @@
+// drift-ignore-file
 export type {
   DriftIssue,
   FileReport,
@@ -6,7 +7,10 @@ export type {
   MaintenanceRiskMetrics,
   AIIssue,
   AIOutput,
+  AIOutputJson,
   DriftReport,
+  DriftReportJson,
+  DriftOutputMetadata,
 } from './types/core.js'
 
 export type {
@@ -20,6 +24,7 @@ export type {
   TrustAdvancedContext,
   TrustDiffContext,
   DriftTrustReport,
+  DriftTrustReportJson,
   TrustKpiDiagnostic,
   TrustScoreStats,
   TrustDiffTrendSummary,
@@ -53,3 +58,21 @@ export type {
   DriftTrendReport,
   DriftBlameReport,
 } from './types/diff.js'
+
+export type {
+  GuardBaseline,
+  GuardThresholds,
+  GuardOptions,
+  GuardMetrics,
+  GuardCheck,
+  GuardEvaluation,
+  GuardResult,
+} from './guard-types.js'
+
+export type {
+  SarifLevel,
+  DriftSarifRule,
+  DriftSarifResult,
+  DriftSarifRun,
+  DriftSarifLog,
+} from './sarif.js'

@@ -114,6 +114,18 @@ function readJsonFile(filePath: string): { parsed?: unknown; diagnostics: TrustK
 
 function normalizeArtifactShape(parsed: unknown, filePath: string): { artifact?: Record<string, unknown>; diagnostics: TrustKpiDiagnostic[] } {
   if (isObjectLike(parsed)) {
+    const rawSchema = parsed.$schema
+    if (rawSchema !== undefined && rawSchema !== 'schemas/drift-trust.v1.json') {
+      return {
+        diagnostics: [{
+          level: 'error',
+          code: 'invalid-shape',
+          file: filePath,
+          message: 'Invalid $schema for trust artifact (expected schemas/drift-trust.v1.json)',
+        }],
+      }
+    }
+
     return { artifact: parsed, diagnostics: [] }
   }
 

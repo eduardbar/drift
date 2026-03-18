@@ -14,6 +14,7 @@ import { printConsole, printDiff } from './printer.js'
 import { loadConfig } from './config.js'
 import { extractFilesAtRef, cleanupTempDir } from './git.js'
 import { computeDiff } from './diff.js'
+import { runGuard } from './guard.js'
 import { generateHtmlReport } from './report.js'
 import { generateBadge } from './badge.js'
 import { emitCIAnnotations, printCISummary } from './ci.js'
@@ -43,10 +44,14 @@ import {
 } from './trust.js'
 import { computeTrustKpis, formatTrustKpiConsole, formatTrustKpiJson } from './trust-kpi.js'
 import { runBenchmarkCli } from './benchmark.js'
+import { runInit, INIT_PRESETS } from './init.js'
+import { runDoctor } from './doctor.js'
+import { resolveOutputFormat } from './format.js'
+import { toSarif, diffToSarif } from './sarif.js'
 import type { DriftDiff, DriftTrustReport, DriftAnalysisOptions, MergeRiskLevel } from './types.js'
+import type { GuardResult, GuardThresholds } from './guard-types.js'
 import type { TrustGatePolicyExplanation } from './trust.js'
 import type { SnapshotHistory } from './snapshot.js'
-
 const program = new Command()
 
 type ResourceOptionFlags = {
@@ -83,6 +88,96 @@ function addResourceOptions(command: Command): Command {
     .option('--max-files <n>', 'Maximum files to analyze before soft-skipping extras')
     .option('--max-file-size-kb <n>', 'Skip files above this size and report diagnostics')
     .option('--with-semantic-duplication', 'Keep semantic-duplication rule enabled in low-memory mode')
+}
+
+function parseOptionalNumber(rawValue: string | undefined, flagName: string): number | undefined {
+  if (rawValue == null) return undefined
+  const value = Number(rawValue)
+  if (!Number.isFinite(value)) {
+    throw new Error(`${flagName} must be a valid number`)
+  }
+  return value
+}
+
+function parseBySeverity(rawValue: string | undefined): GuardThresholds | undefined {
+  if (rawValue == null) return undefined
+
+  const spec = rawValue.trim()
+  if (!spec) {
+    throw new Error('--by-severity must not be empty. Expected format: error=0,warning=2,info=5')
+  }
+
+  const thresholds: GuardThresholds = {}
+  const seen = new Set<string>()
+
+  for (const segment of spec.split(',')) {
+    const pair = segment.trim()
+    if (!pair) continue
+
+    const equalIndex = pair.indexOf('=')
+    if (equalIndex <= 0 || equalIndex === pair.length - 1) {
+      throw new Error(`Invalid --by-severity entry '${pair}'. Expected key=value (e.g. warning=2).`)
+    }
+
+    const key = pair.slice(0, equalIndex).trim().toLowerCase()
+    const rawThreshold = pair.slice(equalIndex + 1).trim()
+
+    if (key !== 'error' && key !== 'warning' && key !== 'info') {
+      throw new Error(`Invalid --by-severity key '${key}'. Allowed keys: error, warning, info.`)
+    }
+
+    if (seen.has(key)) {
+      throw new Error(`Duplicate --by-severity key '${key}'.`)
+    }
+
+    const threshold = Number(rawThreshold)
+    if (!Number.isFinite(threshold)) {
+      throw new Error(`Invalid --by-severity value for '${key}': '${rawThreshold}'. Must be a valid number.`)
+    }
+
+    const severityKey: keyof GuardThresholds = key
+    thresholds[severityKey] = threshold
+    seen.add(severityKey)
+  }
+
+  if (seen.size === 0) {
+    throw new Error('--by-severity must include at least one threshold. Example: error=0,warning=2')
+  }
+
+  return thresholds
+}
+
+function formatSigned(value: number): string {
+  return value > 0 ? `+${value}` : `${value}`
+}
+
+function printGuardSummary(result: GuardResult): void {
+  const modeLabel = result.mode === 'diff' ? `diff (${result.baseRef ?? 'unknown base'})` : 'baseline'
+  const statusLabel = result.passed ? 'PASS' : 'FAIL'
+
+  process.stdout.write('\n')
+  process.stdout.write(`Guard mode: ${modeLabel}\n`)
+  process.stdout.write(`Result: ${statusLabel}\n`)
+  process.stdout.write(`Score delta: ${formatSigned(result.metrics.scoreDelta)}\n`)
+  process.stdout.write(`Total issues delta: ${formatSigned(result.metrics.totalIssuesDelta)}\n`)
+  process.stdout.write(
+    `Severity delta: error=${formatSigned(result.metrics.severityDelta.error)}, warning=${formatSigned(result.metrics.severityDelta.warning)}, info=${formatSigned(result.metrics.severityDelta.info)}\n`,
+  )
+  if (result.mode === 'baseline' && result.baselinePath) {
+    process.stdout.write(`Baseline file: ${result.baselinePath}\n`)
+  }
+
+  if (result.checks.length === 0) {
+    process.stdout.write('Checks: none configured\n')
+    return
+  }
+
+  process.stdout.write('Checks:\n')
+  for (const check of result.checks) {
+    process.stdout.write(
+      `  - [${check.passed ? 'PASS' : 'FAIL'}] ${check.id}: ${check.message} (actual=${check.actual}, limit=${check.limit})\n`,
+    )
+  }
 }
 
 function parseTrustGateOverrides(options: { minTrust?: string; maxRisk?: string }): { minTrust?: number; maxRisk?: MergeRiskLevel } {
@@ -136,11 +231,12 @@ addResourceOptions(
     .command('scan [path]', { isDefault: true })
   .description('Scan a directory for vibe coding drift')
   .option('-o, --output <file>', 'Write report to a Markdown file')
+  .option('--format <type>', 'Output format: console|json|markdown|ai|sarif')
   .option('--json', 'Output raw JSON report')
   .option('--ai', 'Output AI-optimized JSON for LLM consumption')
   .option('--fix', 'Show fix suggestions for each issue')
   .option('--min-score <n>', 'Exit with code 1 if overall score exceeds this threshold', '0')
-  .action(async (targetPath: string | undefined, options: { output?: string; json?: boolean; ai?: boolean; fix?: boolean; minScore: string } & ResourceOptionFlags) => {
+  .action(async (targetPath: string | undefined, options: { output?: string; format?: string; json?: boolean; ai?: boolean; fix?: boolean; minScore: string } & ResourceOptionFlags) => {
     const resolvedPath = resolve(targetPath ?? '.')
 
     process.stderr.write(`\nScanning ${resolvedPath}...\n`)
@@ -149,14 +245,35 @@ addResourceOptions(
     process.stderr.write(`  Found ${files.length} TypeScript file(s)\n\n`)
     const report = buildReport(resolvedPath, files)
 
-    if (options.ai) {
+    const format = resolveOutputFormat({
+      command: 'scan',
+      format: options.format,
+      supported: ['console', 'json', 'markdown', 'ai', 'sarif'],
+      legacyAliases: [
+        { flag: 'json', used: options.json, mapsTo: 'json' },
+        { flag: 'ai', used: options.ai, mapsTo: 'ai' },
+      ],
+      onWarning: (message) => process.stderr.write(`${message}\n`),
+    })
+
+    if (format === 'sarif') {
+      process.stdout.write(`${JSON.stringify(toSarif(report), null, 2)}\n`)
+      return
+    }
+
+    if (format === 'ai') {
       const aiOutput = formatAIOutput(report)
       process.stdout.write(JSON.stringify(aiOutput, null, 2))
       return
     }
 
-    if (options.json) {
+    if (format === 'json') {
       process.stdout.write(JSON.stringify(report, null, 2))
+      return
+    }
+
+    if (format === 'markdown') {
+      process.stdout.write(`${formatMarkdown(report)}\n`)
       return
     }
 
@@ -177,12 +294,35 @@ addResourceOptions(
   }),
 )
 
+program
+  .command('init')
+  .description('Initialize drift configuration with presets and scaffolding')
+  .option('--preset <type>', `Scaffold config with preset: ${INIT_PRESETS.join(', ')}`)
+  .option('--ci', 'Generate GitHub Actions workflow for drift review')
+  .option('--baseline', 'Create drift-baseline.json with current project score')
+  .action(async (options: { preset?: string; ci?: boolean; baseline?: boolean }) => {
+    const projectRoot = resolve('.')
+    
+    try {
+      await runInit(projectRoot, {
+        preset: options.preset,
+        ci: options.ci,
+        baseline: options.baseline,
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      process.stderr.write(`\n  Error: ${message}\n\n`)
+      process.exit(1)
+    }
+  })
+
 addResourceOptions(
   program
     .command('diff [ref]')
   .description('Compare current state against a git ref (default: HEAD~1)')
+  .option('--format <type>', 'Output format: console|json|markdown|ai|sarif')
   .option('--json', 'Output raw JSON diff')
-  .action(async (ref: string | undefined, options: { json?: boolean } & ResourceOptionFlags) => {
+  .action(async (ref: string | undefined, options: { format?: string; json?: boolean } & ResourceOptionFlags) => {
     const baseRef = ref ?? 'HEAD~1'
     const projectPath = resolve('.')
     const analysisOptions = resolveAnalysisOptions(options)
@@ -191,6 +331,14 @@ addResourceOptions(
 
     try {
       process.stderr.write(`\nComputing diff: HEAD vs ${baseRef}...\n\n`)
+
+      const format = resolveOutputFormat({
+        command: 'diff',
+        format: options.format,
+        supported: ['console', 'json', 'sarif'],
+        legacyAliases: [{ flag: 'json', used: options.json, mapsTo: 'json' }],
+        onWarning: (message) => process.stderr.write(`${message}\n`),
+      })
 
       // Scan current state
       const config = await loadConfig(projectPath)
@@ -214,7 +362,9 @@ addResourceOptions(
 
       const diff = computeDiff(remappedBase, currentReport, baseRef)
 
-      if (options.json) {
+      if (format === 'sarif') {
+        process.stdout.write(`${JSON.stringify(diffToSarif(diff), null, 2)}\n`)
+      } else if (format === 'json') {
         process.stdout.write(JSON.stringify(diff, null, 2) + '\n')
       } else {
         printDiff(diff)
@@ -225,6 +375,55 @@ addResourceOptions(
       process.exit(1)
     } finally {
       if (tempDir) cleanupTempDir(tempDir)
+    }
+  }),
+)
+
+addResourceOptions(
+  program
+    .command('guard [path]')
+  .description('Evaluate drift guard thresholds against diff or baseline')
+  .option('--base <ref>', 'Git base ref for diff guard mode')
+  .option('--baseline <file>', 'Baseline file path (default: drift-baseline.json)')
+  .option('--budget <n>', 'Allowed score delta budget')
+  .option('--by-severity <spec>', 'Severity thresholds: error=0,warning=2,info=5')
+  .option('--json', 'Output raw JSON guard result')
+  .action(async (
+    targetPath: string | undefined,
+    options: {
+      base?: string
+      baseline?: string
+      budget?: string
+      bySeverity?: string
+      json?: boolean
+    } & ResourceOptionFlags,
+  ) => {
+    try {
+      const resolvedPath = resolve(targetPath ?? '.')
+      const budget = parseOptionalNumber(options.budget, '--budget')
+      const bySeverity = parseBySeverity(options.bySeverity)
+
+      const result = await runGuard(resolvedPath, {
+        baseRef: options.base,
+        baselinePath: options.baseline,
+        budget,
+        bySeverity,
+        analysis: resolveAnalysisOptions(options),
+      })
+
+      if (options.json) {
+        process.stdout.write(JSON.stringify(result, null, 2) + '\n')
+      } else {
+        printGuardSummary(result)
+      }
+
+      if (!result.passed) {
+        process.exit(1)
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      process.stderr.write(`\n  Error: ${message}\n\n`)
+      process.exit(1)
     }
   }),
 )
@@ -241,17 +440,32 @@ program
   .command('review')
   .description('Review drift against a base ref and output PR markdown')
   .option('--base <ref>', 'Git base ref to compare against', 'origin/main')
+  .option('--format <type>', 'Output format: console|json|markdown|ai|sarif')
   .option('--json', 'Output structured review JSON')
   .option('--comment', 'Output markdown comment body')
   .option('--fail-on <n>', 'Exit with code 1 if score delta is >= n')
-  .action(async (options: { base: string; json?: boolean; comment?: boolean; failOn?: string }) => {
+  .action(async (options: { base: string; format?: string; json?: boolean; comment?: boolean; failOn?: string }) => {
     try {
       const review = await generateReview(resolve('.'), options.base)
+      const format = resolveOutputFormat({
+        command: 'review',
+        format: options.format,
+        supported: ['console', 'json', 'markdown', 'sarif'],
+        legacyAliases: [
+          { flag: 'json', used: options.json, mapsTo: 'json' },
+          { flag: 'comment', used: options.comment, mapsTo: 'markdown' },
+        ],
+        onWarning: (message) => process.stderr.write(`${message}\n`),
+      })
 
-      if (options.json) {
+      if (format === 'sarif') {
+        process.stdout.write(`${JSON.stringify(diffToSarif(review.diff), null, 2)}\n`)
+      } else if (format === 'json') {
         process.stdout.write(JSON.stringify(review, null, 2) + '\n')
+      } else if (format === 'markdown') {
+        process.stdout.write(`${review.markdown}\n`)
       } else {
-        process.stdout.write((options.comment ? review.markdown : `${review.summary}\n\n${review.markdown}`) + '\n')
+        process.stdout.write(`${review.summary}\n\n${review.markdown}\n`)
       }
 
       const failOn = options.failOn ? Number(options.failOn) : undefined
@@ -270,6 +484,7 @@ addResourceOptions(
     .command('trust [path]')
   .description('Compute merge trust baseline from drift signals')
   .option('--base <ref>', 'Git base ref for diff-aware trust scoring')
+  .option('--format <type>', 'Output format: console|json|markdown|ai|sarif')
   .option('--json', 'Output structured trust JSON')
   .option('--markdown', 'Output trust report as markdown (PR comment ready)')
   .option('-o, --output <file>', 'Write trust output to file')
@@ -286,6 +501,7 @@ addResourceOptions(
     targetPath: string | undefined,
     options: {
       base?: string
+      format?: string
       json?: boolean
       markdown?: boolean
       output?: string
@@ -373,7 +589,23 @@ addResourceOptions(
         },
       })
 
-      const rendered = `${renderTrustOutput(trust, options)}\n`
+      const format = resolveOutputFormat({
+        command: 'trust',
+        format: options.format,
+        supported: ['console', 'json', 'markdown', 'sarif'],
+        legacyAliases: [
+          { flag: 'json', used: options.json, mapsTo: 'json' },
+          { flag: 'markdown', used: options.markdown, mapsTo: 'markdown' },
+        ],
+        onWarning: (message) => process.stderr.write(`${message}\n`),
+      })
+
+      const rendered = format === 'sarif'
+        ? `${JSON.stringify(toSarif(report), null, 2)}\n`
+        : `${renderTrustOutput(trust, {
+          json: format === 'json',
+          markdown: format === 'markdown',
+        })}\n`
 
       process.stdout.write(rendered)
 
@@ -479,6 +711,20 @@ program
   })
 
 program
+  .command('doctor')
+  .description('Run project environment diagnostics')
+  .option('--json', 'Output structured doctor JSON')
+  .action(async (opts: { json?: boolean }) => {
+    try {
+      await runDoctor(process.cwd(), { json: opts.json })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      process.stderr.write(`\n  Error: ${message}\n\n`)
+      process.exitCode = 1
+    }
+  })
+
+program
   .command('kpi <path>')
   .description('Aggregate trust KPIs from trust JSON artifacts')
   .option('--no-summary', 'Disable console KPI summary in stderr')
@@ -552,14 +798,31 @@ addResourceOptions(
   program
     .command('ci [path]')
   .description('Emit GitHub Actions annotations and step summary')
+  .option('--format <type>', 'Output format: console|json|markdown|ai|sarif')
+  .option('--json', 'Output raw JSON report (legacy alias for --format json)')
   .option('--min-score <n>', 'Exit with code 1 if overall score exceeds this threshold', '0')
-  .action(async (targetPath: string | undefined, options: { minScore: string } & ResourceOptionFlags) => {
+  .action(async (targetPath: string | undefined, options: { format?: string; json?: boolean; minScore: string } & ResourceOptionFlags) => {
     const resolvedPath = resolve(targetPath ?? '.')
     const config = await loadConfig(resolvedPath)
     const files = analyzeProject(resolvedPath, config, resolveAnalysisOptions(options))
     const report = buildReport(resolvedPath, files)
-    emitCIAnnotations(report)
-    printCISummary(report)
+
+    const format = resolveOutputFormat({
+      command: 'ci',
+      format: options.format,
+      supported: ['console', 'json', 'sarif'],
+      legacyAliases: [{ flag: 'json', used: options.json, mapsTo: 'json' }],
+      onWarning: (message) => process.stderr.write(`${message}\n`),
+    })
+
+    if (format === 'sarif') {
+      process.stdout.write(`${JSON.stringify(toSarif(report), null, 2)}\n`)
+    } else if (format === 'json') {
+      process.stdout.write(JSON.stringify(report, null, 2) + '\n')
+    } else {
+      emitCIAnnotations(report)
+      printCISummary(report)
+    }
     const minScore = Number(options.minScore)
     if (minScore > 0 && report.totalScore > minScore) {
       process.exit(1)

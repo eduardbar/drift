@@ -1,0 +1,131 @@
+name: 'Drift — Trust + Review for PRs'
+description: 'Generate trust/review artifacts and enforce trust gate for pull requests'
+author: 'eduardbar'
+
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  path:
+    description: 'Path to analyze'
+    required: false
+    default: '.'
+  base-ref:
+    description: 'Git base ref used by trust/review diff context'
+    required: false
+    default: 'origin/main'
+  version:
+    description: 'Version of @eduardbar/drift to use'
+    required: false
+    default: '1.3.0'
+  min-trust:
+    description: 'Fail gate if trust score is below this threshold'
+    required: false
+    default: '45'
+  max-risk:
+    description: 'Fail gate if merge risk exceeds this level (LOW|MEDIUM|HIGH|CRITICAL)'
+    required: false
+    default: 'HIGH'
+  fail-on-gate:
+    description: 'Whether to enforce trust-gate failure'
+    required: false
+    default: 'true'
+  include-review:
+    description: 'Whether to generate drift review markdown'
+    required: false
+    default: 'true'
+
+outputs:
+  trust-score:
+    description: 'Trust score from drift trust JSON'
+    value: ${{ steps.extract.outputs.trust_score }}
+  merge-risk:
+    description: 'Merge risk from drift trust JSON'
+    value: ${{ steps.extract.outputs.merge_risk }}
+  new-issues:
+    description: 'New issues compared to base ref when available'
+    value: ${{ steps.extract.outputs.new_issues }}
+  resolved-issues:
+    description: 'Resolved issues compared to base ref when available'
+    value: ${{ steps.extract.outputs.resolved_issues }}
+  trust-json:
+    description: 'Generated trust JSON file path'
+    value: ${{ steps.files.outputs.trust_json }}
+  trust-markdown:
+    description: 'Generated trust markdown file path'
+    value: ${{ steps.files.outputs.trust_md }}
+  review-markdown:
+    description: 'Generated review markdown file path (if include-review=true)'
+    value: ${{ steps.files.outputs.review_md }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Prepare artifact file paths
+      id: files
+      shell: bash
+      run: |
+        set -euo pipefail
+        trust_json="$RUNNER_TEMP/drift-trust.json"
+        trust_md="$RUNNER_TEMP/drift-trust.md"
+        review_md="$RUNNER_TEMP/drift-review.md"
+        echo "trust_json=$trust_json" >> "$GITHUB_OUTPUT"
+        echo "trust_md=$trust_md" >> "$GITHUB_OUTPUT"
+        echo "review_md=$review_md" >> "$GITHUB_OUTPUT"
+
+    - name: Generate trust artifacts
+      shell: bash
+      run: |
+        set -euo pipefail
+        EXEC_PREFIX="$RUNNER_TEMP/drift-cli"
+        mkdir -p "$EXEC_PREFIX"
+        npm exec --yes --prefix "$EXEC_PREFIX" --package=@eduardbar/drift@${{ inputs.version }} -- drift --version
+        npm exec --yes --prefix "$EXEC_PREFIX" --package=@eduardbar/drift@${{ inputs.version }} -- drift trust "${{ inputs.path }}" --base "${{ inputs.base-ref }}" --markdown --json-output "${{ steps.files.outputs.trust_json }}" > "${{ steps.files.outputs.trust_md }}"
+
+    - name: Generate review markdown
+      if: inputs.include-review == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        EXEC_PREFIX="$RUNNER_TEMP/drift-cli"
+        mkdir -p "$EXEC_PREFIX"
+        npm exec --yes --prefix "$EXEC_PREFIX" --package=@eduardbar/drift@${{ inputs.version }} -- drift review --base "${{ inputs.base-ref }}" --comment > "${{ steps.files.outputs.review_md }}"
+
+    - name: Extract trust outputs
+      id: extract
+      shell: bash
+      run: |
+        set -euo pipefail
+        TRUST_JSON_PATH="${{ steps.files.outputs.trust_json }}" GITHUB_OUTPUT_PATH="$GITHUB_OUTPUT" node --input-type=module <<'NODE'
+        import fs from 'node:fs'
+
+        const payload = JSON.parse(fs.readFileSync(process.env.TRUST_JSON_PATH, 'utf8'))
+        const trust = payload.trust_score
+        const risk = payload.merge_risk
+        const diff = payload.diff_context ?? {}
+
+        if (typeof trust !== 'number') {
+          throw new Error('drift trust JSON missing numeric trust_score')
+        }
+        if (typeof risk !== 'string') {
+          throw new Error('drift trust JSON missing merge_risk')
+        }
+
+        const lines = [
+          `trust_score=${trust}`,
+          `merge_risk=${risk}`,
+          `new_issues=${diff.newIssues ?? 'n/a'}`,
+          `resolved_issues=${diff.resolvedIssues ?? 'n/a'}`,
+        ]
+        fs.appendFileSync(process.env.GITHUB_OUTPUT_PATH, lines.join('\n') + '\n')
+        NODE
+
+    - name: Enforce trust gate
+      if: inputs.fail-on-gate == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        EXEC_PREFIX="$RUNNER_TEMP/drift-cli"
+        mkdir -p "$EXEC_PREFIX"
+        npm exec --yes --prefix "$EXEC_PREFIX" --package=@eduardbar/drift@${{ inputs.version }} -- drift trust-gate "${{ steps.files.outputs.trust_json }}" --min-trust "${{ inputs.min-trust }}" --max-risk "${{ inputs.max-risk }}"

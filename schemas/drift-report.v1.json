@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/drift-report.v1.json",
+  "title": "drift report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "toolVersion",
+    "scannedAt",
+    "targetPath",
+    "files",
+    "totalIssues",
+    "totalScore",
+    "totalFiles",
+    "summary",
+    "quality",
+    "maintenanceRisk"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "schemas/drift-report.v1.json"
+    },
+    "toolVersion": {
+      "type": "string"
+    },
+    "scannedAt": {
+      "type": "string"
+    },
+    "targetPath": {
+      "type": "string"
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "issues", "score"],
+        "properties": {
+          "path": { "type": "string" },
+          "score": { "type": "number" },
+          "issues": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["rule", "severity", "message", "line", "column", "snippet"],
+              "properties": {
+                "rule": { "type": "string" },
+                "severity": { "enum": ["error", "warning", "info"] },
+                "message": { "type": "string" },
+                "line": { "type": "number" },
+                "column": { "type": "number" },
+                "snippet": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "totalIssues": {
+      "type": "number"
+    },
+    "totalScore": {
+      "type": "number"
+    },
+    "totalFiles": {
+      "type": "number"
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["errors", "warnings", "infos", "byRule"],
+      "properties": {
+        "errors": { "type": "number" },
+        "warnings": { "type": "number" },
+        "infos": { "type": "number" },
+        "byRule": {
+          "type": "object",
+          "additionalProperties": { "type": "number" }
+        }
+      }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["overall", "dimensions"],
+      "properties": {
+        "overall": { "type": "number" },
+        "dimensions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["architecture", "complexity", "ai-patterns", "testing"],
+          "properties": {
+            "architecture": { "type": "number" },
+            "complexity": { "type": "number" },
+            "ai-patterns": { "type": "number" },
+            "testing": { "type": "number" }
+          }
+        }
+      }
+    },
+    "maintenanceRisk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score", "level", "hotspots", "signals"],
+      "properties": {
+        "score": { "type": "number" },
+        "level": { "enum": ["low", "medium", "high", "critical"] },
+        "hotspots": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "file",
+              "driftScore",
+              "complexityIssues",
+              "hasNearbyTests",
+              "changeFrequency",
+              "risk",
+              "reasons"
+            ],
+            "properties": {
+              "file": { "type": "string" },
+              "driftScore": { "type": "number" },
+              "complexityIssues": { "type": "number" },
+              "hasNearbyTests": { "type": "boolean" },
+              "changeFrequency": { "type": "number" },
+              "risk": { "type": "number" },
+              "reasons": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          }
+        },
+        "signals": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["highComplexityFiles", "filesWithoutNearbyTests", "frequentChangeFiles"],
+          "properties": {
+            "highComplexityFiles": { "type": "number" },
+            "filesWithoutNearbyTests": { "type": "number" },
+            "frequentChangeFiles": { "type": "number" }
+          }
+        }
+      }
+    }
+  }
+}

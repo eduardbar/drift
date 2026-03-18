@@ -94,3 +94,12 @@ export interface AIOutput {
     recommended_action: string
   }
 }
+
+export interface DriftOutputMetadata {
+  $schema: string
+  toolVersion: string
+}
+
+export type DriftReportJson = DriftReport & DriftOutputMetadata
+
+export type AIOutputJson = AIOutput & DriftOutputMetadata

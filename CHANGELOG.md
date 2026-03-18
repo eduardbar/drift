@@ -18,6 +18,28 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- `drift init`: project scaffolding command for `drift.config.ts`, optional CI workflow, and baseline generation.
+- `drift doctor`: environment and project diagnostics command with optional JSON output.
+- `drift guard [path]`: non-regression gate command for diff-aware (`--base`) or baseline-aware (`--baseline`) quality checks.
+- Output schema contracts and metadata for machine-consumable outputs (v1 JSON schemas).
+- SARIF mapper/public API and SARIF output support for `scan`, `ci`, `diff`, `review`, and `trust`.
+- CI integration update for SARIF publishing in pull request workflows and action v2 contract alignment.
+
+### Changed
+
+- Unified CLI output format handling around `--format` with legacy alias compatibility (`--json`, `--ai`, `--comment`, `--markdown`).
+- `docs/rules-catalog.md` and command format matrix updated to reflect current SARIF-capable commands and 35-rule catalog.
+
+### Tests
+
+- Added and expanded coverage for init/doctor/guard flows and SARIF paths (`tests/phase1-init-doctor-guard.test.ts`, `tests/cli-sarif.test.ts`, `tests/sarif.test.ts`, `tests/format.test.ts`).
+
+### Docs
+
+- Updated trust-core and release-oriented docs to match current CLI behavior, trust artifacts, and SARIF workflow expectations.
+
 ---
 
 ## [0.9.0] - 2026-02-24

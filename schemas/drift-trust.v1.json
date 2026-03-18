@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/drift-trust.v1.json",
+  "title": "drift trust v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "toolVersion",
+    "scannedAt",
+    "targetPath",
+    "trust_score",
+    "merge_risk",
+    "top_reasons",
+    "fix_priorities"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "schemas/drift-trust.v1.json"
+    },
+    "toolVersion": {
+      "type": "string"
+    },
+    "scannedAt": {
+      "type": "string"
+    },
+    "targetPath": {
+      "type": "string"
+    },
+    "trust_score": {
+      "type": "number"
+    },
+    "merge_risk": {
+      "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+    },
+    "top_reasons": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["label", "detail", "impact"],
+        "properties": {
+          "label": { "type": "string" },
+          "detail": { "type": "string" },
+          "impact": { "type": "number" }
+        }
+      }
+    },
+    "fix_priorities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rank",
+          "rule",
+          "severity",
+          "occurrences",
+          "estimated_trust_gain",
+          "effort",
+          "suggestion"
+        ],
+        "properties": {
+          "rank": { "type": "number" },
+          "rule": { "type": "string" },
+          "severity": { "enum": ["error", "warning", "info"] },
+          "occurrences": { "type": "number" },
+          "estimated_trust_gain": { "type": "number" },
+          "effort": { "enum": ["low", "medium", "high"] },
+          "suggestion": { "type": "string" },
+          "confidence": { "enum": ["low", "medium", "high"] },
+          "explanation": { "type": "string" },
+          "systemic": { "type": "boolean" }
+        }
+      }
+    },
+    "diff_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseRef",
+        "status",
+        "scoreDelta",
+        "newIssues",
+        "resolvedIssues",
+        "filesChanged",
+        "penalty",
+        "bonus",
+        "netImpact"
+      ],
+      "properties": {
+        "baseRef": { "type": "string" },
+        "status": { "enum": ["improved", "regressed", "neutral"] },
+        "scoreDelta": { "type": "number" },
+        "newIssues": { "type": "number" },
+        "resolvedIssues": { "type": "number" },
+        "filesChanged": { "type": "number" },
+        "penalty": { "type": "number" },
+        "bonus": { "type": "number" },
+        "netImpact": { "type": "number" }
+      }
+    },
+    "advanced_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["team_guidance"],
+      "properties": {
+        "comparison": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source", "trend", "summary"],
+          "properties": {
+            "source": { "enum": ["previous-trust-json", "snapshot-history"] },
+            "trend": { "enum": ["improving", "regressing", "stable"] },
+            "summary": { "type": "string" },
+            "trust_delta": { "type": "number" },
+            "previous_trust_score": { "type": "number" },
+            "previous_merge_risk": { "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+            "snapshot_score_delta": { "type": "number" },
+            "snapshot_label": { "type": "string" },
+            "snapshot_timestamp": { "type": "string" }
+          }
+        },
+        "team_guidance": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}

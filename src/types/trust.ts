@@ -1,4 +1,4 @@
-import type { DriftIssue } from './core.js'
+import type { DriftIssue, DriftOutputMetadata } from './core.js'
 
 export type MergeRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
 
@@ -81,6 +81,8 @@ export interface DriftTrustReport {
   diff_context?: TrustDiffContext
   advanced_context?: TrustAdvancedContext
 }
+
+export type DriftTrustReportJson = DriftTrustReport & DriftOutputMetadata
 
 export interface TrustKpiDiagnostic {
   level: 'warning' | 'error'

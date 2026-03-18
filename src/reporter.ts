@@ -1,48 +1,28 @@
-import type { FileReport, DriftReport, DriftIssue, AIOutput, AIIssue } from './types.js'
+import type {
+  FileReport,
+  DriftReport,
+  DriftIssue,
+  AIOutput,
+  AIIssue,
+  AIOutputJson,
+  DriftReportJson,
+} from './types.js'
 import { scoreToGradeText, severityIcon } from './utils.js'
 import { computeRepoQuality, computeMaintenanceRisk } from './metrics.js'
-
-const FIX_SUGGESTIONS: Record<string, string> = {
-  'large-file': 'Consider splitting this file into smaller modules with single responsibility',
-  'large-function': 'Extract logic into smaller functions with descriptive names',
-  'debug-leftover': 'Remove this console.log or replace with proper logging library',
-  'dead-code': 'Remove unused import to keep code clean',
-  'duplicate-function-name': 'Consolidate with existing function or rename to clarify different behavior',
-  'any-abuse': "Replace 'any' with proper type definition",
-  'catch-swallow': 'Add error handling or logging in catch block',
-  'no-return-type': 'Add explicit return type for better type safety',
-}
-
-const RULE_EFFORT: Record<string, 'low' | 'medium' | 'high'> = {
-  'debug-leftover': 'low',
-  'dead-code': 'low',
-  'no-return-type': 'low',
-  'any-abuse': 'medium',
-  'catch-swallow': 'medium',
-  'large-file': 'high',
-  'large-function': 'high',
-  'duplicate-function-name': 'high',
-}
-
-const SEVERITY_ORDER: Record<string, number> = { error: 0, warning: 1, info: 2 }
-const EFFORT_ORDER: Record<string, number> = { low: 0, medium: 1, high: 2 }
-const AI_SIGNAL_RULES = new Set([
-  'over-commented',
-  'hardcoded-config',
-  'inconsistent-error-handling',
-  'unnecessary-abstraction',
-  'naming-inconsistency',
-  'comment-contradiction',
-  'promise-style-mix',
-  'any-abuse',
-  'ai-code-smell',
-])
-
-const AI_CODE_SMELL_BOOST = 20
-const AI_TRIGGER_LIMIT = 4
-const AI_LIKELIHOOD_THRESHOLD = 35
-const AI_SMELL_SCORE_MULTIPLIER = 15
-const AI_SUSPECTED_LIMIT = 10
+import { OUTPUT_SCHEMA, withOutputMetadata } from './output-metadata.js'
+import {
+  AI_CODE_SMELL_BOOST,
+  AI_LIKELIHOOD_THRESHOLD,
+  AI_SIGNAL_RULES,
+  AI_SMELL_SCORE_MULTIPLIER,
+  AI_SUSPECTED_LIMIT,
+  AI_TRIGGER_LIMIT,
+  EFFORT_ORDER,
+  FIX_SUGGESTIONS,
+  RULE_EFFORT,
+  SEVERITY_ORDER,
+  type DriftIssueWithFile,
+} from './reporter-constants.js'
 
 function summarizeIssues(allIssues: DriftIssue[]): DriftReport['summary'] {
   const byRule: Record<string, number> = {}
@@ -64,10 +44,10 @@ function calculateTotalScore(files: FileReport[]): number {
   return Math.round(files.reduce((sum, file) => sum + file.score, 0) / files.length)
 }
 
-function baseReportDefaults(summary: DriftReport['summary'], targetPath: string, files: FileReport[]): DriftReport {
+function baseReportDefaults(summary: DriftReport['summary'], targetPath: string, files: FileReport[]): DriftReportJson {
   const filesWithIssues = files.filter((file) => file.issues.length > 0).sort((a, b) => b.score - a.score)
 
-  return {
+  const report: DriftReport = {
     scannedAt: new Date().toISOString(),
     targetPath,
     files: filesWithIssues,
@@ -95,12 +75,14 @@ function baseReportDefaults(summary: DriftReport['summary'], targetPath: string,
       },
     },
   }
+
+  return withOutputMetadata(report, OUTPUT_SCHEMA.report)
 }
 
-export function buildReport(targetPath: string, files: FileReport[]): DriftReport {
+export function buildReport(targetPath: string, files: FileReport[]): DriftReportJson {
   const allIssues = files.flatMap((f) => f.issues)
   const summary = summarizeIssues(allIssues)
-  const baseReport: DriftReport = baseReportDefaults(summary, targetPath, files)
+  const baseReport = baseReportDefaults(summary, targetPath, files)
 
   baseReport.quality = computeRepoQuality(targetPath, files)
   baseReport.maintenanceRisk = computeMaintenanceRisk(baseReport)
@@ -173,8 +155,8 @@ export function formatMarkdown(report: DriftReport): string {
   return lines.join('\n')
 }
 
-function collectAllIssues(report: DriftReport): Array<{ file: string; issue: DriftIssue }> {
-  const all: Array<{ file: string; issue: DriftIssue }> = []
+function collectAllIssues(report: DriftReport): DriftIssueWithFile[] {
+  const all: DriftIssueWithFile[] = []
   for (const file of report.files) {
     for (const issue of file.issues) {
       all.push({ file: file.path, issue })
@@ -183,7 +165,7 @@ function collectAllIssues(report: DriftReport): Array<{ file: string; issue: Dri
   return all
 }
 
-function sortIssues(issues: Array<{ file: string; issue: DriftIssue }>): Array<{ file: string; issue: DriftIssue }> {
+function sortIssues(issues: DriftIssueWithFile[]): DriftIssueWithFile[] {
   return issues.sort((a, b) => {
     const sevDiff = SEVERITY_ORDER[a.issue.severity] - SEVERITY_ORDER[b.issue.severity]
     if (sevDiff !== 0) return sevDiff
@@ -193,7 +175,7 @@ function sortIssues(issues: Array<{ file: string; issue: DriftIssue }>): Array<{
   })
 }
 
-function buildAIIssue(item: { file: string; issue: DriftIssue }, rank: number): AIIssue {
+function buildAIIssue(item: DriftIssueWithFile, rank: number): AIIssue {
   return {
     rank,
     file: item.file,
@@ -265,7 +247,7 @@ function computeAILikelihood(report: DriftReport): {
   }
 }
 
-export function formatAIOutput(report: DriftReport): AIOutput {
+export function formatAIOutput(report: DriftReport): AIOutputJson {
   const allIssues = collectAllIssues(report)
   const sortedIssues = sortIssues(allIssues)
   const priorityOrder = sortedIssues.map((item, i) => buildAIIssue(item, i + 1))
@@ -273,7 +255,7 @@ export function formatAIOutput(report: DriftReport): AIOutput {
   const grade = scoreToGradeText(report.totalScore)
   const aiLikelihood = computeAILikelihood(report)
 
-  return {
+  const output: AIOutput = {
     summary: {
       score: report.totalScore,
       grade: grade.label.toUpperCase(),
@@ -294,4 +276,6 @@ export function formatAIOutput(report: DriftReport): AIOutput {
       recommended_action: buildRecommendedAction(priorityOrder),
     },
   }
+
+  return withOutputMetadata(output, OUTPUT_SCHEMA.ai)
 }

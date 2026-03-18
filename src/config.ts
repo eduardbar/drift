@@ -3,6 +3,22 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { DriftConfig } from './types.js'
 
+function normalizeLegacyConfig(config: DriftConfig): DriftConfig {
+  if (config.modules !== undefined) {
+    return config
+  }
+
+  const legacyModules = config.moduleBoundaries ?? config.boundaries
+  if (!legacyModules || legacyModules.length === 0) {
+    return config
+  }
+
+  return {
+    ...config,
+    modules: legacyModules,
+  }
+}
+
 /**
  * Load drift.config.ts / .js / .json from the given project root.
  * Returns undefined if no config file is found.
@@ -27,7 +43,8 @@ export async function loadConfig(projectRoot: string): Promise<DriftConfig | und
 
       if (ext === 'json') {
         const { readFileSync } = await import('node:fs')
-        return JSON.parse(readFileSync(candidate, 'utf-8')) as DriftConfig
+        const rawConfig = JSON.parse(readFileSync(candidate, 'utf-8')) as DriftConfig
+        return normalizeLegacyConfig(rawConfig)
       }
 
       // .ts / .js — dynamic import via file URL
@@ -35,7 +52,7 @@ export async function loadConfig(projectRoot: string): Promise<DriftConfig | und
       const mod = await import(fileUrl)
       const config: DriftConfig = mod.default ?? mod
 
-      return config
+      return normalizeLegacyConfig(config)
     } catch { // drift-ignore
       // drift-ignore: catch-swallow — config is optional; load failure is non-fatal
     }

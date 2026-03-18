@@ -16,7 +16,7 @@ function buildCatchTodoEdit(document: vscode.TextDocument, line: number): vscode
   const targetLine = document.lineAt(line)
   const baseIndent = targetLine.text.match(/^\s*/)?.[0] ?? ''
   const indent = `${baseIndent}  `
-  edit.insert(document.uri, new vscode.Position(line + 1, 0), `${indent}// TODO: handle error\n`)
+  edit.insert(document.uri, new vscode.Position(line + 1, 0), `${indent}// handle error\n`)
   return edit
 }
 
