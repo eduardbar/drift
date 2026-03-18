@@ -16,102 +16,8 @@ type InitPreset = (typeof INIT_PRESETS)[number]
 
 type InitBaselineGrade = 'CLEAN' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
 
-function mapScoreToBaselineGrade(score: number): InitBaselineGrade {
-  const { label } = scoreToGrade(score)
-
-  if (label === 'clean') return 'CLEAN'
-  if (label === 'low') return 'LOW'
-  if (label === 'moderate') return 'MEDIUM'
-  if (label === 'high') return 'HIGH'
-
-  return 'CRITICAL'
-}
-
-/**
- * Initialize drift configuration with optional presets and scaffolding.
- * 
- * @param projectRoot - Absolute path to project root
- * @param options - Init options from CLI
- */
-export async function runInit(projectRoot: string, options: InitOptions): Promise<void> {
-  const tasks: string[] = []
-
-  // 1. Generate drift.config.ts if preset is provided
-  if (options.preset) {
-    if (!isInitPreset(options.preset)) {
-      throw new Error(`Invalid preset '${options.preset}'. Use one of: ${INIT_PRESETS.join(', ')}`)
-    }
-
-    const configPath = join(projectRoot, 'drift.config.ts')
-    if (existsSync(configPath)) {
-      process.stderr.write(`  ⚠️  drift.config.ts already exists, skipping config generation\n`)
-    } else {
-      const configContent = generateConfigPreset(options.preset)
-      writeFileSync(configPath, configContent, 'utf8')
-      tasks.push('✅ Generated drift.config.ts')
-    }
-  }
-
-  // 2. Generate GitHub Actions workflow if --ci flag is set
-  if (options.ci) {
-    const workflowDir = join(projectRoot, '.github', 'workflows')
-    const workflowPath = join(workflowDir, 'drift-review.yml')
-    
-    if (existsSync(workflowPath)) {
-      process.stderr.write(`  ⚠️  .github/workflows/drift-review.yml already exists, skipping workflow generation\n`)
-    } else {
-      if (!existsSync(workflowDir)) {
-        mkdirSync(workflowDir, { recursive: true })
-      }
-      const workflowContent = generateGitHubWorkflow()
-      writeFileSync(workflowPath, workflowContent, 'utf8')
-      tasks.push('✅ Generated .github/workflows/drift-review.yml')
-    }
-  }
-
-  // 3. Create drift-baseline.json if --baseline flag is set
-  if (options.baseline) {
-    const baselinePath = join(projectRoot, 'drift-baseline.json')
-    if (existsSync(baselinePath)) {
-      process.stderr.write(`  ⚠️  drift-baseline.json already exists, skipping baseline creation\n`)
-    } else {
-      process.stderr.write(`  Scanning project to create baseline...\n`)
-      const config = await loadConfig(projectRoot)
-      const files = analyzeProject(projectRoot, config)
-      const report = buildReport(projectRoot, files)
-      
-      const baseline = {
-        createdAt: new Date().toISOString(),
-        score: report.totalScore,
-        grade: mapScoreToBaselineGrade(report.totalScore),
-        totalIssues: report.totalIssues,
-        files: report.files.length,
-      }
-      
-      writeFileSync(baselinePath, JSON.stringify(baseline, null, 2), 'utf8')
-      tasks.push(`✅ Created drift-baseline.json (score: ${report.totalScore}/100, grade: ${baseline.grade})`)
-    }
-  }
-
-  // Print summary
-  if (tasks.length === 0) {
-    process.stdout.write('\n  No actions taken. Use --preset, --ci, or --baseline flags.\n\n')
-  } else {
-    process.stdout.write('\n  drift init complete:\n\n')
-    for (const task of tasks) {
-      process.stdout.write(`    ${task}\n`)
-    }
-    process.stdout.write('\n')
-  }
-}
-
-function isInitPreset(value: string): value is InitPreset {
-  return INIT_PRESETS.includes(value as InitPreset)
-}
-
-function generateConfigPreset(preset: InitPreset): string {
-  const presets: Record<typeof preset, string> = {
-    'node-backend': `import type { DriftConfig } from '@eduardbar/drift'
+const CONFIG_PRESET_CONTENT: Record<InitPreset, string> = {
+  'node-backend': `import type { DriftConfig } from '@eduardbar/drift'
 
 export default {
   layers: [
@@ -138,7 +44,7 @@ export default {
   ],
 } satisfies DriftConfig
 `,
-    'react-app': `import type { DriftConfig } from '@eduardbar/drift'
+  'react-app': `import type { DriftConfig } from '@eduardbar/drift'
 
 export default {
   layers: [
@@ -170,7 +76,7 @@ export default {
   ],
 } satisfies DriftConfig
 `,
-    'hexagonal': `import type { DriftConfig } from '@eduardbar/drift'
+  hexagonal: `import type { DriftConfig } from '@eduardbar/drift'
 
 export default {
   layers: [
@@ -192,7 +98,7 @@ export default {
   ],
 } satisfies DriftConfig
 `,
-    'monorepo': `import type { DriftConfig } from '@eduardbar/drift'
+  monorepo: `import type { DriftConfig } from '@eduardbar/drift'
 
 export default {
   modules: [
@@ -214,13 +120,9 @@ export default {
   ],
 } satisfies DriftConfig
 `,
-  }
-
-  return presets[preset]
 }
 
-function generateGitHubWorkflow(): string {
-  return `name: drift PR Review
+const GITHUB_WORKFLOW_TEMPLATE = `name: drift PR Review
 
 on:
   pull_request:
@@ -257,19 +159,19 @@ jobs:
           script: |
             const fs = require('fs')
             const comment = fs.readFileSync('drift-comment.md', 'utf8')
-            
+
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
             })
-            
-            const botComment = comments.find(c => 
+
+            const botComment = comments.find(c =>
               c.user?.type === 'Bot' && c.body?.includes('<!-- drift-review -->')
             )
-            
+
             const body = '<!-- drift-review -->\\n\\n' + comment
-            
+
             if (botComment) {
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
@@ -286,4 +188,111 @@ jobs:
               })
             }
 `
+
+function mapScoreToBaselineGrade(score: number): InitBaselineGrade {
+  const { label } = scoreToGrade(score)
+
+  if (label === 'clean') return 'CLEAN'
+  if (label === 'low') return 'LOW'
+  if (label === 'moderate') return 'MEDIUM'
+  if (label === 'high') return 'HIGH'
+
+  return 'CRITICAL'
+}
+
+/**
+ * Initialize drift configuration with optional presets and scaffolding.
+ * 
+ * @param projectRoot - Absolute path to project root
+ * @param options - Init options from CLI
+ */
+export async function runInit(projectRoot: string, options: InitOptions): Promise<void> {
+  const tasks: string[] = []
+
+  maybeWritePresetConfig(projectRoot, options.preset, tasks)
+  maybeWriteCiWorkflow(projectRoot, options.ci, tasks)
+  await maybeWriteBaseline(projectRoot, options.baseline, tasks)
+
+  if (tasks.length === 0) {
+    process.stdout.write('\n  No actions taken. Use --preset, --ci, or --baseline flags.\n\n')
+  } else {
+    process.stdout.write('\n  drift init complete:\n\n')
+    for (const task of tasks) {
+      process.stdout.write(`    ${task}\n`)
+    }
+    process.stdout.write('\n')
+  }
+}
+
+function isInitPreset(value: string): value is InitPreset {
+  return INIT_PRESETS.includes(value as InitPreset)
+}
+
+function maybeWritePresetConfig(projectRoot: string, preset: string | undefined, tasks: string[]): void {
+  if (!preset) return
+
+  if (!isInitPreset(preset)) {
+    throw new Error(`Invalid preset '${preset}'. Use one of: ${INIT_PRESETS.join(', ')}`)
+  }
+
+  const configPath = join(projectRoot, 'drift.config.ts')
+  if (existsSync(configPath)) {
+    process.stderr.write(`  ⚠️  drift.config.ts already exists, skipping config generation\n`)
+    return
+  }
+
+  writeFileSync(configPath, generateConfigPreset(preset), 'utf8')
+  tasks.push('✅ Generated drift.config.ts')
+}
+
+function maybeWriteCiWorkflow(projectRoot: string, ci: boolean | undefined, tasks: string[]): void {
+  if (!ci) return
+
+  const workflowDir = join(projectRoot, '.github', 'workflows')
+  const workflowPath = join(workflowDir, 'drift-review.yml')
+  if (existsSync(workflowPath)) {
+    process.stderr.write(`  ⚠️  .github/workflows/drift-review.yml already exists, skipping workflow generation\n`)
+    return
+  }
+
+  if (!existsSync(workflowDir)) {
+    mkdirSync(workflowDir, { recursive: true })
+  }
+
+  writeFileSync(workflowPath, generateGitHubWorkflow(), 'utf8')
+  tasks.push('✅ Generated .github/workflows/drift-review.yml')
+}
+
+async function maybeWriteBaseline(projectRoot: string, baseline: boolean | undefined, tasks: string[]): Promise<void> {
+  if (!baseline) return
+
+  const baselinePath = join(projectRoot, 'drift-baseline.json')
+  if (existsSync(baselinePath)) {
+    process.stderr.write(`  ⚠️  drift-baseline.json already exists, skipping baseline creation\n`)
+    return
+  }
+
+  process.stderr.write('  Scanning project to create baseline...\n')
+  const config = await loadConfig(projectRoot)
+  const files = analyzeProject(projectRoot, config)
+  const report = buildReport(projectRoot, files)
+
+  const baselineSnapshot = {
+    createdAt: new Date().toISOString(),
+    score: report.totalScore,
+    grade: mapScoreToBaselineGrade(report.totalScore),
+    totalIssues: report.totalIssues,
+    files: report.files.length,
+  }
+
+  writeFileSync(baselinePath, JSON.stringify(baselineSnapshot, null, 2), 'utf8')
+  tasks.push(`✅ Created drift-baseline.json (score: ${report.totalScore}/100, grade: ${baselineSnapshot.grade})`)
+}
+
+function generateConfigPreset(preset: InitPreset): string {
+  return CONFIG_PRESET_CONTENT[preset]
+}
+
+function generateGitHubWorkflow(): string {
+  return GITHUB_WORKFLOW_TEMPLATE
 }
