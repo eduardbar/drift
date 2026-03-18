@@ -67,3 +67,11 @@ export type {
   GuardEvaluation,
   GuardResult,
 } from './guard.js'
+
+export type {
+  SarifLevel,
+  DriftSarifRule,
+  DriftSarifResult,
+  DriftSarifRun,
+  DriftSarifLog,
+} from './sarif.js'

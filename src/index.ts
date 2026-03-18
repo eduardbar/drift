@@ -29,6 +29,14 @@ export {
   formatTrustKpiConsole,
   formatTrustKpiJson,
 } from './trust-kpi.js'
+export { toSarif } from './sarif.js'
+export type {
+  SarifLevel,
+  DriftSarifRule,
+  DriftSarifResult,
+  DriftSarifRun,
+  DriftSarifLog,
+} from './sarif.js'
 export { generateArchitectureMap, generateArchitectureSvg } from './map.js'
 export type {
   DriftReport,
