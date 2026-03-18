@@ -46,6 +46,7 @@ import { computeTrustKpis, formatTrustKpiConsole, formatTrustKpiJson } from './t
 import { runBenchmarkCli } from './benchmark.js'
 import { runInit, INIT_PRESETS } from './init.js'
 import { runDoctor } from './doctor.js'
+import { resolveOutputFormat } from './format.js'
 import type { DriftDiff, DriftTrustReport, DriftAnalysisOptions, MergeRiskLevel, GuardResult, GuardThresholds } from './types.js'
 import type { TrustGatePolicyExplanation } from './trust.js'
 import type { SnapshotHistory } from './snapshot.js'
@@ -228,11 +229,12 @@ addResourceOptions(
     .command('scan [path]', { isDefault: true })
   .description('Scan a directory for vibe coding drift')
   .option('-o, --output <file>', 'Write report to a Markdown file')
+  .option('--format <type>', 'Output format: console|json|markdown|ai|sarif')
   .option('--json', 'Output raw JSON report')
   .option('--ai', 'Output AI-optimized JSON for LLM consumption')
   .option('--fix', 'Show fix suggestions for each issue')
   .option('--min-score <n>', 'Exit with code 1 if overall score exceeds this threshold', '0')
-  .action(async (targetPath: string | undefined, options: { output?: string; json?: boolean; ai?: boolean; fix?: boolean; minScore: string } & ResourceOptionFlags) => {
+  .action(async (targetPath: string | undefined, options: { output?: string; format?: string; json?: boolean; ai?: boolean; fix?: boolean; minScore: string } & ResourceOptionFlags) => {
     const resolvedPath = resolve(targetPath ?? '.')
 
     process.stderr.write(`\nScanning ${resolvedPath}...\n`)
@@ -241,14 +243,30 @@ addResourceOptions(
     process.stderr.write(`  Found ${files.length} TypeScript file(s)\n\n`)
     const report = buildReport(resolvedPath, files)
 
-    if (options.ai) {
+    const format = resolveOutputFormat({
+      command: 'scan',
+      format: options.format,
+      supported: ['console', 'json', 'markdown', 'ai'],
+      legacyAliases: [
+        { flag: 'json', used: options.json, mapsTo: 'json' },
+        { flag: 'ai', used: options.ai, mapsTo: 'ai' },
+      ],
+      onWarning: (message) => process.stderr.write(`${message}\n`),
+    })
+
+    if (format === 'ai') {
       const aiOutput = formatAIOutput(report)
       process.stdout.write(JSON.stringify(aiOutput, null, 2))
       return
     }
 
-    if (options.json) {
+    if (format === 'json') {
       process.stdout.write(JSON.stringify(report, null, 2))
+      return
+    }
+
+    if (format === 'markdown') {
+      process.stdout.write(`${formatMarkdown(report)}\n`)
       return
     }
 
@@ -295,8 +313,9 @@ addResourceOptions(
   program
     .command('diff [ref]')
   .description('Compare current state against a git ref (default: HEAD~1)')
+  .option('--format <type>', 'Output format: console|json|markdown|ai|sarif')
   .option('--json', 'Output raw JSON diff')
-  .action(async (ref: string | undefined, options: { json?: boolean } & ResourceOptionFlags) => {
+  .action(async (ref: string | undefined, options: { format?: string; json?: boolean } & ResourceOptionFlags) => {
     const baseRef = ref ?? 'HEAD~1'
     const projectPath = resolve('.')
     const analysisOptions = resolveAnalysisOptions(options)
@@ -305,6 +324,14 @@ addResourceOptions(
 
     try {
       process.stderr.write(`\nComputing diff: HEAD vs ${baseRef}...\n\n`)
+
+      const format = resolveOutputFormat({
+        command: 'diff',
+        format: options.format,
+        supported: ['console', 'json'],
+        legacyAliases: [{ flag: 'json', used: options.json, mapsTo: 'json' }],
+        onWarning: (message) => process.stderr.write(`${message}\n`),
+      })
 
       // Scan current state
       const config = await loadConfig(projectPath)
@@ -328,7 +355,7 @@ addResourceOptions(
 
       const diff = computeDiff(remappedBase, currentReport, baseRef)
 
-      if (options.json) {
+      if (format === 'json') {
         process.stdout.write(JSON.stringify(diff, null, 2) + '\n')
       } else {
         printDiff(diff)
@@ -404,17 +431,30 @@ program
   .command('review')
   .description('Review drift against a base ref and output PR markdown')
   .option('--base <ref>', 'Git base ref to compare against', 'origin/main')
+  .option('--format <type>', 'Output format: console|json|markdown|ai|sarif')
   .option('--json', 'Output structured review JSON')
   .option('--comment', 'Output markdown comment body')
   .option('--fail-on <n>', 'Exit with code 1 if score delta is >= n')
-  .action(async (options: { base: string; json?: boolean; comment?: boolean; failOn?: string }) => {
+  .action(async (options: { base: string; format?: string; json?: boolean; comment?: boolean; failOn?: string }) => {
     try {
       const review = await generateReview(resolve('.'), options.base)
+      const format = resolveOutputFormat({
+        command: 'review',
+        format: options.format,
+        supported: ['console', 'json', 'markdown'],
+        legacyAliases: [
+          { flag: 'json', used: options.json, mapsTo: 'json' },
+          { flag: 'comment', used: options.comment, mapsTo: 'markdown' },
+        ],
+        onWarning: (message) => process.stderr.write(`${message}\n`),
+      })
 
-      if (options.json) {
+      if (format === 'json') {
         process.stdout.write(JSON.stringify(review, null, 2) + '\n')
+      } else if (format === 'markdown') {
+        process.stdout.write(`${review.markdown}\n`)
       } else {
-        process.stdout.write((options.comment ? review.markdown : `${review.summary}\n\n${review.markdown}`) + '\n')
+        process.stdout.write(`${review.summary}\n\n${review.markdown}\n`)
       }
 
       const failOn = options.failOn ? Number(options.failOn) : undefined
@@ -433,6 +473,7 @@ addResourceOptions(
     .command('trust [path]')
   .description('Compute merge trust baseline from drift signals')
   .option('--base <ref>', 'Git base ref for diff-aware trust scoring')
+  .option('--format <type>', 'Output format: console|json|markdown|ai|sarif')
   .option('--json', 'Output structured trust JSON')
   .option('--markdown', 'Output trust report as markdown (PR comment ready)')
   .option('-o, --output <file>', 'Write trust output to file')
@@ -449,6 +490,7 @@ addResourceOptions(
     targetPath: string | undefined,
     options: {
       base?: string
+      format?: string
       json?: boolean
       markdown?: boolean
       output?: string
@@ -536,7 +578,21 @@ addResourceOptions(
         },
       })
 
-      const rendered = `${renderTrustOutput(trust, options)}\n`
+      const format = resolveOutputFormat({
+        command: 'trust',
+        format: options.format,
+        supported: ['console', 'json', 'markdown'],
+        legacyAliases: [
+          { flag: 'json', used: options.json, mapsTo: 'json' },
+          { flag: 'markdown', used: options.markdown, mapsTo: 'markdown' },
+        ],
+        onWarning: (message) => process.stderr.write(`${message}\n`),
+      })
+
+      const rendered = `${renderTrustOutput(trust, {
+        json: format === 'json',
+        markdown: format === 'markdown',
+      })}\n`
 
       process.stdout.write(rendered)
 
@@ -729,14 +785,29 @@ addResourceOptions(
   program
     .command('ci [path]')
   .description('Emit GitHub Actions annotations and step summary')
+  .option('--format <type>', 'Output format: console|json|markdown|ai|sarif')
+  .option('--json', 'Output raw JSON report (legacy alias for --format json)')
   .option('--min-score <n>', 'Exit with code 1 if overall score exceeds this threshold', '0')
-  .action(async (targetPath: string | undefined, options: { minScore: string } & ResourceOptionFlags) => {
+  .action(async (targetPath: string | undefined, options: { format?: string; json?: boolean; minScore: string } & ResourceOptionFlags) => {
     const resolvedPath = resolve(targetPath ?? '.')
     const config = await loadConfig(resolvedPath)
     const files = analyzeProject(resolvedPath, config, resolveAnalysisOptions(options))
     const report = buildReport(resolvedPath, files)
-    emitCIAnnotations(report)
-    printCISummary(report)
+
+    const format = resolveOutputFormat({
+      command: 'ci',
+      format: options.format,
+      supported: ['console', 'json'],
+      legacyAliases: [{ flag: 'json', used: options.json, mapsTo: 'json' }],
+      onWarning: (message) => process.stderr.write(`${message}\n`),
+    })
+
+    if (format === 'json') {
+      process.stdout.write(JSON.stringify(report, null, 2) + '\n')
+    } else {
+      emitCIAnnotations(report)
+      printCISummary(report)
+    }
     const minScore = Number(options.minScore)
     if (minScore > 0 && report.totalScore > minScore) {
       process.exit(1)
