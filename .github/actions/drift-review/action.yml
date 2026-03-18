@@ -97,29 +97,29 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        TRUST_JSON_PATH="${{ steps.files.outputs.trust_json }}" GITHUB_OUTPUT_PATH="$GITHUB_OUTPUT" node --input-type=module -e "
-          import fs from 'node:fs'
+        TRUST_JSON_PATH="${{ steps.files.outputs.trust_json }}" GITHUB_OUTPUT_PATH="$GITHUB_OUTPUT" node --input-type=module <<'NODE'
+        import fs from 'node:fs'
 
-          const payload = JSON.parse(fs.readFileSync(process.env.TRUST_JSON_PATH, 'utf8'))
-          const trust = payload.trust_score
-          const risk = payload.merge_risk
-          const diff = payload.diff_context ?? {}
+        const payload = JSON.parse(fs.readFileSync(process.env.TRUST_JSON_PATH, 'utf8'))
+        const trust = payload.trust_score
+        const risk = payload.merge_risk
+        const diff = payload.diff_context ?? {}
 
-          if (typeof trust !== 'number') {
-            throw new Error('drift trust JSON missing numeric trust_score')
-          }
-          if (typeof risk !== 'string') {
-            throw new Error('drift trust JSON missing merge_risk')
-          }
+        if (typeof trust !== 'number') {
+          throw new Error('drift trust JSON missing numeric trust_score')
+        }
+        if (typeof risk !== 'string') {
+          throw new Error('drift trust JSON missing merge_risk')
+        }
 
-          const lines = [
-            `trust_score=${trust}`,
-            `merge_risk=${risk}`,
-            `new_issues=${diff.newIssues ?? 'n/a'}`,
-            `resolved_issues=${diff.resolvedIssues ?? 'n/a'}`,
-          ]
-          fs.appendFileSync(process.env.GITHUB_OUTPUT_PATH, lines.join('\\n') + '\\n')
-        "
+        const lines = [
+          `trust_score=${trust}`,
+          `merge_risk=${risk}`,
+          `new_issues=${diff.newIssues ?? 'n/a'}`,
+          `resolved_issues=${diff.resolvedIssues ?? 'n/a'}`,
+        ]
+        fs.appendFileSync(process.env.GITHUB_OUTPUT_PATH, lines.join('\n') + '\n')
+        NODE
 
     - name: Enforce trust gate
       if: inputs.fail-on-gate == 'true'
