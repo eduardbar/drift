@@ -126,6 +126,7 @@ drift scan ./src --low-memory --max-file-size-kb 1024
 | Flag | Description |
 |------|-------------|
 | `--output <file>` | Write Markdown report to a file instead of stdout |
+| `--format <type>` | Output format: `console\|json\|markdown\|ai\|sarif` |
 | `--json` | Output raw `DriftReport` JSON |
 | `--ai` | Output structured JSON optimized for LLM consumption (Claude, GPT, etc.) |
 | `--fix` | Print inline fix suggestions for each detected issue |
@@ -200,6 +201,7 @@ drift diff                # HEAD vs HEAD~1
 drift diff HEAD~3         # HEAD vs 3 commits ago
 drift diff main           # HEAD vs branch main
 drift diff abc1234        # HEAD vs a specific commit
+drift diff --format sarif # Output SARIF for code scanning
 drift diff --json         # Output raw JSON diff
 ```
 
@@ -207,6 +209,7 @@ drift diff --json         # Output raw JSON diff
 
 | Flag | Description |
 |------|-------------|
+| `--format <type>` | Output format: `console\|json\|sarif` |
 | `--json` | Output raw JSON diff |
 
 Shows score delta, issues introduced, and issues resolved since the given ref.
@@ -221,12 +224,14 @@ Review drift against a git base ref and output a PR-ready markdown comment.
 drift review --base origin/main
 drift review --base main --comment
 drift review --base HEAD~3 --json
+drift review --base origin/main --format sarif
 drift review --base origin/main --fail-on 5
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--base <ref>` | Git base ref to compare against (default: `origin/main`) |
+| `--format <type>` | Output format: `console\|json\|markdown\|sarif` |
 | `--json` | Output structured review JSON |
 | `--comment` | Print only the markdown body for PR comments |
 | `--fail-on <n>` | Exit code 1 when score delta is greater than or equal to `n` |
@@ -245,6 +250,7 @@ drift trust ./src
 drift trust ./src --json
 drift trust ./src --base origin/main
 drift trust ./src --base origin/main --markdown
+drift trust ./src --format sarif
 drift trust ./src --markdown --output trust.md
 drift trust ./src --min-trust 45
 drift trust ./src --max-risk HIGH
@@ -258,6 +264,7 @@ drift trust ./src --advanced-trust --history-file ./drift-history.json --markdow
 | Flag | Description |
 |------|-------------|
 | `--base <ref>` | Compare against a git base ref and include deterministic diff-aware penalties/bonuses |
+| `--format <type>` | Output format: `console\|json\|markdown\|sarif` |
 | `--json` | Output structured trust JSON (`trust_score`, `merge_risk`, `top_reasons`, `fix_priorities`, optional `diff_context`) |
 | `--markdown` | Output PR-ready markdown trust summary |
 | `--output <file>` | Write selected trust output format to file |
@@ -386,6 +393,7 @@ Emit GitHub Actions annotations and a step summary. Designed to run inside a CI 
 ```bash
 drift ci                  # scan current directory
 drift ci ./src
+drift ci ./src --format sarif
 drift ci ./src --min-score 60
 ```
 
@@ -393,6 +401,7 @@ drift ci ./src --min-score 60
 
 | Flag | Description |
 |------|-------------|
+| `--format <type>` | Output format: `console\|json\|sarif` |
 | `--min-score <n>` | Exit with code 1 if the overall score strictly exceeds this threshold |
 
 Outputs `::error` and `::warning` annotations visible in the PR diff. Writes a markdown summary to `$GITHUB_STEP_SUMMARY`.
@@ -665,6 +674,18 @@ Quick local SARIF export:
 
 ```bash
 drift scan ./src --format sarif > drift.sarif
+```
+
+Example GitHub Code Scanning upload with SARIF:
+
+```yaml
+- name: Generate drift SARIF
+  run: npx @eduardbar/drift scan ./src --format sarif > drift.sarif
+
+- name: Upload SARIF to Code Scanning
+  uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: drift.sarif
 ```
 
 Default gate behavior in this repo:
