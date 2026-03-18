@@ -43,10 +43,11 @@ import {
 } from './trust.js'
 import { computeTrustKpis, formatTrustKpiConsole, formatTrustKpiJson } from './trust-kpi.js'
 import { runBenchmarkCli } from './benchmark.js'
+import { runInit, INIT_PRESETS } from './init.js'
+import { runDoctor } from './doctor.js'
 import type { DriftDiff, DriftTrustReport, DriftAnalysisOptions, MergeRiskLevel } from './types.js'
 import type { TrustGatePolicyExplanation } from './trust.js'
 import type { SnapshotHistory } from './snapshot.js'
-
 const program = new Command()
 
 type ResourceOptionFlags = {
@@ -176,6 +177,28 @@ addResourceOptions(
     }
   }),
 )
+
+program
+  .command('init')
+  .description('Initialize drift configuration with presets and scaffolding')
+  .option('--preset <type>', `Scaffold config with preset: ${INIT_PRESETS.join(', ')}`)
+  .option('--ci', 'Generate GitHub Actions workflow for drift review')
+  .option('--baseline', 'Create drift-baseline.json with current project score')
+  .action(async (options: { preset?: string; ci?: boolean; baseline?: boolean }) => {
+    const projectRoot = resolve('.')
+    
+    try {
+      await runInit(projectRoot, {
+        preset: options.preset,
+        ci: options.ci,
+        baseline: options.baseline,
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      process.stderr.write(`\n  Error: ${message}\n\n`)
+      process.exit(1)
+    }
+  })
 
 addResourceOptions(
   program
@@ -475,6 +498,20 @@ program
       const message = err instanceof Error ? err.message : String(err)
       process.stderr.write(`\n  Error: ${message}\n\n`)
       process.exit(1)
+    }
+  })
+
+program
+  .command('doctor')
+  .description('Run project environment diagnostics')
+  .option('--json', 'Output structured doctor JSON')
+  .action(async (opts: { json?: boolean }) => {
+    try {
+      await runDoctor(process.cwd(), { json: opts.json })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      process.stderr.write(`\n  Error: ${message}\n\n`)
+      process.exitCode = 1
     }
   })
 
