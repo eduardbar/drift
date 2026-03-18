@@ -664,6 +664,21 @@ Default gate behavior in this repo:
 - fail when trust is below 45
 - fail when merge risk is above `HIGH` (that means `CRITICAL` is blocked)
 
+### GitHub Action contract (v2)
+
+This repo also ships reusable local composite actions:
+
+- `./.github/actions/drift-scan`: score-focused scan gate using `npx @eduardbar/drift@<version>` (no global install).
+- `./.github/actions/drift-review`: trust/review/gate flow for PRs, aligned with `.github/workflows/review-pr.yml`.
+
+`drift-scan` exposes machine-friendly outputs for CI composition:
+- `score`, `grade`, `errors`, `warnings`, `infos`, `total-issues`, `files-affected`, `top-rules`
+
+`drift-review` exposes:
+- `trust-score`, `merge-risk`, `new-issues`, `resolved-issues`, `trust-json`, `trust-markdown`, `review-markdown`
+
+See `.github/actions/drift-scan/README.md` and `.github/actions/drift-review/README.md` for usage details.
+
 ---
 
 ## drift-ignore

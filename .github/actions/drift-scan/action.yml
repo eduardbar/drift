@@ -22,7 +22,7 @@ inputs:
   version:
     description: 'Version of @eduardbar/drift to use'
     required: false
-    default: 'latest'
+    default: '1.3.0'
 
 outputs:
   score:
@@ -31,33 +31,94 @@ outputs:
   grade:
     description: 'The drift grade (CLEAN / LOW / MODERATE / HIGH / CRITICAL)'
     value: ${{ steps.scan.outputs.grade }}
+  errors:
+    description: 'Total error-level issues in the scan'
+    value: ${{ steps.scan.outputs.errors }}
+  warnings:
+    description: 'Total warning-level issues in the scan'
+    value: ${{ steps.scan.outputs.warnings }}
+  infos:
+    description: 'Total info-level issues in the scan'
+    value: ${{ steps.scan.outputs.infos }}
+  total-issues:
+    description: 'Total number of issues in the scan'
+    value: ${{ steps.scan.outputs.total_issues }}
+  files-affected:
+    description: 'Number of files that contain at least one issue'
+    value: ${{ steps.scan.outputs.files_affected }}
+  top-rules:
+    description: 'Top 3 rules as comma-separated pairs rule:count'
+    value: ${{ steps.scan.outputs.top_rules }}
 
 runs:
   using: 'composite'
   steps:
-    - name: Install drift
-      shell: bash
-      run: npm install -g @eduardbar/drift@${{ inputs.version }}
-
     - name: Run drift scan
       id: scan
       shell: bash
       run: |
+        set -euo pipefail
         TMPFILE=$(mktemp)
 
-        # Run scan — write JSON to tmp, progress to stderr (already separate)
-        drift scan ${{ inputs.path }} --ai > "$TMPFILE" 2>/dev/null || true
+        npx --yes "@eduardbar/drift@${{ inputs.version }}" scan "${{ inputs.path }}" --json > "$TMPFILE"
 
-        # Extract score and grade from AIOutput JSON
-        SCORE=$(node -e "const d=JSON.parse(require('fs').readFileSync('$TMPFILE','utf8')); console.log(d.summary.score)")
-        GRADE=$(node -e "const d=JSON.parse(require('fs').readFileSync('$TMPFILE','utf8')); console.log(d.summary.grade)")
+        TMPFILE_PATH="$TMPFILE" GITHUB_OUTPUT_PATH="$GITHUB_OUTPUT" node --input-type=module -e "
+          import fs from 'node:fs'
+
+          const payload = JSON.parse(fs.readFileSync(process.env.TMPFILE_PATH, 'utf8'))
+          const score = payload.totalScore
+          if (typeof score !== 'number') {
+            throw new Error('drift scan JSON did not include numeric totalScore')
+          }
+
+          const grade = score === 0
+            ? 'CLEAN'
+            : score <= 19
+              ? 'LOW'
+              : score <= 44
+                ? 'MODERATE'
+                : score <= 69
+                  ? 'HIGH'
+                  : 'CRITICAL'
+
+          const summary = payload.summary ?? {}
+          const errors = Number(summary.errors ?? 0)
+          const warnings = Number(summary.warnings ?? 0)
+          const infos = Number(summary.infos ?? 0)
+          const totalIssues = Number(payload.totalIssues ?? 0)
+          const filesAffected = Array.isArray(payload.files) ? payload.files.length : 0
+
+          const byRule = summary.byRule && typeof summary.byRule === 'object' ? summary.byRule : {}
+          const topRules = Object.entries(byRule)
+            .sort((a, b) => Number(b[1]) - Number(a[1]))
+            .slice(0, 3)
+            .map(([rule, count]) => `${rule}:${count}`)
+            .join(',')
+
+          const lines = [
+            `score=${score}`,
+            `grade=${grade}`,
+            `errors=${errors}`,
+            `warnings=${warnings}`,
+            `infos=${infos}`,
+            `total_issues=${totalIssues}`,
+            `files_affected=${filesAffected}`,
+            `top_rules=${topRules}`,
+          ]
+
+          fs.appendFileSync(process.env.GITHUB_OUTPUT_PATH, lines.join('\\n') + '\\n')
+          console.log(`Drift Score: ${score}/100 (${grade})`)
+          console.log(`Issue summary: errors=${errors} warnings=${warnings} infos=${infos} total=${totalIssues}`)
+          console.log(`Top rules: ${topRules || 'n/a'}`)
+        "
+
+        SCORE=$(TMPFILE_PATH="$TMPFILE" node --input-type=module -e "
+          import fs from 'node:fs'
+          const payload = JSON.parse(fs.readFileSync(process.env.TMPFILE_PATH, 'utf8'))
+          process.stdout.write(String(payload.totalScore))
+        ")
 
         rm "$TMPFILE"
-
-        echo "score=$SCORE" >> "$GITHUB_OUTPUT"
-        echo "grade=$GRADE" >> "$GITHUB_OUTPUT"
-
-        echo "Drift Score: $SCORE/100 ($GRADE)"
 
         if [ "${{ inputs.fail-on-threshold }}" = "true" ] && [ "$SCORE" -gt "${{ inputs.min-score }}" ]; then
           echo "::error::Drift score $SCORE/100 exceeds threshold of ${{ inputs.min-score }}"
