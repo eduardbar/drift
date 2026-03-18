@@ -42,6 +42,7 @@ import {
   detectBranchName,
 } from './trust.js'
 import { computeTrustKpis, formatTrustKpiConsole, formatTrustKpiJson } from './trust-kpi.js'
+import { runBenchmarkCli } from './benchmark.js'
 import type { DriftDiff, DriftTrustReport, DriftAnalysisOptions, MergeRiskLevel } from './types.js'
 import type { TrustGatePolicyExplanation } from './trust.js'
 import type { SnapshotHistory } from './snapshot.js'
@@ -227,6 +228,14 @@ addResourceOptions(
     }
   }),
 )
+
+program
+  .command('benchmark')
+  .description('Run benchmark harness for scan/review/trust commands')
+  .allowUnknownOption(true)
+  .action(async () => {
+    await runBenchmarkCli(process.argv.slice(3))
+  })
 
 program
   .command('review')

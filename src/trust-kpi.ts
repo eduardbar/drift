@@ -1,25 +1,8 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
-import { dirname, isAbsolute, resolve } from 'node:path'
-import { MERGE_RISK_ORDER, normalizeMergeRiskLevel } from './trust.js'
-import type { DriftTrustReport, MergeRiskLevel, TrustDiffContext, TrustDiffTrendSummary, TrustKpiDiagnostic, TrustKpiReport } from './types.js'
-
-interface ParsedTrustArtifact {
-  filePath: string
-  trustScore: number
-  mergeRisk: MergeRiskLevel
-  diffContext?: TrustDiffContext
-}
-
-interface DiscoverResult {
-  files: string[]
-  diagnostics: TrustKpiDiagnostic[]
-}
-
-const IGNORED_DIRECTORIES = new Set(['node_modules', '.git', 'dist', '.next', 'build'])
-
-function toPosixPath(path: string): string {
-  return path.replace(/\\/g, '/')
-}
+import { normalizeMergeRiskLevel } from './trust.js'
+import type { DriftTrustReport, MergeRiskLevel, TrustDiffTrendSummary, TrustKpiReport } from './types.js'
+import { discoverTrustJsonFiles } from './trust-kpi-fs.js'
+import { parseTrustArtifact } from './trust-kpi-parse.js'
+import type { ParsedTrustArtifact, TrustKpiOptions } from './trust-kpi-types.js'
 
 function round(value: number, decimals = 2): number {
   return Number(value.toFixed(decimals))
@@ -40,295 +23,6 @@ function average(values: number[]): number | null {
   return round(values.reduce((sum, value) => sum + value, 0) / values.length)
 }
 
-function listFilesRecursively(root: string): string[] {
-  if (!existsSync(root)) return []
-  const out: string[] = []
-  const stack = [root]
-
-  while (stack.length > 0) {
-    const current = stack.pop()!
-    for (const entry of readdirSync(current)) {
-      const fullPath = resolve(current, entry)
-      const info = statSync(fullPath)
-      if (info.isDirectory()) {
-        if (IGNORED_DIRECTORIES.has(entry)) continue
-        stack.push(fullPath)
-      } else {
-        out.push(fullPath)
-      }
-    }
-  }
-
-  return out
-}
-
-function isGlobPattern(input: string): boolean {
-  return /[*?[\]{}]/.test(input)
-}
-
-function escapeRegex(char: string): string {
-  return /[\\^$+?.()|{}\[\]]/.test(char) ? `\\${char}` : char
-}
-
-function globToRegex(pattern: string): RegExp {
-  const normalized = toPosixPath(pattern)
-  let expression = '^'
-
-  for (let index = 0; index < normalized.length; index += 1) {
-    const char = normalized[index]
-    const nextChar = normalized[index + 1]
-    const nextNextChar = normalized[index + 2]
-
-    if (char === '*' && nextChar === '*') {
-      if (nextNextChar === '/') {
-        expression += '(?:.*/)?'
-        index += 2
-        continue
-      }
-      expression += '.*'
-      index += 1
-      continue
-    }
-
-    if (char === '*') {
-      expression += '[^/]*'
-      continue
-    }
-
-    if (char === '?') {
-      expression += '[^/]'
-      continue
-    }
-
-    expression += escapeRegex(char)
-  }
-
-  expression += '$'
-  return new RegExp(expression)
-}
-
-function globBaseDir(pattern: string): string {
-  const normalized = toPosixPath(pattern)
-  const wildcardIndex = normalized.search(/[*?[\]{}]/)
-
-  if (wildcardIndex < 0) return dirname(pattern)
-
-  const prefix = normalized.slice(0, wildcardIndex)
-  const slashIndex = prefix.lastIndexOf('/')
-
-  if (slashIndex < 0) return '.'
-  if (slashIndex === 0) return '/'
-
-  return prefix.slice(0, slashIndex)
-}
-
-function discoverTrustJsonFiles(input: string, cwd: string): DiscoverResult {
-  const diagnostics: TrustKpiDiagnostic[] = []
-  const source = input.trim() || '.'
-
-  if (isGlobPattern(source)) {
-    const absolutePattern = isAbsolute(source) ? source : resolve(cwd, source)
-    const regex = globToRegex(toPosixPath(absolutePattern))
-    const base = resolve(cwd, globBaseDir(source))
-
-    if (!existsSync(base)) {
-      diagnostics.push({
-        level: 'error',
-        code: 'path-not-found',
-        message: `Glob base path does not exist: ${base}`,
-      })
-      return { files: [], diagnostics }
-    }
-
-    const matched = listFilesRecursively(base)
-      .filter((filePath) => regex.test(toPosixPath(filePath)))
-      .filter((filePath) => filePath.toLowerCase().endsWith('.json'))
-      .sort((a, b) => a.localeCompare(b))
-
-    return { files: matched, diagnostics }
-  }
-
-  const absolute = isAbsolute(source) ? source : resolve(cwd, source)
-  if (!existsSync(absolute)) {
-    diagnostics.push({
-      level: 'error',
-      code: 'path-not-found',
-      message: `Path does not exist: ${absolute}`,
-    })
-    return { files: [], diagnostics }
-  }
-
-  const info = statSync(absolute)
-  if (info.isDirectory()) {
-    const files = listFilesRecursively(absolute)
-      .filter((filePath) => filePath.toLowerCase().endsWith('.json'))
-      .sort((a, b) => a.localeCompare(b))
-    return { files, diagnostics }
-  }
-
-  if (info.isFile()) {
-    if (!absolute.toLowerCase().endsWith('.json')) {
-      diagnostics.push({
-        level: 'warning',
-        code: 'path-not-supported',
-        file: absolute,
-        message: 'Input file is not JSON; attempting to parse anyway',
-      })
-    }
-    return { files: [absolute], diagnostics }
-  }
-
-  diagnostics.push({
-    level: 'error',
-    code: 'path-not-supported',
-    message: `Path is neither a file nor directory: ${absolute}`,
-  })
-
-  return { files: [], diagnostics }
-}
-
-function isObjectLike(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
-function normalizeDiffContext(raw: unknown): { diffContext?: TrustDiffContext; diagnostic?: TrustKpiDiagnostic } {
-  if (!isObjectLike(raw)) {
-    return {
-      diagnostic: {
-        level: 'warning',
-        code: 'invalid-diff-context',
-        message: 'diff_context is present but malformed; skipping diff trend fields for this artifact',
-      },
-    }
-  }
-
-  const baseRef = typeof raw.baseRef === 'string' ? raw.baseRef : 'unknown'
-  const status = raw.status
-  const scoreDelta = typeof raw.scoreDelta === 'number' && Number.isFinite(raw.scoreDelta) ? raw.scoreDelta : null
-  const newIssues = typeof raw.newIssues === 'number' && Number.isFinite(raw.newIssues) ? raw.newIssues : null
-  const resolvedIssues = typeof raw.resolvedIssues === 'number' && Number.isFinite(raw.resolvedIssues) ? raw.resolvedIssues : null
-  const filesChanged = typeof raw.filesChanged === 'number' && Number.isFinite(raw.filesChanged) ? raw.filesChanged : 0
-  const penalty = typeof raw.penalty === 'number' && Number.isFinite(raw.penalty) ? raw.penalty : 0
-  const bonus = typeof raw.bonus === 'number' && Number.isFinite(raw.bonus) ? raw.bonus : 0
-  const netImpact = typeof raw.netImpact === 'number' && Number.isFinite(raw.netImpact) ? raw.netImpact : 0
-
-  if (scoreDelta == null || newIssues == null || resolvedIssues == null) {
-    return {
-      diagnostic: {
-        level: 'warning',
-        code: 'invalid-diff-context',
-        message: 'diff_context is missing numeric scoreDelta/newIssues/resolvedIssues; skipping diff trend fields for this artifact',
-      },
-    }
-  }
-
-  const normalizedStatus = status === 'improved' || status === 'regressed' || status === 'neutral'
-    ? status
-    : scoreDelta < 0
-      ? 'improved'
-      : scoreDelta > 0
-        ? 'regressed'
-        : 'neutral'
-
-  return {
-    diffContext: {
-      baseRef,
-      status: normalizedStatus,
-      scoreDelta,
-      newIssues,
-      resolvedIssues,
-      filesChanged,
-      penalty,
-      bonus,
-      netImpact,
-    },
-  }
-}
-
-function parseTrustArtifact(filePath: string): { record?: ParsedTrustArtifact; diagnostics: TrustKpiDiagnostic[] } {
-  const diagnostics: TrustKpiDiagnostic[] = []
-
-  let rawContent = ''
-  try {
-    rawContent = readFileSync(filePath, 'utf8')
-  } catch (error) {
-    diagnostics.push({
-      level: 'error',
-      code: 'read-failed',
-      file: filePath,
-      message: error instanceof Error ? error.message : String(error),
-    })
-    return { diagnostics }
-  }
-
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(rawContent)
-  } catch (error) {
-    diagnostics.push({
-      level: 'error',
-      code: 'parse-failed',
-      file: filePath,
-      message: error instanceof Error ? error.message : String(error),
-    })
-    return { diagnostics }
-  }
-
-  if (!isObjectLike(parsed)) {
-    diagnostics.push({
-      level: 'error',
-      code: 'invalid-shape',
-      file: filePath,
-      message: 'Trust artifact must be a JSON object',
-    })
-    return { diagnostics }
-  }
-
-  const trustScore = parsed.trust_score
-  if (typeof trustScore !== 'number' || !Number.isFinite(trustScore)) {
-    diagnostics.push({
-      level: 'error',
-      code: 'invalid-shape',
-      file: filePath,
-      message: 'Missing numeric trust_score',
-    })
-    return { diagnostics }
-  }
-
-  const mergeRisk = typeof parsed.merge_risk === 'string'
-    ? normalizeMergeRiskLevel(parsed.merge_risk)
-    : undefined
-
-  if (!mergeRisk) {
-    diagnostics.push({
-      level: 'error',
-      code: 'invalid-shape',
-      file: filePath,
-      message: `Missing/invalid merge_risk (expected one of ${MERGE_RISK_ORDER.join(', ')})`,
-    })
-    return { diagnostics }
-  }
-
-  let diffContext: TrustDiffContext | undefined
-  if (parsed.diff_context !== undefined) {
-    const normalized = normalizeDiffContext(parsed.diff_context)
-    if (normalized.diagnostic) {
-      diagnostics.push({ ...normalized.diagnostic, file: filePath })
-    } else {
-      diffContext = normalized.diffContext
-    }
-  }
-
-  return {
-    record: {
-      filePath,
-      trustScore,
-      mergeRisk,
-      diffContext,
-    },
-    diagnostics,
-  }
-}
 
 function buildDiffTrend(records: ParsedTrustArtifact[]): TrustDiffTrendSummary {
   const withDiff = records.filter((record) => record.diffContext)
@@ -380,9 +74,7 @@ function buildDiffTrend(records: ParsedTrustArtifact[]): TrustDiffTrendSummary {
   }
 }
 
-export interface TrustKpiOptions {
-  cwd?: string
-}
+const KPI_RATIO_DECIMALS = 4
 
 export function computeTrustKpis(input: string, options?: TrustKpiOptions): TrustKpiReport {
   const cwd = options?.cwd ?? process.cwd()
@@ -427,7 +119,7 @@ export function computeTrustKpis(input: string, options?: TrustKpiOptions): Trus
       min: trustScores.length > 0 ? Math.min(...trustScores) : null,
       max: trustScores.length > 0 ? Math.max(...trustScores) : null,
     },
-    highRiskRatio: records.length > 0 ? round(highRiskCount / records.length, 4) : null,
+    highRiskRatio: records.length > 0 ? round(highRiskCount / records.length, KPI_RATIO_DECIMALS) : null,
     diffTrend: buildDiffTrend(records),
     diagnostics,
   }
@@ -511,7 +203,7 @@ export function computeTrustKpisFromReports(reports: DriftTrustReport[]): TrustK
       min: trustScores.length > 0 ? Math.min(...trustScores) : null,
       max: trustScores.length > 0 ? Math.max(...trustScores) : null,
     },
-    highRiskRatio: tempRecords.length > 0 ? round(highRiskCount / tempRecords.length, 4) : null,
+    highRiskRatio: tempRecords.length > 0 ? round(highRiskCount / tempRecords.length, KPI_RATIO_DECIMALS) : null,
     diffTrend: buildDiffTrend(tempRecords),
     diagnostics: [],
   }

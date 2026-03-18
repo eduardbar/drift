@@ -12,6 +12,58 @@ function normalizeIssueText(value: string): string {
     .trim()
 }
 
+const SNIPPET_PREFIX_LENGTH = 80
+
+interface IssueMatchState {
+  matchedBaseIndexes: Set<number>
+  matchedCurrentIndexes: Set<number>
+}
+
+function strictIssueKey(i: DriftIssue): string {
+  return `${i.rule}:${i.line}:${i.column}`
+}
+
+function normalizedIssueKey(i: DriftIssue): string {
+  const normalizedMessage = normalizeIssueText(i.message)
+  const normalizedSnippetPrefix = normalizeIssueText(i.snippet).slice(0, SNIPPET_PREFIX_LENGTH)
+  return `${i.rule}:${i.severity}:${i.line}:${normalizedMessage}:${normalizedSnippetPrefix}`
+}
+
+function buildIssueIndex(
+  issues: DriftIssue[],
+  getKey: (issue: DriftIssue) => string,
+  skip?: Set<number>,
+): Map<string, number[]> {
+  const index = new Map<string, number[]>()
+  for (const [idx, issue] of issues.entries()) {
+    if (skip?.has(idx)) continue
+    const key = getKey(issue)
+    const bucket = index.get(key)
+    if (bucket) bucket.push(idx)
+    else index.set(key, [idx])
+  }
+  return index
+}
+
+function matchIssues(
+  currentIssues: DriftIssue[],
+  index: Map<string, number[]>,
+  state: IssueMatchState,
+  getKey: (issue: DriftIssue) => string,
+): void {
+  for (const [currentIndex, issue] of currentIssues.entries()) {
+    if (state.matchedCurrentIndexes.has(currentIndex)) continue
+    const bucket = index.get(getKey(issue))
+    if (!bucket || bucket.length === 0) continue
+
+    const matchedIndex = bucket.shift()
+    if (matchedIndex === undefined) continue
+
+    state.matchedBaseIndexes.add(matchedIndex)
+    state.matchedCurrentIndexes.add(currentIndex)
+  }
+}
+
 /**
  * Compute the diff between two DriftReports.
  *
@@ -36,58 +88,15 @@ function computeFileDiff(
   const baseIssues = baseFile?.issues ?? []
   const currentIssues = currentFile?.issues ?? []
 
-  const strictIssueKey = (i: DriftIssue) => `${i.rule}:${i.line}:${i.column}`
-  const normalizedIssueKey = (i: DriftIssue) => {
-    const normalizedMessage = normalizeIssueText(i.message)
-    const normalizedSnippetPrefix = normalizeIssueText(i.snippet).slice(0, 80)
-    return `${i.rule}:${i.severity}:${i.line}:${normalizedMessage}:${normalizedSnippetPrefix}`
-  }
-
   const matchedBaseIndexes = new Set<number>()
   const matchedCurrentIndexes = new Set<number>()
+  const matchState = { matchedBaseIndexes, matchedCurrentIndexes }
 
-  const baseStrictIndex = new Map<string, number[]>()
-  for (const [index, issue] of baseIssues.entries()) {
-    const key = strictIssueKey(issue)
-    const bucket = baseStrictIndex.get(key)
-    if (bucket) bucket.push(index)
-    else baseStrictIndex.set(key, [index])
-  }
+  const baseStrictIndex = buildIssueIndex(baseIssues, strictIssueKey)
+  matchIssues(currentIssues, baseStrictIndex, matchState, strictIssueKey)
 
-  for (const [currentIndex, issue] of currentIssues.entries()) {
-    const key = strictIssueKey(issue)
-    const bucket = baseStrictIndex.get(key)
-    if (!bucket || bucket.length === 0) continue
-
-    const matchedIndex = bucket.shift()
-    if (matchedIndex === undefined) continue
-
-    matchedBaseIndexes.add(matchedIndex)
-    matchedCurrentIndexes.add(currentIndex)
-  }
-
-  const baseNormalizedIndex = new Map<string, number[]>()
-  for (const [index, issue] of baseIssues.entries()) {
-    if (matchedBaseIndexes.has(index)) continue
-    const key = normalizedIssueKey(issue)
-    const bucket = baseNormalizedIndex.get(key)
-    if (bucket) bucket.push(index)
-    else baseNormalizedIndex.set(key, [index])
-  }
-
-  for (const [currentIndex, issue] of currentIssues.entries()) {
-    if (matchedCurrentIndexes.has(currentIndex)) continue
-
-    const key = normalizedIssueKey(issue)
-    const bucket = baseNormalizedIndex.get(key)
-    if (!bucket || bucket.length === 0) continue
-
-    const matchedIndex = bucket.shift()
-    if (matchedIndex === undefined) continue
-
-    matchedBaseIndexes.add(matchedIndex)
-    matchedCurrentIndexes.add(currentIndex)
-  }
+  const baseNormalizedIndex = buildIssueIndex(baseIssues, normalizedIssueKey, matchedBaseIndexes)
+  matchIssues(currentIssues, baseNormalizedIndex, matchState, normalizedIssueKey)
 
   const newIssues = currentIssues.filter((_, index) => !matchedCurrentIndexes.has(index))
   const resolvedIssues = baseIssues.filter((_, index) => !matchedBaseIndexes.has(index))

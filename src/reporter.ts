@@ -38,34 +38,43 @@ const AI_SIGNAL_RULES = new Set([
   'ai-code-smell',
 ])
 
-export function buildReport(targetPath: string, files: FileReport[]): DriftReport {
-  const allIssues = files.flatMap((f) => f.issues)
+const AI_CODE_SMELL_BOOST = 20
+const AI_TRIGGER_LIMIT = 4
+const AI_LIKELIHOOD_THRESHOLD = 35
+const AI_SMELL_SCORE_MULTIPLIER = 15
+const AI_SUSPECTED_LIMIT = 10
+
+function summarizeIssues(allIssues: DriftIssue[]): DriftReport['summary'] {
   const byRule: Record<string, number> = {}
 
   for (const issue of allIssues) {
     byRule[issue.rule] = (byRule[issue.rule] ?? 0) + 1
   }
 
-  const totalScore =
-    files.length > 0
-      ? Math.round(files.reduce((sum, f) => sum + f.score, 0) / files.length)
-      : 0
+  return {
+    errors: allIssues.filter((issue) => issue.severity === 'error').length,
+    warnings: allIssues.filter((issue) => issue.severity === 'warning').length,
+    infos: allIssues.filter((issue) => issue.severity === 'info').length,
+    byRule,
+  }
+}
 
-  const sortedFiles = files.filter((f) => f.issues.length > 0).sort((a, b) => b.score - a.score)
+function calculateTotalScore(files: FileReport[]): number {
+  if (files.length === 0) return 0
+  return Math.round(files.reduce((sum, file) => sum + file.score, 0) / files.length)
+}
 
-  const baseReport: DriftReport = {
+function baseReportDefaults(summary: DriftReport['summary'], targetPath: string, files: FileReport[]): DriftReport {
+  const filesWithIssues = files.filter((file) => file.issues.length > 0).sort((a, b) => b.score - a.score)
+
+  return {
     scannedAt: new Date().toISOString(),
     targetPath,
-    files: sortedFiles,
-    totalIssues: allIssues.length,
-    totalScore,
+    files: filesWithIssues,
+    totalIssues: files.flatMap((file) => file.issues).length,
+    totalScore: calculateTotalScore(files),
     totalFiles: files.length,
-    summary: {
-      errors: allIssues.filter((i) => i.severity === 'error').length,
-      warnings: allIssues.filter((i) => i.severity === 'warning').length,
-      infos: allIssues.filter((i) => i.severity === 'info').length,
-      byRule,
-    },
+    summary,
     quality: {
       overall: 100,
       dimensions: {
@@ -86,6 +95,12 @@ export function buildReport(targetPath: string, files: FileReport[]): DriftRepor
       },
     },
   }
+}
+
+export function buildReport(targetPath: string, files: FileReport[]): DriftReport {
+  const allIssues = files.flatMap((f) => f.issues)
+  const summary = summarizeIssues(allIssues)
+  const baseReport: DriftReport = baseReportDefaults(summary, targetPath, files)
 
   baseReport.quality = computeRepoQuality(targetPath, files)
   baseReport.maintenanceRisk = computeMaintenanceRisk(baseReport)
@@ -209,12 +224,12 @@ function fileAILikelihood(fileIssues: DriftIssue[]): { score: number; triggers: 
     triggerCounts.set(issue.rule, (triggerCounts.get(issue.rule) ?? 0) + 1)
   }
   const triggerTotal = [...triggerCounts.values()].reduce((sum, count) => sum + count, 0)
-  const smellBoost = fileIssues.some((issue) => issue.rule === 'ai-code-smell') ? 20 : 0
+  const smellBoost = fileIssues.some((issue) => issue.rule === 'ai-code-smell') ? AI_CODE_SMELL_BOOST : 0
   const ratioScore = Math.round((triggerTotal / Math.max(fileIssues.length, 1)) * 100)
   const score = Math.max(0, Math.min(100, ratioScore + smellBoost))
   const triggers = [...triggerCounts.entries()]
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 4)
+    .slice(0, AI_TRIGGER_LIMIT)
     .map(([rule]) => rule)
   return { score, triggers }
 }
@@ -233,7 +248,7 @@ function computeAILikelihood(report: DriftReport): {
         triggers: likelihood.triggers,
       }
     })
-    .filter((entry) => entry.ai_likelihood >= 35)
+    .filter((entry) => entry.ai_likelihood >= AI_LIKELIHOOD_THRESHOLD)
     .sort((a, b) => b.ai_likelihood - a.ai_likelihood)
 
   const overall = suspected.length === 0
@@ -241,11 +256,11 @@ function computeAILikelihood(report: DriftReport): {
     : Math.round(suspected.reduce((sum, entry) => sum + entry.ai_likelihood, 0) / suspected.length)
 
   const smellCount = report.files.flatMap((file) => file.issues).filter((issue) => issue.rule === 'ai-code-smell').length
-  const smellScore = Math.min(100, smellCount * 15)
+  const smellScore = Math.min(100, smellCount * AI_SMELL_SCORE_MULTIPLIER)
 
   return {
     overall,
-    files: suspected.slice(0, 10),
+    files: suspected.slice(0, AI_SUSPECTED_LIMIT),
     smellScore,
   }
 }

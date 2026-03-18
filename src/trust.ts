@@ -1,51 +1,46 @@
-import { RULE_WEIGHTS } from './analyzer.js'
 import type {
-  DriftConfig,
   DriftDiff,
   DriftReport,
   DriftTrustReport,
   MergeRiskLevel,
-  TrustGatePolicyPack,
-  TrustGatePolicyPreset,
-  TrustDiffContext,
-  TrustFixPriority,
-  TrustReason,
-  TrustAdvancedComparison,
 } from './types.js'
 import type { SnapshotEntry } from './snapshot.js'
+import { MERGE_RISK_ORDER } from './trust-policy.js'
+import type { TrustGateOptions } from './trust-policy.js'
+import { buildAdvancedContext } from './trust-advanced.js'
+import {
+  TOP_REASONS_SLICE,
+  buildDiffRegressionReason,
+  clamp,
+  computeDiffContext,
+  computeFixPriorities,
+  computeReasons,
+  toMergeRisk,
+} from './trust-scoring.js'
+import {
+  renderTrustAdvancedComparison,
+  renderTrustAdvancedGuidance,
+  renderTrustDiffBlock,
+  renderTrustMarkdownPriorities,
+  renderTrustMarkdownReasons,
+  renderTrustPriorities,
+  renderTrustReasons,
+} from './trust-render.js'
 
-const ARCHITECTURE_RULES = new Set([
-  'circular-dependency',
-  'layer-violation',
-  'cross-boundary-import',
-  'controller-no-db',
-  'service-no-http',
-])
-
-const RULE_SUGGESTIONS: Record<string, string> = {
-  'circular-dependency': 'Break cycles first to reduce hidden merge blast radius.',
-  'layer-violation': 'Fix layer violations to keep architecture boundaries enforceable.',
-  'high-complexity': 'Split branch-heavy functions before adding more logic.',
-  'deep-nesting': 'Flatten control flow with early returns.',
-  'large-file': 'Split monolithic files by responsibility before merge.',
-  'large-function': 'Extract smaller functions to reduce review complexity.',
-  'catch-swallow': 'Handle or rethrow swallowed errors to avoid silent failures.',
-  'debug-leftover': 'Remove debug leftovers from production paths.',
-  'semantic-duplication': 'Consolidate duplicated logic to prevent divergent fixes.',
-  'dead-file': 'Delete or wire dead files to avoid stale merge artifacts.',
-}
-
-const SYSTEMIC_RULES = new Set([
-  'circular-dependency',
-  'layer-violation',
-  'cross-boundary-import',
-  'unused-export',
-  'unused-dependency',
-  'dead-file',
-  'semantic-duplication',
-  'controller-no-db',
-  'service-no-http',
-])
+export {
+  MERGE_RISK_ORDER,
+  detectBranchName,
+  explainTrustGatePolicy,
+  formatTrustGatePolicyExplanation,
+  normalizeMergeRiskLevel,
+  resolveTrustGatePolicy,
+} from './trust-policy.js'
+export type {
+  TrustGatePolicyExplanation,
+  TrustGatePolicyResolutionOptions,
+  TrustGatePolicyResolutionStep,
+  TrustGateOptions,
+} from './trust-policy.js'
 
 interface BuildTrustOptions {
   diff?: DriftDiff
@@ -61,39 +56,6 @@ interface TrustRenderOptions {
   markdown?: boolean
 }
 
-function formatTrustGatePolicyValues(values: TrustGateOptions): string {
-  const enabled = typeof values.enabled === 'boolean' ? String(values.enabled) : 'inherit'
-  const minTrust = typeof values.minTrust === 'number' ? String(values.minTrust) : 'inherit'
-  const maxRisk = values.maxRisk ?? 'inherit'
-  return `enabled=${enabled} minTrust=${minTrust} maxRisk=${maxRisk}`
-}
-
-export interface TrustGateOptions {
-  enabled?: boolean
-  minTrust?: number
-  maxRisk?: MergeRiskLevel
-}
-
-export interface TrustGatePolicyResolutionOptions {
-  branchName?: string
-  policyPack?: string
-  overrides?: TrustGateOptions
-}
-
-export interface TrustGatePolicyResolutionStep {
-  source: 'base' | 'policy-pack' | 'branch-preset' | 'overrides'
-  name: string
-  values: TrustGateOptions
-}
-
-export interface TrustGatePolicyExplanation {
-  effectivePolicy: TrustGateOptions
-  branchName?: string
-  selectedPolicyPack?: string
-  invalidPolicyPack?: string
-  steps: TrustGatePolicyResolutionStep[]
-}
-
 export interface TrustGateEvaluation {
   shouldFail: boolean
   reasons: string[]
@@ -106,474 +68,34 @@ export interface TrustGateEvaluation {
   }
 }
 
-export const MERGE_RISK_ORDER: MergeRiskLevel[] = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
-
-const BRANCH_ENV_CANDIDATES = [
-  'DRIFT_BRANCH',
-  'GITHUB_HEAD_REF',
-  'GITHUB_REF_NAME',
-  'CI_COMMIT_REF_NAME',
-  'BRANCH_NAME',
-] as const
-
-export function normalizeMergeRiskLevel(value: string): MergeRiskLevel | undefined {
-  const normalized = value.toUpperCase()
-  return MERGE_RISK_ORDER.find((level) => level === normalized)
-}
-
-function branchPatternToRegExp(pattern: string): RegExp {
-  const escaped = pattern.replace(/[|\\{}()[\]^$+?.]/g, '\\$&').replace(/\*/g, '.*')
-  return new RegExp(`^${escaped}$`)
-}
-
-function patternSpecificity(pattern: string): number {
-  const wildcardCount = (pattern.match(/\*/g) ?? []).length
-  const staticChars = pattern.replace(/\*/g, '').length
-  const exactBoost = wildcardCount === 0 ? 10_000 : 0
-  return exactBoost + staticChars * 10 - wildcardCount
-}
-
-function resolvePresetsForBranch(
-  branchName: string,
-  presets: TrustGatePolicyPreset[] | undefined,
-): TrustGatePolicyPreset[] {
-  if (!presets || presets.length === 0) return []
-
-  const matched: Array<{ preset: TrustGatePolicyPreset; specificity: number; index: number }> = []
-
-  for (let index = 0; index < presets.length; index += 1) {
-    const preset = presets[index]
-    if (!preset?.branch) continue
-
-    const regex = branchPatternToRegExp(preset.branch)
-    if (!regex.test(branchName)) continue
-
-    matched.push({ preset, specificity: patternSpecificity(preset.branch), index })
-  }
-
-  matched.sort((a, b) => a.specificity - b.specificity || a.index - b.index)
-  return matched.map((entry) => entry.preset)
-}
-
-function normalizeMinTrust(value: unknown): number | undefined {
-  return typeof value === 'number' && !Number.isNaN(value) ? value : undefined
-}
-
-function normalizeMaxRisk(value: unknown): MergeRiskLevel | undefined {
-  if (typeof value !== 'string') return undefined
-  return normalizeMergeRiskLevel(value)
-}
-
-function normalizeTrustGateOptions(
-  source: { enabled?: unknown; minTrust?: unknown; maxRisk?: unknown } | undefined,
-): TrustGateOptions {
-  if (!source) return {}
-
-  return {
-    enabled: typeof source.enabled === 'boolean' ? source.enabled : undefined,
-    minTrust: normalizeMinTrust(source.minTrust),
-    maxRisk: normalizeMaxRisk(source.maxRisk),
-  }
-}
-
-function mergeTrustGateOptions(base: TrustGateOptions, layer: TrustGateOptions): TrustGateOptions {
-  return {
-    enabled: typeof layer.enabled === 'boolean' ? layer.enabled : base.enabled,
-    minTrust: layer.minTrust ?? base.minTrust,
-    maxRisk: layer.maxRisk ?? base.maxRisk,
-  }
-}
-
-function normalizeResolutionOptions(
-  branchNameOrOptions?: string | TrustGatePolicyResolutionOptions,
-  explicitOverrides?: TrustGateOptions,
-): TrustGatePolicyResolutionOptions {
-  if (typeof branchNameOrOptions === 'string') {
-    return {
-      branchName: branchNameOrOptions,
-      overrides: explicitOverrides,
-    }
-  }
-
-  if (!branchNameOrOptions) {
-    return {
-      overrides: explicitOverrides,
-    }
-  }
-
-  return {
-    ...branchNameOrOptions,
-    overrides: explicitOverrides
-      ? mergeTrustGateOptions(normalizeTrustGateOptions(branchNameOrOptions.overrides), normalizeTrustGateOptions(explicitOverrides))
-      : branchNameOrOptions.overrides,
-  }
-}
-
-function resolvePolicyPack(
-  policyPacks: Record<string, TrustGatePolicyPack> | undefined,
-  policyPackName: string | undefined,
-): { name?: string; pack?: TrustGatePolicyPack; invalid?: string } {
-  const normalizedName = policyPackName?.trim()
-  if (!normalizedName) return {}
-
-  if (!policyPacks) {
-    return { name: normalizedName, invalid: normalizedName }
-  }
-
-  const pack = policyPacks[normalizedName]
-  if (!pack) {
-    return { name: normalizedName, invalid: normalizedName }
-  }
-
-  return { name: normalizedName, pack }
-}
-
-export function detectBranchName(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  for (const key of BRANCH_ENV_CANDIDATES) {
-    const value = env[key]?.trim()
-    if (value) return value
-  }
-
-  return undefined
-}
-
-export function explainTrustGatePolicy(
-  config: DriftConfig | undefined,
-  branchName?: string,
-  overrides?: TrustGateOptions,
-): TrustGatePolicyExplanation
-export function explainTrustGatePolicy(
-  config: DriftConfig | undefined,
-  options?: TrustGatePolicyResolutionOptions,
-): TrustGatePolicyExplanation
-export function explainTrustGatePolicy(
-  config: DriftConfig | undefined,
-  branchNameOrOptions?: string | TrustGatePolicyResolutionOptions,
-  explicitOverrides?: TrustGateOptions,
-): TrustGatePolicyExplanation {
-  const policy = config?.trustGate
-  const resolution = normalizeResolutionOptions(branchNameOrOptions, explicitOverrides)
-  const normalizedBranch = resolution.branchName?.trim()
-  const packResolution = resolvePolicyPack(policy?.policyPacks, resolution.policyPack)
-
-  const steps: TrustGatePolicyResolutionStep[] = []
-  const base = normalizeTrustGateOptions(policy)
-  let effective = base
-  steps.push({ source: 'base', name: 'trustGate', values: base })
-
-  if (packResolution.pack) {
-    const packOptions = normalizeTrustGateOptions(packResolution.pack)
-    effective = mergeTrustGateOptions(effective, packOptions)
-    steps.push({ source: 'policy-pack', name: packResolution.name ?? 'unknown', values: packOptions })
-  }
-
-  if (normalizedBranch) {
-    const matchedPresets = resolvePresetsForBranch(normalizedBranch, policy?.presets)
-    for (const preset of matchedPresets) {
-      const presetOptions = normalizeTrustGateOptions(preset)
-      effective = mergeTrustGateOptions(effective, presetOptions)
-      steps.push({ source: 'branch-preset', name: preset.branch, values: presetOptions })
-    }
-  }
-
-  const overrides = normalizeTrustGateOptions(resolution.overrides)
-  if (Object.values(overrides).some((value) => value !== undefined)) {
-    effective = mergeTrustGateOptions(effective, overrides)
-    steps.push({ source: 'overrides', name: 'cli', values: overrides })
-  }
-
-  return {
-    effectivePolicy: effective,
-    branchName: normalizedBranch,
-    selectedPolicyPack: packResolution.name,
-    invalidPolicyPack: packResolution.invalid,
-    steps,
-  }
-}
-
-export function resolveTrustGatePolicy(
-  config: DriftConfig | undefined,
-  branchName?: string,
-  overrides?: TrustGateOptions,
-): TrustGateOptions
-export function resolveTrustGatePolicy(
-  config: DriftConfig | undefined,
-  options?: TrustGatePolicyResolutionOptions,
-): TrustGateOptions
-export function resolveTrustGatePolicy(
-  config: DriftConfig | undefined,
-  branchNameOrOptions?: string | TrustGatePolicyResolutionOptions,
-  explicitOverrides?: TrustGateOptions,
-): TrustGateOptions {
-  const options = normalizeResolutionOptions(branchNameOrOptions, explicitOverrides)
-  return explainTrustGatePolicy(config, options).effectivePolicy
-}
-
-export function formatTrustGatePolicyExplanation(explanation: TrustGatePolicyExplanation): string {
-  const lines = ['Trust gate policy resolution:']
-  lines.push(`- branch: ${explanation.branchName ?? 'not provided'}`)
-  lines.push(`- policy pack: ${explanation.selectedPolicyPack ?? 'not selected'}`)
-  if (explanation.invalidPolicyPack) {
-    lines.push(`- invalid policy pack: ${explanation.invalidPolicyPack}`)
-  }
-  lines.push('- steps:')
-
-  for (const [index, step] of explanation.steps.entries()) {
-    lines.push(`  ${index + 1}. ${step.source} (${step.name}): ${formatTrustGatePolicyValues(step.values)}`)
-  }
-
-  lines.push(`- effective: ${formatTrustGatePolicyValues(explanation.effectivePolicy)}`)
-  return lines.join('\n')
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value))
-}
-
-function toMergeRisk(trustScore: number): MergeRiskLevel {
-  if (trustScore >= 80) return 'LOW'
-  if (trustScore >= 60) return 'MEDIUM'
-  if (trustScore >= 40) return 'HIGH'
-  return 'CRITICAL'
-}
-
-function computeReasons(report: DriftReport): TrustReason[] {
-  const architectureIssues = Object.entries(report.summary.byRule)
-    .filter(([rule]) => ARCHITECTURE_RULES.has(rule))
-    .reduce((sum, [, count]) => sum + count, 0)
-
-  const worstHotspot = report.maintenanceRisk.hotspots[0]
-  const reasons: TrustReason[] = [
-    {
-      label: 'Drift score pressure',
-      detail: `Repository drift score is ${report.totalScore}/100.`,
-      impact: Math.round(report.totalScore * 0.55),
-    },
-    {
-      label: 'Error-level issues',
-      detail: `${report.summary.errors} error issue(s) increase merge volatility.`,
-      impact: Math.min(22, report.summary.errors * 4),
-    },
-    {
-      label: 'Architecture signals',
-      detail: `${architectureIssues} architecture-related issue(s) detected.`,
-      impact: Math.min(24, architectureIssues * 6),
-    },
-    {
-      label: 'Maintenance hotspots',
-      detail: `Maintenance risk is ${report.maintenanceRisk.level.toUpperCase()} (${report.maintenanceRisk.score}/100).`,
-      impact: Math.min(25, Math.round(report.maintenanceRisk.score * 0.25)),
-    },
-    {
-      label: 'Highest-risk file',
-      detail: worstHotspot
-        ? `${worstHotspot.file} has hotspot risk ${worstHotspot.risk}/100.`
-        : 'No hotspot concentration detected.',
-      impact: worstHotspot ? Math.min(15, Math.round(worstHotspot.risk * 0.15)) : 0,
-    },
-  ]
-
-  return reasons
-    .filter((reason) => reason.impact > 0)
-    .sort((a, b) => b.impact - a.impact)
-    .slice(0, 4)
-}
-
-function effortFromWeight(weight: number): 'low' | 'medium' | 'high' {
-  if (weight <= 6) return 'low'
-  if (weight <= 12) return 'medium'
-  return 'high'
-}
-
-function computeDiffContext(diff: DriftDiff): TrustDiffContext {
-  const scoreRegressionPenalty = Math.max(0, diff.totalDelta) * 2
-  const newIssuePenalty = diff.newIssuesCount * 3
-  const churnPenalty = diff.files.length >= 15 ? 4 : 0
-  const penalty = clamp(scoreRegressionPenalty + newIssuePenalty + churnPenalty, 0, 30)
-
-  const scoreImprovementBonus = Math.max(0, -diff.totalDelta) * 2
-  const resolvedIssueBonus = diff.resolvedIssuesCount * 2
-  const bonus = clamp(scoreImprovementBonus + resolvedIssueBonus, 0, 20)
-
-  const netImpact = penalty - bonus
-  const status = netImpact > 0 ? 'regressed' : netImpact < 0 ? 'improved' : 'neutral'
-
-  return {
-    baseRef: diff.baseRef,
-    status,
-    scoreDelta: diff.totalDelta,
-    newIssues: diff.newIssuesCount,
-    resolvedIssues: diff.resolvedIssuesCount,
-    filesChanged: diff.files.length,
-    penalty,
-    bonus,
-    netImpact,
-  }
-}
-
-function confidenceFromPrioritySignals(
-  occurrences: number,
-  severity: 'error' | 'warning' | 'info',
-  systemic: boolean,
-): 'low' | 'medium' | 'high' {
-  const severityScore = severity === 'error' ? 4 : severity === 'warning' ? 2 : 1
-  const systemicScore = systemic ? 2 : 0
-  const score = occurrences * 2 + severityScore + systemicScore
-
-  if (score >= 12) return 'high'
-  if (score >= 7) return 'medium'
-  return 'low'
-}
-
-function computeFixPriorities(report: DriftReport, advancedMode = false): TrustFixPriority[] {
-  const ordered = Object.entries(report.summary.byRule)
-    .map(([rule, occurrences]) => {
-      const weightConfig = RULE_WEIGHTS[rule] ?? { severity: 'warning' as const, weight: 6 }
-      const severityBoost = weightConfig.severity === 'error' ? 25 : weightConfig.severity === 'warning' ? 12 : 4
-      const systemic = SYSTEMIC_RULES.has(rule)
-      const systemicBoost = advancedMode && systemic ? 25 : 0
-      const priorityScore = occurrences * weightConfig.weight + severityBoost + systemicBoost
-      const confidence = confidenceFromPrioritySignals(occurrences, weightConfig.severity, systemic)
-      const explanation = advancedMode
-        ? systemic
-          ? 'System-level rule that propagates risk across multiple teams and modules.'
-          : 'Local rule with contained impact; treat as team-level cleanup after systemic fixes.'
-        : undefined
-
-      return {
-        rule,
-        severity: weightConfig.severity,
-        occurrences,
-        systemic,
-        priorityScore,
-        estimatedTrustGain: Math.min(30, Math.max(3, Math.round(priorityScore / 4))),
-        effort: effortFromWeight(weightConfig.weight),
-        suggestion: RULE_SUGGESTIONS[rule] ?? 'Address this rule in the highest-scored files first.',
-        confidence,
-        explanation,
-      }
-    })
-    .sort((a, b) => b.priorityScore - a.priorityScore)
-    .slice(0, 5)
-
-  return ordered.map((item, index) => ({
-    rank: index + 1,
-    rule: item.rule,
-    severity: item.severity,
-    occurrences: item.occurrences,
-    estimated_trust_gain: item.estimatedTrustGain,
-    effort: item.effort,
-    suggestion: item.suggestion,
-    ...(advancedMode ? { confidence: item.confidence, explanation: item.explanation, systemic: item.systemic } : {}),
-  }))
-}
-
-function buildComparisonFromPreviousTrust(
-  trustScore: number,
-  previousTrust: Partial<DriftTrustReport> | undefined,
-): TrustAdvancedComparison | undefined {
-  if (!previousTrust || typeof previousTrust.trust_score !== 'number') return undefined
-
-  const trustDelta = trustScore - previousTrust.trust_score
-  const trend = trustDelta > 0 ? 'improving' : trustDelta < 0 ? 'regressing' : 'stable'
-
-  return {
-    source: 'previous-trust-json',
-    trend,
-    summary: `Trust moved ${trustDelta >= 0 ? '+' : ''}${trustDelta} vs provided previous trust JSON.`,
-    trust_delta: trustDelta,
-    previous_trust_score: previousTrust.trust_score,
-    previous_merge_risk: previousTrust.merge_risk,
-  }
-}
-
-function buildComparisonFromSnapshotHistory(
-  report: DriftReport,
-  snapshots: SnapshotEntry[] | undefined,
-): TrustAdvancedComparison | undefined {
-  const lastSnapshot = snapshots && snapshots.length > 0 ? snapshots[snapshots.length - 1] : undefined
-  if (!lastSnapshot) return undefined
-
-  const snapshotScoreDelta = report.totalScore - lastSnapshot.score
-  const trend = snapshotScoreDelta < 0 ? 'improving' : snapshotScoreDelta > 0 ? 'regressing' : 'stable'
-  const snapshotContext = lastSnapshot.label
-    ? `${lastSnapshot.timestamp} (${lastSnapshot.label})`
-    : lastSnapshot.timestamp
-
-  return {
-    source: 'snapshot-history',
-    trend,
-    summary: `Drift score moved ${snapshotScoreDelta >= 0 ? '+' : ''}${snapshotScoreDelta} vs snapshot ${snapshotContext}.`,
-    snapshot_score_delta: snapshotScoreDelta,
-    snapshot_label: lastSnapshot.label || undefined,
-    snapshot_timestamp: lastSnapshot.timestamp,
-  }
-}
-
-function buildTeamGuidance(
-  priorities: TrustFixPriority[],
-  comparison: TrustAdvancedComparison | undefined,
-  diffContext: TrustDiffContext | undefined,
-): string[] {
-  const systemicTargets = priorities
-    .filter((priority) => priority.systemic)
-    .slice(0, 2)
-    .map((priority) => `${priority.rule} (x${priority.occurrences})`)
-
-  const guidance: string[] = []
-  if (systemicTargets.length > 0) {
-    guidance.push(`Start with systemic rules: ${systemicTargets.join(', ')}.`)
-  }
-
-  if (comparison?.trend === 'regressing') {
-    guidance.push('Trend regressed; freeze net-new debt in CI and assign owners per systemic rule.')
-  }
-
-  if (diffContext && diffContext.newIssues > 0) {
-    guidance.push(`Block net-new issue growth first (+${diffContext.newIssues} new issue(s) in diff context).`)
-  }
-
-  if (guidance.length === 0) {
-    guidance.push('Maintain current baseline and schedule periodic systemic debt cleanup by rule ownership.')
-  }
-
-  return guidance.slice(0, 3)
-}
+const CONSOLE_DIFF_INSERT_INDEX = 5
 
 export function buildTrustReport(report: DriftReport, options?: BuildTrustOptions): DriftTrustReport {
   const reasons = computeReasons(report)
-  const advancedMode = options?.advanced?.enabled === true
 
   const diffContext = options?.diff ? computeDiffContext(options.diff) : undefined
   if (diffContext && diffContext.netImpact > 0) {
-    reasons.push({
-      label: 'Diff regression signals',
-      detail: `Against ${diffContext.baseRef}: score delta ${diffContext.scoreDelta >= 0 ? '+' : ''}${diffContext.scoreDelta}, +${diffContext.newIssues} new issue(s), -${diffContext.resolvedIssues} resolved.`,
-      impact: diffContext.netImpact,
-    })
+    reasons.push(buildDiffRegressionReason(diffContext))
   }
 
   const rankedReasons = reasons
     .filter((reason) => reason.impact > 0)
     .sort((a, b) => b.impact - a.impact)
-    .slice(0, 4)
+    .slice(0, TOP_REASONS_SLICE)
 
   const totalPenalty = rankedReasons.reduce((sum, reason) => sum + reason.impact, 0)
   const totalBonus = diffContext && diffContext.netImpact < 0 ? Math.abs(diffContext.netImpact) : 0
   const trustScore = clamp(Math.round(100 - totalPenalty + totalBonus), 0, 100)
 
-  const comparison = advancedMode
-    ? buildComparisonFromPreviousTrust(trustScore, options?.advanced?.previousTrust)
-      ?? buildComparisonFromSnapshotHistory(report, options?.advanced?.snapshots)
-    : undefined
-
+  const advancedMode = options?.advanced?.enabled === true
   const fixPriorities = computeFixPriorities(report, advancedMode)
-  const advancedContext = advancedMode
-    ? {
-      comparison,
-      team_guidance: buildTeamGuidance(fixPriorities, comparison, diffContext),
-    }
-    : undefined
+  const advancedContext = buildAdvancedContext({
+    report,
+    advancedOptions: options?.advanced,
+    trustScore,
+    fixPriorities,
+    diffContext,
+  })
 
   return {
     scannedAt: new Date().toISOString(),
@@ -599,17 +121,8 @@ export function formatTrustConsole(trust: DriftTrustReport): string {
     ].join('\n')
     : undefined
 
-  const reasons = trust.top_reasons.length === 0
-    ? '- none'
-    : trust.top_reasons.map((reason) => `- ${reason.label}: ${reason.detail} (impact ${reason.impact})`).join('\n')
-
-  const priorities = trust.fix_priorities.length === 0
-    ? '- none'
-    : trust.fix_priorities
-      .map((priority) =>
-        `- #${priority.rank} ${priority.rule} (${priority.severity}, x${priority.occurrences}${priority.confidence ? `, confidence ${priority.confidence}` : ''}): ${priority.suggestion}`
-      )
-      .join('\n')
+  const reasons = renderTrustReasons(trust.top_reasons)
+  const priorities = renderTrustPriorities(trust.fix_priorities)
 
   const advanced = trust.advanced_context
   const advancedComparison = advanced?.comparison
@@ -637,7 +150,7 @@ export function formatTrustConsole(trust: DriftTrustReport): string {
   ]
 
   if (diffLines) {
-    sections.splice(5, 0, 'Diff Context:', diffLines, '')
+    sections.splice(CONSOLE_DIFF_INSERT_INDEX, 0, 'Diff Context:', diffLines, '')
   }
 
   if (advanced) {
@@ -648,44 +161,11 @@ export function formatTrustConsole(trust: DriftTrustReport): string {
 }
 
 export function formatTrustMarkdown(trust: DriftTrustReport): string {
-  const diffContext = trust.diff_context
-
-  const reasons = trust.top_reasons.length === 0
-    ? '- none'
-    : trust.top_reasons.map((reason) => `- **${reason.label}**: ${reason.detail} (impact ${reason.impact})`).join('\n')
-
-  const priorities = trust.fix_priorities.length === 0
-    ? '- none'
-    : trust.fix_priorities
-      .map((priority) =>
-        `- #${priority.rank} \`${priority.rule}\` (${priority.severity}, x${priority.occurrences}, effort: ${priority.effort}${priority.confidence ? `, confidence: ${priority.confidence}` : ''}) - ${priority.suggestion}${priority.explanation ? ` ${priority.explanation}` : ''}`
-      )
-      .join('\n')
-
-  const diffBlock = !diffContext
-    ? [
-      '- Base ref: not provided',
-      '- Diff-aware adjustment: not applied',
-    ].join('\n')
-    : [
-      `- Base ref: \`${diffContext.baseRef}\``,
-      `- Diff status: **${diffContext.status.toUpperCase()}**`,
-      `- Score delta: **${diffContext.scoreDelta >= 0 ? '+' : ''}${diffContext.scoreDelta}**`,
-      `- Issues: **+${diffContext.newIssues}** new / **-${diffContext.resolvedIssues}** resolved`,
-      `- Trust adjustment: **+${diffContext.penalty}** penalty / **-${diffContext.bonus}** bonus (net ${diffContext.netImpact >= 0 ? '+' : ''}${diffContext.netImpact})`,
-    ].join('\n')
-
-  const advancedComparison = trust.advanced_context?.comparison
-    ? [
-      `- Source: \`${trust.advanced_context.comparison.source}\``,
-      `- Trend: **${trust.advanced_context.comparison.trend.toUpperCase()}**`,
-      `- Summary: ${trust.advanced_context.comparison.summary}`,
-    ].join('\n')
-    : '- Historical comparison not available'
-
-  const advancedGuidance = trust.advanced_context?.team_guidance?.length
-    ? trust.advanced_context.team_guidance.map((item) => `- ${item}`).join('\n')
-    : '- none'
+  const reasons = renderTrustMarkdownReasons(trust.top_reasons)
+  const priorities = renderTrustMarkdownPriorities(trust.fix_priorities)
+  const diffBlock = renderTrustDiffBlock(trust.diff_context)
+  const advancedComparison = renderTrustAdvancedComparison(trust.advanced_context)
+  const advancedGuidance = renderTrustAdvancedGuidance(trust.advanced_context)
 
   const sections = [
     '## drift trust',

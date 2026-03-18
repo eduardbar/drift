@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import * as path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { analyzeProject } from './analyzer.js'
 import { loadConfig } from './config.js'
 import { buildReport } from './reporter.js'
@@ -40,6 +41,33 @@ interface BenchmarkOutput {
   results: TaskResult[]
 }
 
+const DEFAULT_SCAN_PATH = '.'
+const DEFAULT_REVIEW_PATH = '.'
+const DEFAULT_TRUST_PATH = '.'
+const DEFAULT_BASE_REF = 'HEAD~1'
+const DEFAULT_WARMUP_RUNS = 1
+const DEFAULT_MEASURED_RUNS = 5
+
+const TABLE_WIDTHS = {
+  task: 10,
+  warmup: 8,
+  runs: 6,
+  median: 13,
+  mean: 11,
+  min: 10,
+  max: 10,
+} as const
+
+const TABLE_COLUMNS = [
+  { key: 'task', header: 'task' },
+  { key: 'warmup', header: 'warmup' },
+  { key: 'runs', header: 'runs' },
+  { key: 'median', header: 'median(ms)' },
+  { key: 'mean', header: 'mean(ms)' },
+  { key: 'min', header: 'min(ms)' },
+  { key: 'max', header: 'max(ms)' },
+] as const
+
 function parseNumberFlag(value: string, flagName: string): number {
   const parsed = Number(value)
   if (!Number.isFinite(parsed) || parsed < 0) {
@@ -50,55 +78,31 @@ function parseNumberFlag(value: string, flagName: string): number {
 
 function parseOptions(argv: string[]): BenchmarkOptions {
   const options: BenchmarkOptions = {
-    scanPath: '.',
-    reviewPath: '.',
-    trustPath: '.',
-    baseRef: 'HEAD~1',
-    warmupRuns: 1,
-    measuredRuns: 5,
+    scanPath: DEFAULT_SCAN_PATH,
+    reviewPath: DEFAULT_REVIEW_PATH,
+    trustPath: DEFAULT_TRUST_PATH,
+    baseRef: DEFAULT_BASE_REF,
+    warmupRuns: DEFAULT_WARMUP_RUNS,
+    measuredRuns: DEFAULT_MEASURED_RUNS,
   }
 
-  for (let i = 0; i < argv.length; i += 1) {
+  const handlers: Record<string, (value: string) => void> = {
+    '--scan-path': (value) => { options.scanPath = value },
+    '--review-path': (value) => { options.reviewPath = value },
+    '--trust-path': (value) => { options.trustPath = value },
+    '--base': (value) => { options.baseRef = value },
+    '--warmup': (value) => { options.warmupRuns = parseNumberFlag(value, '--warmup') },
+    '--runs': (value) => { options.measuredRuns = parseNumberFlag(value, '--runs') },
+    '--json-out': (value) => { options.jsonOut = value },
+  }
+
+  for (let i = 0; i < argv.length; i += 2) {
     const arg = argv[i]
     const next = argv[i + 1]
+    const handler = handlers[arg]
 
-    if (arg === '--scan-path' && next) {
-      options.scanPath = next
-      i += 1
-      continue
-    }
-    if (arg === '--review-path' && next) {
-      options.reviewPath = next
-      i += 1
-      continue
-    }
-    if (arg === '--trust-path' && next) {
-      options.trustPath = next
-      i += 1
-      continue
-    }
-    if (arg === '--base' && next) {
-      options.baseRef = next
-      i += 1
-      continue
-    }
-    if (arg === '--warmup' && next) {
-      options.warmupRuns = parseNumberFlag(next, '--warmup')
-      i += 1
-      continue
-    }
-    if (arg === '--runs' && next) {
-      options.measuredRuns = parseNumberFlag(next, '--runs')
-      i += 1
-      continue
-    }
-    if (arg === '--json-out' && next) {
-      options.jsonOut = next
-      i += 1
-      continue
-    }
-
-    throw new Error(`Unknown or incomplete argument: ${arg}`)
+    if (!handler || !next) throw new Error(`Unknown or incomplete argument: ${arg}`)
+    handler(next)
   }
 
   if (options.measuredRuns < 1) {
@@ -156,8 +160,8 @@ async function runTask(
 }
 
 function printTable(results: TaskResult[]): void {
-  const headers = ['task', 'warmup', 'runs', 'median(ms)', 'mean(ms)', 'min(ms)', 'max(ms)']
-  const widths = [10, 8, 6, 13, 11, 10, 10]
+  const headers = TABLE_COLUMNS.map((column) => column.header)
+  const widths = TABLE_COLUMNS.map((column) => TABLE_WIDTHS[column.key])
 
   const row = (values: string[]): string => values
     .map((value, index) => value.padEnd(widths[index], ' '))
@@ -212,8 +216,8 @@ async function runReview(reviewPath: string, baseRef: string): Promise<void> {
   await generateReview(reviewPath, baseRef)
 }
 
-async function main(): Promise<void> {
-  const options = parseOptions(process.argv.slice(2))
+async function main(argv: string[]): Promise<void> {
+  const options = parseOptions(argv)
 
   const results = [
     await runTask('scan', options.warmupRuns, options.measuredRuns, () => runScan(options.scanPath)),
@@ -242,11 +246,21 @@ async function main(): Promise<void> {
   }
 }
 
-void (async () => {
+function isExecutedAsEntryPoint(): boolean {
+  const entryArg = process.argv[1]
+  if (!entryArg) return false
+  return import.meta.url === pathToFileURL(path.resolve(entryArg)).href
+}
+
+export async function runBenchmarkCli(argv = process.argv.slice(2)): Promise<void> {
   try {
-    await main()
+    await main(argv)
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
     process.exit(1)
   }
-})()
+}
+
+if (isExecutedAsEntryPoint()) {
+  void runBenchmarkCli()
+}

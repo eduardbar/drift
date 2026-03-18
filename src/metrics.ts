@@ -30,6 +30,20 @@ const AI_RULES = new Set([
   'ai-code-smell',
 ])
 
+const ISSUE_WEIGHT_PER_FILE = 20
+const DIMENSION_COUNT = 4
+const MAX_COMPLEXITY_RISK = 40
+const COMPLEXITY_RISK_PER_ISSUE = 10
+const MISSING_TESTS_RISK = 25
+const FREQUENT_CHANGE_THRESHOLD = 8
+const FREQUENT_CHANGE_RISK = 20
+const HIGH_DRIFT_THRESHOLD = 50
+const HIGH_DRIFT_RISK = 15
+const HOTSPOT_LIMIT = 10
+const LEVEL_CRITICAL_THRESHOLD = 75
+const LEVEL_HIGH_THRESHOLD = 55
+const LEVEL_MEDIUM_THRESHOLD = 30
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }
@@ -38,20 +52,23 @@ function listFilesRecursively(root: string): string[] {
   if (!existsSync(root)) return []
   const out: string[] = []
   const stack = [root]
+
+  const shouldSkipDirectory = (name: string): boolean =>
+    name === 'node_modules' || name === 'dist' || name === '.git' || name === '.next' || name === 'build'
+
   while (stack.length > 0) {
     const current = stack.pop()!
     const entries = readdirSync(current)
     for (const entry of entries) {
       const full = join(current, entry)
       const stat = statSync(full)
-      if (stat.isDirectory()) {
-        if (entry === 'node_modules' || entry === 'dist' || entry === '.git' || entry === '.next' || entry === 'build') {
-          continue
-        }
-        stack.push(full)
-      } else {
+      if (!stat.isDirectory()) {
         out.push(full)
+        continue
       }
+
+      if (shouldSkipDirectory(entry)) continue
+      stack.push(full)
     }
   }
   return out
@@ -88,7 +105,55 @@ function getCommitTouchCount(targetPath: string, filePath: string): number {
 function qualityFromIssues(totalFiles: number, issues: DriftIssue[], rules: Set<string>): number {
   const count = issues.filter((issue) => rules.has(issue.rule)).length
   if (totalFiles === 0) return 100
-  return clamp(100 - Math.round((count / totalFiles) * 20), 0, 100)
+  return clamp(100 - Math.round((count / totalFiles) * ISSUE_WEIGHT_PER_FILE), 0, 100)
+}
+
+function riskLevelFromScore(score: number): MaintenanceRiskMetrics['level'] {
+  if (score >= LEVEL_CRITICAL_THRESHOLD) return 'critical'
+  if (score >= LEVEL_HIGH_THRESHOLD) return 'high'
+  if (score >= LEVEL_MEDIUM_THRESHOLD) return 'medium'
+  return 'low'
+}
+
+function evaluateHotspot(targetPath: string, file: FileReport): RiskHotspot {
+  const complexityIssues = file.issues.filter((issue) =>
+    issue.rule === 'high-complexity' ||
+    issue.rule === 'deep-nesting' ||
+    issue.rule === 'large-function' ||
+    issue.rule === 'max-function-lines'
+  ).length
+
+  const changeFrequency = getCommitTouchCount(targetPath, file.path)
+  const hasTests = hasNearbyTest(targetPath, file.path)
+  const reasons: string[] = []
+  let risk = 0
+
+  if (complexityIssues > 0) {
+    risk += Math.min(MAX_COMPLEXITY_RISK, complexityIssues * COMPLEXITY_RISK_PER_ISSUE)
+    reasons.push('high complexity signals')
+  }
+  if (!hasTests) {
+    risk += MISSING_TESTS_RISK
+    reasons.push('no nearby tests')
+  }
+  if (changeFrequency >= FREQUENT_CHANGE_THRESHOLD) {
+    risk += FREQUENT_CHANGE_RISK
+    reasons.push('frequently changed file')
+  }
+  if (file.score >= HIGH_DRIFT_THRESHOLD) {
+    risk += HIGH_DRIFT_RISK
+    reasons.push('high drift score')
+  }
+
+  return {
+    file: file.path,
+    driftScore: file.score,
+    complexityIssues,
+    hasNearbyTests: hasTests,
+    changeFrequency,
+    risk: clamp(risk, 0, 100),
+    reasons,
+  }
 }
 
 export function computeRepoQuality(targetPath: string, files: FileReport[]): RepoQualityScore {
@@ -119,73 +184,27 @@ export function computeRepoQuality(targetPath: string, files: FileReport[]): Rep
     dimensions.complexity +
     dimensions['ai-patterns'] +
     dimensions.testing
-  ) / 4)
+  ) / DIMENSION_COUNT)
 
   return { overall, dimensions }
 }
 
 export function computeMaintenanceRisk(report: DriftReport): MaintenanceRiskMetrics {
-  const allFiles = report.files
-  const hotspots: RiskHotspot[] = allFiles
-    .map((file) => {
-      const complexityIssues = file.issues.filter((issue) =>
-        issue.rule === 'high-complexity' ||
-        issue.rule === 'deep-nesting' ||
-        issue.rule === 'large-function' ||
-        issue.rule === 'max-function-lines'
-      ).length
-
-      const changeFrequency = getCommitTouchCount(report.targetPath, file.path)
-      const hasTests = hasNearbyTest(report.targetPath, file.path)
-      const reasons: string[] = []
-      let risk = 0
-
-      if (complexityIssues > 0) {
-        risk += Math.min(40, complexityIssues * 10)
-        reasons.push('high complexity signals')
-      }
-      if (!hasTests) {
-        risk += 25
-        reasons.push('no nearby tests')
-      }
-      if (changeFrequency >= 8) {
-        risk += 20
-        reasons.push('frequently changed file')
-      }
-      if (file.score >= 50) {
-        risk += 15
-        reasons.push('high drift score')
-      }
-
-      return {
-        file: file.path,
-        driftScore: file.score,
-        complexityIssues,
-        hasNearbyTests: hasTests,
-        changeFrequency,
-        risk: clamp(risk, 0, 100),
-        reasons,
-      }
-    })
+  const hotspots: RiskHotspot[] = report.files
+    .map((file) => evaluateHotspot(report.targetPath, file))
     .filter((hotspot) => hotspot.risk > 0)
     .sort((a, b) => b.risk - a.risk)
-    .slice(0, 10)
+    .slice(0, HOTSPOT_LIMIT)
 
   const highComplexityFiles = hotspots.filter((hotspot) => hotspot.complexityIssues > 0).length
   const filesWithoutNearbyTests = hotspots.filter((hotspot) => !hotspot.hasNearbyTests).length
-  const frequentChangeFiles = hotspots.filter((hotspot) => hotspot.changeFrequency >= 8).length
+  const frequentChangeFiles = hotspots.filter((hotspot) => hotspot.changeFrequency >= FREQUENT_CHANGE_THRESHOLD).length
 
   const score = hotspots.length === 0
     ? 0
     : Math.round(hotspots.reduce((sum, hotspot) => sum + hotspot.risk, 0) / hotspots.length)
 
-  const level = score >= 75
-    ? 'critical'
-    : score >= 55
-      ? 'high'
-      : score >= 30
-        ? 'medium'
-        : 'low'
+  const level = riskLevelFromScore(score)
 
   return {
     score,

@@ -6,7 +6,7 @@ import { cleanupTempDir, extractFilesAtRef } from './git.js'
 import { computeDiff } from './diff.js'
 import type { DriftDiff } from './types.js'
 
-export interface DriftReview {
+interface DriftReview {
   baseRef: string
   scannedAt: string
   totalDelta: number
@@ -18,10 +18,12 @@ export interface DriftReview {
   diff: DriftDiff
 }
 
+const REVIEW_TOP_FILES_LIMIT = 8
+
 export function formatReviewMarkdown(review: DriftReview): string {
   const trendIcon = review.status === 'regressed' ? '⚠️' : review.status === 'improved' ? '✅' : 'ℹ️'
   const topFiles = review.diff.files
-    .slice(0, 8)
+    .slice(0, REVIEW_TOP_FILES_LIMIT)
     .map((file) => {
       const sign = file.scoreDelta > 0 ? '+' : ''
       return `- \`${file.path}\`: ${file.scoreBefore} -> ${file.scoreAfter} (${sign}${file.scoreDelta}), +${file.newIssues.length} new / -${file.resolvedIssues.length} resolved`

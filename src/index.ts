@@ -7,10 +7,18 @@ export {
   formatTrustConsole,
   formatTrustMarkdown,
   formatTrustJson,
+  resolveTrustGatePolicy,
+  evaluateTrustGate,
   shouldFailByMaxRisk,
   shouldFailTrustGate,
   normalizeMergeRiskLevel,
   MERGE_RISK_ORDER,
+} from './trust.js'
+export type {
+  TrustGateOptions,
+  TrustGatePolicyResolutionOptions,
+  TrustGatePolicyResolutionStep,
+  TrustGateEvaluation,
 } from './trust.js'
 export {
   computeTrustKpis,
@@ -39,6 +47,8 @@ export type {
   MergeRiskLevel,
   DriftPlugin,
   DriftPluginRule,
+  TrustGatePolicyConfig,
+  TrustAdvancedContext,
 } from './types.js'
 export { loadHistory, saveSnapshot } from './snapshot.js'
 export type { SnapshotEntry, SnapshotHistory } from './snapshot.js'
@@ -61,6 +71,11 @@ export {
   generateSaasDashboardHtml,
 } from './saas.js'
 export type {
+  SaasUser,
+  SaasOrganization,
+  SaasWorkspace,
+  SaasRepo,
+  SaasMembership,
   SaasRole,
   SaasPlan,
   SaasPolicy,

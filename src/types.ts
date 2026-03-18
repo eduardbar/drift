@@ -1,409 +1,55 @@
-import type { SourceFile } from 'ts-morph'
+export type {
+  DriftIssue,
+  FileReport,
+  RepoQualityScore,
+  RiskHotspot,
+  MaintenanceRiskMetrics,
+  AIIssue,
+  AIOutput,
+  DriftReport,
+} from './types/core.js'
 
-export interface DriftIssue {
-  rule: string
-  severity: 'error' | 'warning' | 'info'
-  message: string
-  line: number
-  column: number
-  snippet: string
-}
+export type {
+  MergeRiskLevel,
+  TrustGatePolicyPreset,
+  TrustGatePolicyPack,
+  TrustGatePolicyConfig,
+  TrustReason,
+  TrustFixPriority,
+  TrustAdvancedComparison,
+  TrustAdvancedContext,
+  TrustDiffContext,
+  DriftTrustReport,
+  TrustKpiDiagnostic,
+  TrustScoreStats,
+  TrustDiffTrendSummary,
+  TrustKpiReport,
+} from './types/trust.js'
 
-export interface FileReport {
-  path: string
-  issues: DriftIssue[]
-  score: number // 0–100, higher = more drift
-}
+export type {
+  LayerDefinition,
+  ModuleBoundary,
+  DriftPerformanceConfig,
+  DriftAnalysisOptions,
+} from './types/config.js'
 
-export interface DriftReport {
-  scannedAt: string
-  targetPath: string
-  files: FileReport[]
-  totalIssues: number
-  totalScore: number
-  totalFiles: number
-  summary: {
-    errors: number
-    warnings: number
-    infos: number
-    byRule: Record<string, number>
-  }
-  quality: RepoQualityScore
-  maintenanceRisk: MaintenanceRiskMetrics
-}
+export type { DriftConfig } from './types/app.js'
 
-export interface RepoQualityScore {
-  overall: number
-  dimensions: {
-    architecture: number
-    complexity: number
-    'ai-patterns': number
-    testing: number
-  }
-}
+export type {
+  PluginRuleContext,
+  DriftPluginRule,
+  DriftPlugin,
+  LoadedPlugin,
+  PluginLoadError,
+  PluginLoadWarning,
+} from './types/plugin.js'
 
-export interface RiskHotspot {
-  file: string
-  driftScore: number
-  complexityIssues: number
-  hasNearbyTests: boolean
-  changeFrequency: number
-  risk: number
-  reasons: string[]
-}
-
-export interface MaintenanceRiskMetrics {
-  score: number
-  level: 'low' | 'medium' | 'high' | 'critical'
-  hotspots: RiskHotspot[]
-  signals: {
-    highComplexityFiles: number
-    filesWithoutNearbyTests: number
-    frequentChangeFiles: number
-  }
-}
-
-export interface AIOutput {
-  summary: {
-    score: number
-    grade: string
-    total_issues: number
-    files_affected: number
-    files_clean: number
-    ai_likelihood: number
-    ai_code_smell_score: number
-  }
-  files_suspected: Array<{ path: string; ai_likelihood: number; triggers: string[] }>
-  priority_order: AIIssue[]
-  maintenance_risk: MaintenanceRiskMetrics
-  quality: RepoQualityScore
-  context_for_ai: {
-    project_type: string
-    scan_path: string
-    rules_detected: string[]
-    recommended_action: string
-  }
-}
-
-export interface AIIssue {
-  rank: number
-  file: string
-  line: number
-  rule: string
-  severity: string
-  message: string
-  snippet: string
-  fix_suggestion: string
-  effort: 'low' | 'medium' | 'high'
-}
-
-export type MergeRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
-
-export interface TrustGatePolicyPreset {
-  branch: string
-  enabled?: boolean
-  minTrust?: number
-  maxRisk?: MergeRiskLevel
-}
-
-export interface TrustGatePolicyPack {
-  enabled?: boolean
-  minTrust?: number
-  maxRisk?: MergeRiskLevel
-}
-
-export interface TrustGatePolicyConfig {
-  enabled?: boolean
-  minTrust?: number
-  maxRisk?: MergeRiskLevel
-  presets?: TrustGatePolicyPreset[]
-  policyPacks?: Record<string, TrustGatePolicyPack>
-}
-
-export interface TrustReason {
-  label: string
-  detail: string
-  impact: number
-}
-
-export interface TrustFixPriority {
-  rank: number
-  rule: string
-  severity: DriftIssue['severity']
-  occurrences: number
-  estimated_trust_gain: number
-  effort: 'low' | 'medium' | 'high'
-  suggestion: string
-  confidence?: 'low' | 'medium' | 'high'
-  explanation?: string
-  systemic?: boolean
-}
-
-export interface TrustAdvancedComparison {
-  source: 'previous-trust-json' | 'snapshot-history'
-  trend: 'improving' | 'regressing' | 'stable'
-  summary: string
-  trust_delta?: number
-  previous_trust_score?: number
-  previous_merge_risk?: MergeRiskLevel
-  snapshot_score_delta?: number
-  snapshot_label?: string
-  snapshot_timestamp?: string
-}
-
-export interface TrustAdvancedContext {
-  comparison?: TrustAdvancedComparison
-  team_guidance: string[]
-}
-
-export interface TrustDiffContext {
-  baseRef: string
-  status: 'improved' | 'regressed' | 'neutral'
-  scoreDelta: number
-  newIssues: number
-  resolvedIssues: number
-  filesChanged: number
-  penalty: number
-  bonus: number
-  netImpact: number
-}
-
-export interface DriftTrustReport {
-  scannedAt: string
-  targetPath: string
-  trust_score: number
-  merge_risk: MergeRiskLevel
-  top_reasons: TrustReason[]
-  fix_priorities: TrustFixPriority[]
-  diff_context?: TrustDiffContext
-  advanced_context?: TrustAdvancedContext
-}
-
-export interface TrustKpiDiagnostic {
-  level: 'warning' | 'error'
-  code: 'path-not-found' | 'path-not-supported' | 'read-failed' | 'parse-failed' | 'invalid-shape' | 'invalid-diff-context'
-  message: string
-  file?: string
-}
-
-export interface TrustScoreStats {
-  average: number | null
-  median: number | null
-  min: number | null
-  max: number | null
-}
-
-export interface TrustDiffTrendSummary {
-  available: boolean
-  samples: number
-  statusDistribution: {
-    improved: number
-    regressed: number
-    neutral: number
-  }
-  scoreDelta: {
-    average: number | null
-    median: number | null
-  }
-  issues: {
-    newTotal: number
-    resolvedTotal: number
-    netNew: number
-  }
-}
-
-export interface TrustKpiReport {
-  generatedAt: string
-  input: string
-  files: {
-    matched: number
-    parsed: number
-    malformed: number
-  }
-  prsEvaluated: number
-  mergeRiskDistribution: Record<MergeRiskLevel, number>
-  trustScore: TrustScoreStats
-  highRiskRatio: number | null
-  diffTrend: TrustDiffTrendSummary
-  diagnostics: TrustKpiDiagnostic[]
-}
-
-// ---------------------------------------------------------------------------
-// Configuration
-// ---------------------------------------------------------------------------
-
-/**
- * Layer definition for architectural boundary enforcement.
- */
-export interface LayerDefinition {
-  name: string
-  patterns: string[]
-  canImportFrom: string[]
-}
-
-/**
- * Module boundary definition for cross-boundary enforcement.
- */
-export interface ModuleBoundary {
-  name: string
-  root: string
-  allowedExternalImports?: string[]
-}
-
-/**
- * Optional project-level configuration for drift.
- * Place in drift.config.ts (or .js / .json) at the project root.
- */
-export interface DriftConfig {
-  layers?: LayerDefinition[]
-  modules?: ModuleBoundary[]
-  plugins?: string[]
-  performance?: DriftPerformanceConfig
-  architectureRules?: {
-    controllerNoDb?: boolean
-    serviceNoHttp?: boolean
-    maxFunctionLines?: number
-  }
-  saas?: {
-    freeUserThreshold?: number
-    maxRunsPerWorkspacePerMonth?: number
-    maxReposPerWorkspace?: number
-    retentionDays?: number
-    strictActorEnforcement?: boolean
-    maxWorkspacesPerOrganizationByPlan?: {
-      free?: number
-      sponsor?: number
-      team?: number
-      business?: number
-    }
-  }
-  trustGate?: TrustGatePolicyConfig
-}
-
-export interface DriftPerformanceConfig {
-  lowMemory?: boolean
-  chunkSize?: number
-  maxFiles?: number
-  maxFileSizeKb?: number
-  includeSemanticDuplication?: boolean
-}
-
-export interface DriftAnalysisOptions {
-  lowMemory?: boolean
-  chunkSize?: number
-  maxFiles?: number
-  maxFileSizeKb?: number
-  includeSemanticDuplication?: boolean
-}
-
-export interface PluginRuleContext {
-  projectRoot: string
-  filePath: string
-  config?: DriftConfig
-}
-
-export interface DriftPluginRule {
-  id?: string
-  name: string
-  severity?: DriftIssue['severity']
-  weight?: number
-  detect: (file: SourceFile, context: PluginRuleContext) => DriftIssue[]
-  fix?: (issue: DriftIssue, file: SourceFile, context: PluginRuleContext) => DriftIssue | void
-}
-
-export interface DriftPlugin {
-  name: string
-  apiVersion?: number
-  capabilities?: Record<string, string | number | boolean>
-  rules: DriftPluginRule[]
-}
-
-export interface LoadedPlugin {
-  id: string
-  plugin: DriftPlugin
-}
-
-export interface PluginLoadError {
-  pluginId: string
-  pluginName?: string
-  ruleId?: string
-  code?: string
-  message: string
-}
-
-export interface PluginLoadWarning {
-  pluginId: string
-  pluginName?: string
-  ruleId?: string
-  code?: string
-  message: string
-}
-
-// ---------------------------------------------------------------------------
-// Diff
-// ---------------------------------------------------------------------------
-
-export interface FileDiff {
-  path: string            // path relativo al project root
-  scoreBefore: number
-  scoreAfter: number
-  scoreDelta: number      // positivo = empeoró (más deuda), negativo = mejoró
-  newIssues: DriftIssue[]
-  resolvedIssues: DriftIssue[]
-}
-
-export interface DriftDiff {
-  baseRef: string         // git ref del baseline (e.g. "HEAD~1", "main")
-  projectPath: string     // path absoluto del proyecto
-  scannedAt: string       // ISO timestamp
-  files: FileDiff[]       // solo archivos con cambios (delta != 0 o issues diff != 0)
-  totalScoreBefore: number
-  totalScoreAfter: number
-  totalDelta: number      // positivo = más deuda, negativo = menos deuda
-  newIssuesCount: number
-  resolvedIssuesCount: number
-}
-
-/** Historical analysis data for a single commit */
-export interface HistoricalAnalysis {
-  commitHash: string;
-  commitDate: Date;
-  author: string;
-  message: string;
-  files: FileReport[];
-  totalScore: number;
-  averageScore: number;
-}
-
-/** Trend data point for score evolution */
-export interface TrendDataPoint {
-  date: Date;
-  score: number;
-  fileCount: number;
-  avgIssuesPerFile: number;
-}
-
-/** Blame attribution data */
-export interface BlameAttribution {
-  author: string;
-  email: string;
-  commits: number;
-  linesChanged: number;
-  issuesIntroduced: number;
-  avgScoreImpact: number;
-}
-
-/** Extended DriftReport with historical context */
-export interface DriftTrendReport extends DriftReport {
-  trend: TrendDataPoint[];
-  regression: {
-    slope: number;
-    intercept: number;
-    r2: number;
-  };
-}
-
-/** Extended DriftReport with blame data */
-export interface DriftBlameReport extends DriftReport {
-  blame: BlameAttribution[];
-}
+export type {
+  FileDiff,
+  DriftDiff,
+  HistoricalAnalysis,
+  TrendDataPoint,
+  BlameAttribution,
+  DriftTrendReport,
+  DriftBlameReport,
+} from './types/diff.js'

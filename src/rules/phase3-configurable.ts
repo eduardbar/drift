@@ -23,12 +23,14 @@ const HTTP_IMPORT_PATTERNS = [
 
 function isControllerFile(filePath: string): boolean {
   const normalized = filePath.replace(/\\/g, '/').toLowerCase()
-  return normalized.includes('/controller/') || normalized.includes('/controllers/') || normalized.endsWith('controller.ts') || normalized.endsWith('controller.js')
+  const segments = normalized.split('/')
+  return segments.includes('controller') || segments.includes('controllers') || normalized.endsWith('controller.ts') || normalized.endsWith('controller.js')
 }
 
 function isServiceFile(filePath: string): boolean {
   const normalized = filePath.replace(/\\/g, '/').toLowerCase()
-  return normalized.includes('/service/') || normalized.includes('/services/') || normalized.endsWith('service.ts') || normalized.endsWith('service.js')
+  const segments = normalized.split('/')
+  return segments.includes('service') || segments.includes('services') || normalized.endsWith('service.ts') || normalized.endsWith('service.js')
 }
 
 function createIssue(rule: string, message: string, line: number, snippet: string): DriftIssue {
@@ -100,33 +102,44 @@ export function detectMaxFunctionLines(file: SourceFile, config?: DriftConfig): 
 
   const issues: DriftIssue[] = []
 
-  for (const fn of file.getFunctions()) {
-    const body = fn.getBody()
-    if (!body) continue
-    const lines = body.getEndLineNumber() - body.getStartLineNumber() - 1
-    if (lines > maxLines) {
-      issues.push(createIssue(
-        'max-function-lines',
-        `Function '${fn.getName() ?? '(anonymous)'}' has ${lines} lines (max: ${maxLines}).`,
-        fn.getStartLineNumber(),
-        fn.getName() ?? '(anonymous)',
-      ))
-    }
-  }
-
-  for (const method of file.getDescendantsOfKind(SyntaxKind.MethodDeclaration)) {
-    const body = method.getBody()
-    if (!body) continue
-    const lines = body.getEndLineNumber() - body.getStartLineNumber() - 1
-    if (lines > maxLines) {
-      issues.push(createIssue(
-        'max-function-lines',
-        `Method '${method.getName()}' has ${lines} lines (max: ${maxLines}).`,
-        method.getStartLineNumber(),
-        method.getName(),
-      ))
-    }
-  }
+  collectFunctionLineIssues(file, maxLines, issues)
+  collectMethodLineIssues(file, maxLines, issues)
 
   return issues
+}
+
+function countBodyLines(
+  body: ReturnType<import('ts-morph').FunctionDeclaration['getBody']> | ReturnType<import('ts-morph').MethodDeclaration['getBody']>,
+): number {
+  if (!body) return 0
+  return body.getEndLineNumber() - body.getStartLineNumber() - 1
+}
+
+function collectFunctionLineIssues(file: SourceFile, maxLines: number, issues: DriftIssue[]): void {
+  for (const fn of file.getFunctions()) {
+    const lines = countBodyLines(fn.getBody())
+    if (lines <= maxLines) continue
+
+    const functionName = fn.getName() ?? '(anonymous)'
+    issues.push(createIssue(
+      'max-function-lines',
+      `Function '${functionName}' has ${lines} lines (max: ${maxLines}).`,
+      fn.getStartLineNumber(),
+      functionName,
+    ))
+  }
+}
+
+function collectMethodLineIssues(file: SourceFile, maxLines: number, issues: DriftIssue[]): void {
+  for (const method of file.getDescendantsOfKind(SyntaxKind.MethodDeclaration)) {
+    const lines = countBodyLines(method.getBody())
+    if (lines <= maxLines) continue
+
+    issues.push(createIssue(
+      'max-function-lines',
+      `Method '${method.getName()}' has ${lines} lines (max: ${maxLines}).`,
+      method.getStartLineNumber(),
+      method.getName(),
+    ))
+  }
 }
