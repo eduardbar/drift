@@ -47,6 +47,7 @@ import { runBenchmarkCli } from './benchmark.js'
 import { runInit, INIT_PRESETS } from './init.js'
 import { runDoctor } from './doctor.js'
 import { resolveOutputFormat } from './format.js'
+import { toSarif } from './sarif.js'
 import type { DriftDiff, DriftTrustReport, DriftAnalysisOptions, MergeRiskLevel, GuardResult, GuardThresholds } from './types.js'
 import type { TrustGatePolicyExplanation } from './trust.js'
 import type { SnapshotHistory } from './snapshot.js'
@@ -246,13 +247,18 @@ addResourceOptions(
     const format = resolveOutputFormat({
       command: 'scan',
       format: options.format,
-      supported: ['console', 'json', 'markdown', 'ai'],
+      supported: ['console', 'json', 'markdown', 'ai', 'sarif'],
       legacyAliases: [
         { flag: 'json', used: options.json, mapsTo: 'json' },
         { flag: 'ai', used: options.ai, mapsTo: 'ai' },
       ],
       onWarning: (message) => process.stderr.write(`${message}\n`),
     })
+
+    if (format === 'sarif') {
+      process.stdout.write(`${JSON.stringify(toSarif(report), null, 2)}\n`)
+      return
+    }
 
     if (format === 'ai') {
       const aiOutput = formatAIOutput(report)
@@ -797,12 +803,14 @@ addResourceOptions(
     const format = resolveOutputFormat({
       command: 'ci',
       format: options.format,
-      supported: ['console', 'json'],
+      supported: ['console', 'json', 'sarif'],
       legacyAliases: [{ flag: 'json', used: options.json, mapsTo: 'json' }],
       onWarning: (message) => process.stderr.write(`${message}\n`),
     })
 
-    if (format === 'json') {
+    if (format === 'sarif') {
+      process.stdout.write(`${JSON.stringify(toSarif(report), null, 2)}\n`)
+    } else if (format === 'json') {
       process.stdout.write(JSON.stringify(report, null, 2) + '\n')
     } else {
       emitCIAnnotations(report)

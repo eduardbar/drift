@@ -5,7 +5,7 @@ describe('resolveOutputFormat', () => {
   it('defaults to console when no format flags are passed', () => {
     const format = resolveOutputFormat({
       command: 'scan',
-      supported: ['console', 'json', 'markdown', 'ai'],
+      supported: ['console', 'json', 'markdown', 'ai', 'sarif'],
     })
 
     expect(format).toBe('console')
@@ -39,7 +39,7 @@ describe('resolveOutputFormat', () => {
     expect(
       resolveOutputFormat({
         command: 'scan',
-        supported: ['console', 'json', 'markdown', 'ai'],
+        supported: ['console', 'json', 'markdown', 'ai', 'sarif'],
         legacyAliases: [{ flag: 'ai', used: true, mapsTo: 'ai' }],
       }),
     ).toBe('ai')
@@ -63,10 +63,28 @@ describe('resolveOutputFormat', () => {
     expect(
       resolveOutputFormat({
         command: 'ci',
-        supported: ['console', 'json'],
+        supported: ['console', 'json', 'sarif'],
         legacyAliases: [{ flag: 'json', used: true, mapsTo: 'json' }],
       }),
     ).toBe('json')
+  })
+
+  it('allows sarif when command supports it', () => {
+    expect(
+      resolveOutputFormat({
+        command: 'scan',
+        format: 'sarif',
+        supported: ['console', 'json', 'markdown', 'ai', 'sarif'],
+      }),
+    ).toBe('sarif')
+
+    expect(
+      resolveOutputFormat({
+        command: 'ci',
+        format: 'sarif',
+        supported: ['console', 'json', 'sarif'],
+      }),
+    ).toBe('sarif')
   })
 
   it('fails on unsupported format per command', () => {
@@ -79,21 +97,21 @@ describe('resolveOutputFormat', () => {
     ).toThrow("Format 'markdown' is not supported for 'diff'. Supported formats: console, json.")
   })
 
-  it('fails with explicit placeholder message for sarif in phase 1', () => {
+  it('fails when sarif is not supported by the command', () => {
     expect(() =>
       resolveOutputFormat({
-        command: 'scan',
+        command: 'trust',
         format: 'sarif',
-        supported: ['console', 'json', 'markdown', 'ai'],
+        supported: ['console', 'json', 'markdown'],
       }),
-    ).toThrow("'scan' --format sarif is a phase 1 placeholder and is not implemented yet.")
+    ).toThrow("Format 'sarif' is not supported for 'trust'. Supported formats: console, json, markdown.")
   })
 
   it('fails when legacy aliases conflict', () => {
     expect(() =>
       resolveOutputFormat({
         command: 'scan',
-        supported: ['console', 'json', 'markdown', 'ai'],
+        supported: ['console', 'json', 'markdown', 'ai', 'sarif'],
         legacyAliases: [
           { flag: 'json', used: true, mapsTo: 'json' },
           { flag: 'ai', used: true, mapsTo: 'ai' },

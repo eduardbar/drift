@@ -24,10 +24,6 @@ function assertSupportedFormatValue(command: string, format: string): asserts fo
 }
 
 function throwUnsupportedFormat(command: string, selected: UnifiedOutputFormat, supported: readonly UnifiedOutputFormat[]): never {
-  if (selected === 'sarif') {
-    throw new Error(`'${command}' --format sarif is a phase 1 placeholder and is not implemented yet.`)
-  }
-
   throw new Error(
     `Format '${selected}' is not supported for '${command}'. Supported formats: ${supported.join(', ')}.`,
   )
