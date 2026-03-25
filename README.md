@@ -663,7 +663,7 @@ jobs:
 
 This repository enforces `.github/workflows/quality.yml` on `pull_request` and `push` to `master`.
 
-The workflow runs a required Node.js matrix (`18`, `20`, `22`) and executes these checks in each matrix job:
+The workflow runs a required Node.js matrix (`20`, `22`) and executes these checks in each matrix job:
 - `npm ci`
 - `npm test`
 - `npm run test:coverage`
