@@ -1,0 +1,64 @@
+name: Reusable Quality Checks
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to checkout before running checks
+        required: false
+        type: string
+        default: ''
+      node_versions:
+        description: JSON array of Node.js versions for matrix execution
+        required: false
+        type: string
+        default: '["20", "22"]'
+      coverage_artifact_prefix:
+        description: Prefix used for uploaded coverage artifacts
+        required: false
+        type: string
+        default: coverage
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Quality (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ${{ fromJson(inputs.node_versions) }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref != '' && inputs.ref || github.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Run coverage
+        run: npm run test:coverage -- --testTimeout=30000
+
+      - name: Build
+        run: npm run build
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.coverage_artifact_prefix }}-node-${{ matrix.node }}-run-${{ github.run_id }}-${{ github.run_attempt }}
+          path: coverage/
+          if-no-files-found: error
+          retention-days: 14
