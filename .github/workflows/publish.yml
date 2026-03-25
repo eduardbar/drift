@@ -14,7 +14,15 @@ permissions:
   contents: read
 
 jobs:
+  release-verify:
+    name: Release Verify
+    uses: ./.github/workflows/reusable-quality-checks.yml
+    with:
+      ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/v{0}', inputs.tag) || github.ref }}
+      coverage_artifact_prefix: release-coverage
+
   publish:
+    needs: release-verify
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

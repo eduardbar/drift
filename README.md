@@ -659,6 +659,20 @@ jobs:
 
 `drift ci` emits `::error` and `::warning` annotations that appear inline in the PR diff and writes a formatted summary to `$GITHUB_STEP_SUMMARY`. Use this when you want visibility beyond a pass/fail exit code.
 
+### Required quality checks for merge and release
+
+This repository enforces `.github/workflows/quality.yml` on `pull_request` and `push` to `master`.
+
+The workflow runs a required Node.js matrix (`18`, `20`, `22`) and executes these checks in each matrix job:
+- `npm ci`
+- `npm test`
+- `npm run test:coverage`
+- `npm run build`
+
+Coverage artifacts are uploaded from each matrix run to support traceability.
+
+`publish.yml` now runs `release-verify` before publish, reusing the same quality workflow contract. `publish` only runs after `release-verify` passes.
+
 ### Auto PR comment with `drift review`
 
 The repository includes `.github/workflows/review-pr.yml`, which:

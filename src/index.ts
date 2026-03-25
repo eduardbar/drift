@@ -18,6 +18,7 @@ export {
   buildTrustReport,
   formatTrustConsole,
   formatTrustMarkdown,
+  formatTrustJsonObject,
   formatTrustJson,
   resolveTrustGatePolicy,
   evaluateTrustGate,
