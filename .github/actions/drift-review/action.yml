@@ -80,8 +80,15 @@ runs:
         set -euo pipefail
         EXEC_PREFIX="$RUNNER_TEMP/drift-cli"
         mkdir -p "$EXEC_PREFIX"
-        npm exec --yes --prefix "$EXEC_PREFIX" --package=@eduardbar/drift@${{ inputs.version }} -- drift --version
-        npm exec --yes --prefix "$EXEC_PREFIX" --package=@eduardbar/drift@${{ inputs.version }} -- drift trust "${{ inputs.path }}" --base "${{ inputs.base-ref }}" --markdown --json-output "${{ steps.files.outputs.trust_json }}" > "${{ steps.files.outputs.trust_md }}"
+        VERSION="${{ inputs.version }}"
+        if npm view "@eduardbar/drift@$VERSION" version >/dev/null 2>&1; then
+          npm exec --yes --prefix "$EXEC_PREFIX" --package="@eduardbar/drift@$VERSION" -- drift --version
+          npm exec --yes --prefix "$EXEC_PREFIX" --package="@eduardbar/drift@$VERSION" -- drift trust "${{ inputs.path }}" --base "${{ inputs.base-ref }}" --markdown --json-output "${{ steps.files.outputs.trust_json }}" > "${{ steps.files.outputs.trust_md }}"
+        else
+          echo "::notice::@eduardbar/drift@$VERSION is not published yet; using local CLI fallback"
+          npx --no-install tsx ./src/cli.ts --version
+          npx --no-install tsx ./src/cli.ts trust "${{ inputs.path }}" --base "${{ inputs.base-ref }}" --markdown --json-output "${{ steps.files.outputs.trust_json }}" > "${{ steps.files.outputs.trust_md }}"
+        fi
 
     - name: Generate review markdown
       if: inputs.include-review == 'true'
@@ -90,7 +97,12 @@ runs:
         set -euo pipefail
         EXEC_PREFIX="$RUNNER_TEMP/drift-cli"
         mkdir -p "$EXEC_PREFIX"
-        npm exec --yes --prefix "$EXEC_PREFIX" --package=@eduardbar/drift@${{ inputs.version }} -- drift review --base "${{ inputs.base-ref }}" --comment > "${{ steps.files.outputs.review_md }}"
+        VERSION="${{ inputs.version }}"
+        if npm view "@eduardbar/drift@$VERSION" version >/dev/null 2>&1; then
+          npm exec --yes --prefix "$EXEC_PREFIX" --package="@eduardbar/drift@$VERSION" -- drift review --base "${{ inputs.base-ref }}" --comment > "${{ steps.files.outputs.review_md }}"
+        else
+          npx --no-install tsx ./src/cli.ts review --base "${{ inputs.base-ref }}" --comment > "${{ steps.files.outputs.review_md }}"
+        fi
 
     - name: Extract trust outputs
       id: extract
@@ -128,4 +140,9 @@ runs:
         set -euo pipefail
         EXEC_PREFIX="$RUNNER_TEMP/drift-cli"
         mkdir -p "$EXEC_PREFIX"
-        npm exec --yes --prefix "$EXEC_PREFIX" --package=@eduardbar/drift@${{ inputs.version }} -- drift trust-gate "${{ steps.files.outputs.trust_json }}" --min-trust "${{ inputs.min-trust }}" --max-risk "${{ inputs.max-risk }}"
+        VERSION="${{ inputs.version }}"
+        if npm view "@eduardbar/drift@$VERSION" version >/dev/null 2>&1; then
+          npm exec --yes --prefix "$EXEC_PREFIX" --package="@eduardbar/drift@$VERSION" -- drift trust-gate "${{ steps.files.outputs.trust_json }}" --min-trust "${{ inputs.min-trust }}" --max-risk "${{ inputs.max-risk }}"
+        else
+          npx --no-install tsx ./src/cli.ts trust-gate "${{ steps.files.outputs.trust_json }}" --min-trust "${{ inputs.min-trust }}" --max-risk "${{ inputs.max-risk }}"
+        fi
