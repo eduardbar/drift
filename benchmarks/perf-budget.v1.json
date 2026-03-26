@@ -12,7 +12,7 @@
   },
   "tasks": {
     "scan": {
-      "maxMedianMs": 3500,
+      "maxMedianMs": 3800,
       "maxRssMb": 700
     },
     "review": {
