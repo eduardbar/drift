@@ -14,7 +14,7 @@ import { printConsole, printDiff } from './printer.js'
 import { loadConfig } from './config.js'
 import { extractFilesAtRef, cleanupTempDir } from './git.js'
 import { computeDiff } from './diff.js'
-import { runGuard } from './guard.js'
+import { formatGuardJson, runGuard } from './guard.js'
 import { generateHtmlReport } from './report.js'
 import { generateBadge } from './badge.js'
 import { emitCIAnnotations, printCISummary } from './ci.js'
@@ -412,7 +412,7 @@ addResourceOptions(
       })
 
       if (options.json) {
-        process.stdout.write(JSON.stringify(result, null, 2) + '\n')
+        process.stdout.write(`${formatGuardJson(result)}\n`)
       } else {
         printGuardSummary(result)
       }

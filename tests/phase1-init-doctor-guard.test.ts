@@ -4,9 +4,94 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runDoctor } from '../src/doctor.js'
 import { runInit } from '../src/init.js'
-import { evaluateGuard, runGuard } from '../src/guard.js'
+import { evaluateGuard, formatGuardJsonObject, runGuard } from '../src/guard.js'
 import { analyzeProject } from '../src/analyzer.js'
 import { buildReport } from '../src/reporter.js'
+
+type JsonSchema = {
+  type?: string | string[]
+  required?: string[]
+  properties?: Record<string, JsonSchema>
+  additionalProperties?: boolean | JsonSchema
+  items?: JsonSchema
+  const?: unknown
+  enum?: unknown[]
+}
+
+function validateAgainstSchema(schema: JsonSchema, value: unknown, path = '$'): string[] {
+  const errors: string[] = []
+
+  if (schema.const !== undefined && value !== schema.const) {
+    errors.push(`${path} must be ${JSON.stringify(schema.const)}`)
+    return errors
+  }
+
+  if (schema.enum && !schema.enum.includes(value)) {
+    errors.push(`${path} must be one of ${JSON.stringify(schema.enum)}`)
+    return errors
+  }
+
+  if (schema.type) {
+    const allowedTypes = Array.isArray(schema.type) ? schema.type : [schema.type]
+    const actualType = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value
+    if (!allowedTypes.includes(actualType)) {
+      errors.push(`${path} must be type ${allowedTypes.join('|')}, got ${actualType}`)
+      return errors
+    }
+  }
+
+  if (schema.type === 'array' && schema.items && Array.isArray(value)) {
+    for (let i = 0; i < value.length; i += 1) {
+      errors.push(...validateAgainstSchema(schema.items, value[i], `${path}[${i}]`))
+    }
+    return errors
+  }
+
+  if (schema.type === 'object' && value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    const objectValue = value as Record<string, unknown>
+    const required = schema.required ?? []
+    const properties = schema.properties ?? {}
+
+    for (const key of required) {
+      if (!(key in objectValue)) {
+        errors.push(`${path}.${key} is required`)
+      }
+    }
+
+    for (const [key, propertySchema] of Object.entries(properties)) {
+      if (key in objectValue) {
+        errors.push(...validateAgainstSchema(propertySchema, objectValue[key], `${path}.${key}`))
+      }
+    }
+
+    if (schema.additionalProperties === false) {
+      for (const key of Object.keys(objectValue)) {
+        if (!(key in properties)) {
+          errors.push(`${path}.${key} is not allowed`)
+        }
+      }
+    }
+
+    if (
+      schema.additionalProperties &&
+      typeof schema.additionalProperties === 'object' &&
+      schema.additionalProperties !== null
+    ) {
+      for (const [key, propValue] of Object.entries(objectValue)) {
+        if (!(key in properties)) {
+          errors.push(...validateAgainstSchema(schema.additionalProperties, propValue, `${path}.${key}`))
+        }
+      }
+    }
+  }
+
+  return errors
+}
+
+function loadSchema(schemaFileName: string): JsonSchema {
+  const raw = readFileSync(join(process.cwd(), 'schemas', schemaFileName), 'utf8')
+  return JSON.parse(raw) as JsonSchema
+}
 
 function createTempDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
@@ -60,6 +145,8 @@ describe('phase 1: doctor/init/guard', () => {
 
       await runDoctor(projectDir, { json: true })
       const report = JSON.parse(output.join('')) as {
+        $schema: string
+        toolVersion: string
         targetPath: string
         node: { version: string; major: number; supported: boolean }
         project: {
@@ -72,6 +159,12 @@ describe('phase 1: doctor/init/guard', () => {
         }
       }
 
+      const schema = loadSchema('drift-doctor.v1.json')
+      const schemaErrors = validateAgainstSchema(schema, report)
+
+      expect(report.$schema).toBe('schemas/drift-doctor.v1.json')
+      expect(typeof report.toolVersion).toBe('string')
+      expect(report.toolVersion.length).toBeGreaterThan(0)
       expect(report.targetPath).toBe(projectDir)
       expect(typeof report.node.version).toBe('string')
       expect(typeof report.node.major).toBe('number')
@@ -82,6 +175,7 @@ describe('phase 1: doctor/init/guard', () => {
       expect(report.project.sourceFilesCount).toBe(2)
       expect(report.project.driftConfigFile).toBe('drift.config.ts')
       expect(typeof report.project.lowMemorySuggested).toBe('boolean')
+      expect(schemaErrors).toEqual([])
     })
   })
 
@@ -113,6 +207,7 @@ describe('phase 1: doctor/init/guard', () => {
       const workflowPath = join(projectDir, '.github', 'workflows', 'drift-review.yml')
       const workflow = readFileSync(workflowPath, 'utf8')
       expect(workflow).toContain('name: drift PR Review')
+      expect(workflow).toContain('node-version: 20')
       expect(workflow).toContain('npx drift review --base')
     })
 
@@ -176,6 +271,9 @@ describe('phase 1: doctor/init/guard', () => {
         budget: 0,
         bySeverity: { error: 0, warning: 0, info: 0 },
       })
+      const resultJson = formatGuardJsonObject(result)
+      const schema = loadSchema('drift-guard.v1.json')
+      const schemaErrors = validateAgainstSchema(schema, JSON.parse(JSON.stringify(resultJson)))
 
       expect(result.mode).toBe('baseline')
       expect(result.passed).toBe(true)
@@ -184,7 +282,11 @@ describe('phase 1: doctor/init/guard', () => {
       expect(result.metrics.severityDelta).toEqual({ error: 0, warning: 0, info: 0 })
       expect(result.checks.some((check) => check.id === 'no-regression-score')).toBe(true)
       expect(result.checks.some((check) => check.id === 'no-regression-total-issues')).toBe(true)
-    })
+      expect(resultJson.$schema).toBe('schemas/drift-guard.v1.json')
+      expect(typeof resultJson.toolVersion).toBe('string')
+      expect(resultJson.toolVersion.length).toBeGreaterThan(0)
+      expect(schemaErrors).toEqual([])
+    }, 15000)
 
     it('throws when guard has no baseRef and no baseline', async () => {
       const projectDir = createTempDir('drift-guard-missing-anchor-')

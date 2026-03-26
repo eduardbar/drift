@@ -9,6 +9,8 @@ export const OUTPUT_SCHEMA = {
   report: 'schemas/drift-report.v1.json',
   trust: 'schemas/drift-trust.v1.json',
   ai: 'schemas/drift-ai-output.v1.json',
+  doctor: 'schemas/drift-doctor.v1.json',
+  guard: 'schemas/drift-guard.v1.json',
 } as const
 
 type OutputMetadata = {

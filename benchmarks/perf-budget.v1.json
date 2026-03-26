@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "drift-perf-budget/v1",
+  "budgetVersion": "2026-03-26",
+  "benchmark": {
+    "fixturePath": "benchmarks/fixtures/critical",
+    "warmupRuns": 1,
+    "measuredRuns": 3
+  },
+  "tolerance": {
+    "runtimePct": 30,
+    "memoryPct": 25
+  },
+  "tasks": {
+    "scan": {
+      "maxMedianMs": 3500,
+      "maxRssMb": 700
+    },
+    "review": {
+      "maxMedianMs": 6500,
+      "maxRssMb": 1300
+    },
+    "trust": {
+      "maxMedianMs": 6500,
+      "maxRssMb": 1300
+    }
+  }
+}

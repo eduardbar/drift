@@ -10,7 +10,7 @@ Esta guia define como colaborar en `drift` para mantener calidad tecnica, consis
 
 ### Stack real
 
-- Runtime: Node.js 18+
+- Runtime: Node.js 20.x and 22.x (LTS)
 - Lenguaje: TypeScript (`type: module`)
 - Analisis AST: `ts-morph`
 - CLI: `commander`

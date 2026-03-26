@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/drift-doctor.v1.json",
+  "title": "drift doctor v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "toolVersion",
+    "targetPath",
+    "node",
+    "project"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "schemas/drift-doctor.v1.json"
+    },
+    "toolVersion": {
+      "type": "string"
+    },
+    "targetPath": {
+      "type": "string"
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "major", "supported"],
+      "properties": {
+        "version": { "type": "string" },
+        "major": { "type": "number" },
+        "supported": { "type": "boolean" }
+      }
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "packageJsonFound",
+        "esm",
+        "tsconfigFound",
+        "sourceFilesCount",
+        "lowMemorySuggested",
+        "driftConfigFile"
+      ],
+      "properties": {
+        "packageJsonFound": { "type": "boolean" },
+        "esm": { "type": "boolean" },
+        "tsconfigFound": { "type": "boolean" },
+        "sourceFilesCount": { "type": "number" },
+        "lowMemorySuggested": { "type": "boolean" },
+        "driftConfigFile": {
+          "type": ["string", "null"]
+        }
+      }
+    }
+  }
+}

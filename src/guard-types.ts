@@ -1,4 +1,4 @@
-import type { DriftAnalysisOptions, DriftDiff, DriftIssue, DriftReport } from './types.js'
+import type { DriftAnalysisOptions, DriftDiff, DriftIssue, DriftOutputMetadata, DriftReport } from './types.js'
 
 export type IssueSeverity = DriftIssue['severity']
 
@@ -62,3 +62,5 @@ export interface GuardResult {
   current: DriftReport
   diff?: DriftDiff
 }
+
+export type GuardResultJson = GuardResult & DriftOutputMetadata

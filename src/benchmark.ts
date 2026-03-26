@@ -24,10 +24,14 @@ interface TaskResult {
   warmupRuns: number
   measuredRuns: number
   samplesMs: number[]
+  samplesRssMb: number[]
   medianMs: number
   meanMs: number
   minMs: number
   maxMs: number
+  medianRssMb: number
+  meanRssMb: number
+  maxRssMb: number
 }
 
 interface BenchmarkOutput {
@@ -129,6 +133,10 @@ function formatMs(ms: number): string {
   return ms.toFixed(2)
 }
 
+function bytesToMb(bytes: number): number {
+  return bytes / (1024 * 1024)
+}
+
 async function runTask(
   name: TaskResult['name'],
   warmupRuns: number,
@@ -140,22 +148,31 @@ async function runTask(
   }
 
   const samplesMs: number[] = []
+  const samplesRssMb: number[] = []
   for (let i = 0; i < measuredRuns; i += 1) {
+    const rssBefore = process.memoryUsage().rss
     const started = performance.now()
     await task()
     samplesMs.push(performance.now() - started)
+    const rssAfter = process.memoryUsage().rss
+    samplesRssMb.push(bytesToMb(Math.max(rssBefore, rssAfter)))
   }
 
   const total = samplesMs.reduce((sum, sample) => sum + sample, 0)
+  const totalRss = samplesRssMb.reduce((sum, sample) => sum + sample, 0)
   return {
     name,
     warmupRuns,
     measuredRuns,
     samplesMs,
+    samplesRssMb,
     medianMs: median(samplesMs),
     meanMs: total / samplesMs.length,
     minMs: Math.min(...samplesMs),
     maxMs: Math.max(...samplesMs),
+    medianRssMb: median(samplesRssMb),
+    meanRssMb: totalRss / samplesRssMb.length,
+    maxRssMb: Math.max(...samplesRssMb),
   }
 }
 

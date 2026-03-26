@@ -6,7 +6,7 @@
 
 - Publicado en npm como `@eduardbar/drift`
 - Licencia MIT
-- Versión del paquete: `1.3.0` (`package.json`)
+- Versión del paquete: `1.4.0` (`package.json`)
 
 ---
 
@@ -20,7 +20,7 @@
 | `typescript ^5.9` | compilación |
 | `vitest ^4` | testing |
 
-Runtime: Node.js 18+, ES Modules (`"type": "module"`).
+Runtime: Node.js 20.x and 22.x (LTS), ES Modules (`"type": "module"`).
 
 ---
 
