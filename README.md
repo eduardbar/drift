@@ -259,7 +259,7 @@ drift trust ./src --markdown --output trust.md
 drift trust ./src --min-trust 45
 drift trust ./src --max-risk HIGH
 drift trust ./src --branch main
-drift trust ./src --branch release/v1.4.0 --policy-pack strict --explain-policy
+drift trust ./src --branch release/v1.5.0 --policy-pack strict --explain-policy
 drift trust ./src --advanced-trust
 drift trust ./src --advanced-trust --previous-trust ./artifacts/prev-trust.json
 drift trust ./src --advanced-trust --history-file ./drift-history.json --markdown

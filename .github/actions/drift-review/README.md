@@ -4,6 +4,8 @@ Composite action for PR workflows that wraps `drift trust`, optional `drift revi
 
 The action runs drift via `npm exec` with an isolated prefix under `$RUNNER_TEMP/drift-cli` to avoid local bin resolution conflicts when workflows execute inside the `@eduardbar/drift` repository.
 
+If the requested `version` is not published on npm yet (for example, release-prep PRs), the action falls back to the local repository CLI (`npx --no-install tsx ./src/cli.ts`) so PR checks can still run.
+
 ## Why this action exists
 
 The repository workflow (`.github/workflows/review-pr.yml`) uses trust as the merge gate and review markdown as complementary context. This action packages that flow as a reusable contract:
@@ -22,7 +24,7 @@ The repository workflow (`.github/workflows/review-pr.yml`) uses trust as the me
   with:
     path: .
     base-ref: origin/${{ github.base_ref }}
-    version: 1.4.0
+    version: 1.5.0
     min-trust: 40
     max-risk: HIGH
     fail-on-gate: true
@@ -35,7 +37,7 @@ The repository workflow (`.github/workflows/review-pr.yml`) uses trust as the me
 |-------|-------------|---------|
 | `path` | Path to analyze | `.` |
 | `base-ref` | Base git ref for diff-aware trust/review | `origin/main` |
-| `version` | drift version for `npm exec` execution | `1.4.0` |
+| `version` | drift version for `npm exec` execution | `1.5.0` |
 | `min-trust` | Failing threshold for trust score | `45` |
 | `max-risk` | Failing threshold for merge risk | `HIGH` |
 | `fail-on-gate` | Enforce trust gate failure | `true` |

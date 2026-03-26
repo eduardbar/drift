@@ -18,9 +18,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+---
+
+## [1.5.0] - 2026-03-26
+
 ### Changed
 
-- CI drift version policy now uses `package.json` as source of truth, aligns action defaults/docs to `1.4.0`, and adds a test guard that fails if action/workflow references drift semver values that diverge.
+- CI drift version policy now uses `package.json` as source of truth, aligns action defaults/docs to `1.5.0`, and adds a test guard that fails if action/workflow references drift semver values that diverge.
 - Reusable quality checks now include a required CLI smoke E2E gate (`npm run smoke:repo`) for merge/release verification and upload smoke artifacts (`.drift-smoke/...`) for CI failure triage.
 - Runtime support policy is now enforced as Node.js `20.x` and `22.x` (LTS): `package.json` now declares `engines.node`, CI matrix moved to `20/22`, and docs/doctor output were aligned to avoid advertising unsupported Node versions.
 - Added runtime policy gate (`npm run check:runtime-policy`) in required CI checks to fail fast when `engines.node`, workflow matrix, README runtime line, or lockfile dependency constraints diverge.
