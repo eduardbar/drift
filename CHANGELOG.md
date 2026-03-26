@@ -27,6 +27,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Tradeoff: dropped Node 18 from required support because `commander@14` (runtime dependency) requires Node `>=20`; preserving `18/20/22` would create false support claims and non-deterministic install/runtime behavior.
 - `drift doctor --json` and `drift guard --json` now emit schema metadata (`$schema`, `toolVersion`) and are covered by v1 schema contract tests (`schemas/drift-doctor.v1.json`, `schemas/drift-guard.v1.json`).
 - Added performance regression gate (`npm run check:perf-budget`) with versioned budgets in `benchmarks/perf-budget.v1.json`, benchmark memory/runtime contract checks, and CI artifact upload under `.drift-perf/` (gated on Node 20 to reduce matrix flakiness).
+- Stabilized local/CI test reliability by setting global Vitest default timeouts (15s) and tuning the scan runtime perf budget threshold for lower false-positive noise.
 
 ---
 
