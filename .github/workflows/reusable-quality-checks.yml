@@ -46,14 +46,27 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Validate runtime policy contract
+        run: npm run check:runtime-policy
+
+      - name: Validate docs/source-of-truth drift contract
+        run: npm run check:docs-drift
+
       - name: Run tests
         run: npm test
 
       - name: Run coverage
-        run: npm run test:coverage -- --testTimeout=30000
+        run: npm run test:coverage
 
       - name: Build
         run: npm run build
+
+      - name: Run CLI smoke E2E
+        run: npm run smoke:repo -- --base HEAD --out .drift-smoke/ci-node-${{ matrix.node }}
+
+      - name: Run performance regression gate
+        if: matrix.node == '20'
+        run: npm run check:perf-budget -- --out .drift-perf/ci-node-${{ matrix.node }}/benchmark-latest.json
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
@@ -61,4 +74,22 @@ jobs:
           name: ${{ inputs.coverage_artifact_prefix }}-node-${{ matrix.node }}-run-${{ github.run_id }}-${{ github.run_attempt }}
           path: coverage/
           if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload smoke E2E artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-e2e-node-${{ matrix.node }}-run-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .drift-smoke/ci-node-${{ matrix.node }}/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload perf gate artifacts
+        if: always() && matrix.node == '20'
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-gate-node-${{ matrix.node }}-run-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .drift-perf/ci-node-${{ matrix.node }}/
+          if-no-files-found: warn
           retention-days: 14

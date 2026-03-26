@@ -1,6 +1,8 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import kleur from 'kleur'
+import type { DriftOutputMetadata } from './types.js'
+import { OUTPUT_SCHEMA, withOutputMetadata } from './output-metadata.js'
 
 export interface DoctorOptions {
   json?: boolean
@@ -23,10 +25,12 @@ interface DoctorReport {
   }
 }
 
+export type DoctorReportJson = DoctorReport & DriftOutputMetadata
+
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx'])
 const IGNORED_DIRECTORIES = new Set(['node_modules', '.git', 'dist', '.next', 'coverage'])
 const DECIMAL_RADIX = 10
-const MIN_SUPPORTED_NODE_MAJOR = 18
+const MIN_SUPPORTED_NODE_MAJOR = 20
 const LOW_MEMORY_SOURCE_FILE_THRESHOLD = 500
 const DRIFT_CONFIG_CANDIDATES = [
   'drift.config.ts',
@@ -128,7 +132,7 @@ function printConsoleReport(report: DoctorReport): void {
 
   const nodeStatus = report.node.supported
     ? `${icons.check} ${kleur.green('Node runtime supported')}`
-    : `${icons.warn} ${kleur.yellow('Node runtime below recommended minimum (>=18)')}`
+    : `${icons.warn} ${kleur.yellow('Node runtime below supported minimum (>=20)')}`
   process.stdout.write(`${nodeStatus} ${kleur.gray(`(${report.node.version})`)}\n`)
 
   if (report.project.packageJsonFound) {
@@ -160,11 +164,19 @@ function printConsoleReport(report: DoctorReport): void {
   process.stdout.write('\n')
 }
 
+export function formatDoctorJsonObject(report: DoctorReport): DoctorReportJson {
+  return withOutputMetadata(report, OUTPUT_SCHEMA.doctor)
+}
+
+export function formatDoctorJson(report: DoctorReport): string {
+  return JSON.stringify(formatDoctorJsonObject(report), null, 2)
+}
+
 export async function runDoctor(projectPath: string, options?: DoctorOptions): Promise<number> {
   const report = buildDoctorReport(projectPath)
 
   if (options?.json) {
-    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)
+    process.stdout.write(`${formatDoctorJson(report)}\n`)
   } else {
     printConsoleReport(report)
   }

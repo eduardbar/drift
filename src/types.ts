@@ -67,6 +67,7 @@ export type {
   GuardCheck,
   GuardEvaluation,
   GuardResult,
+  GuardResultJson,
 } from './guard-types.js'
 
 export type {

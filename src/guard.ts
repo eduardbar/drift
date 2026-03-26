@@ -5,6 +5,7 @@ import { computeDiff } from './diff.js'
 import { cleanupTempDir, extractFilesAtRef } from './git.js'
 import { normalizeBaseline, readBaselineFromFile } from './guard-baseline.js'
 import { buildMetricsFromBaseline, buildMetricsFromDiff } from './guard-metrics.js'
+import { OUTPUT_SCHEMA, withOutputMetadata } from './output-metadata.js'
 import { buildReport } from './reporter.js'
 import type { DriftReport } from './types.js'
 import type {
@@ -13,6 +14,7 @@ import type {
   GuardMetrics,
   GuardOptions,
   GuardResult,
+  GuardResultJson,
   GuardThresholds,
   IssueSeverity,
 } from './guard-types.js'
@@ -128,6 +130,14 @@ export function evaluateGuard(input: GuardEvalInput): GuardEvaluation {
     passed: checks.every((check) => check.passed),
     checks,
   }
+}
+
+export function formatGuardJsonObject(result: GuardResult): GuardResultJson {
+  return withOutputMetadata(result, OUTPUT_SCHEMA.guard)
+}
+
+export function formatGuardJson(result: GuardResult): string {
+  return JSON.stringify(formatGuardJsonObject(result), null, 2)
 }
 
 export async function runGuard(targetPath: string, options: GuardOptions = {}): Promise<GuardResult> {

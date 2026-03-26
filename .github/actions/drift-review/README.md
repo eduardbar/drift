@@ -22,7 +22,7 @@ The repository workflow (`.github/workflows/review-pr.yml`) uses trust as the me
   with:
     path: .
     base-ref: origin/${{ github.base_ref }}
-    version: 1.3.0
+    version: 1.4.0
     min-trust: 40
     max-risk: HIGH
     fail-on-gate: true
@@ -35,7 +35,7 @@ The repository workflow (`.github/workflows/review-pr.yml`) uses trust as the me
 |-------|-------------|---------|
 | `path` | Path to analyze | `.` |
 | `base-ref` | Base git ref for diff-aware trust/review | `origin/main` |
-| `version` | drift version for `npm exec` execution | `1.3.0` |
+| `version` | drift version for `npm exec` execution | `1.4.0` |
 | `min-trust` | Failing threshold for trust score | `45` |
 | `max-risk` | Failing threshold for merge risk | `HIGH` |
 | `fail-on-gate` | Enforce trust gate failure | `true` |

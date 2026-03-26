@@ -3,7 +3,7 @@ name: Quality Gate
 on:
   pull_request:
   push:
-    branches: [master]
+    branches: [main, master]
 
 permissions:
   contents: read
@@ -11,3 +11,5 @@ permissions:
 jobs:
   quality:
     uses: ./.github/workflows/reusable-quality-checks.yml
+    with:
+      node_versions: '["20", "22"]'

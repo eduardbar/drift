@@ -1,0 +1,298 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/drift-guard.v1.json",
+  "title": "drift guard v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "toolVersion",
+    "scannedAt",
+    "projectPath",
+    "mode",
+    "passed",
+    "metrics",
+    "checks",
+    "current"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "schemas/drift-guard.v1.json"
+    },
+    "toolVersion": {
+      "type": "string"
+    },
+    "scannedAt": {
+      "type": "string"
+    },
+    "projectPath": {
+      "type": "string"
+    },
+    "mode": {
+      "enum": ["diff", "baseline"]
+    },
+    "passed": {
+      "type": "boolean"
+    },
+    "baseRef": {
+      "type": "string"
+    },
+    "baselinePath": {
+      "type": "string"
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scoreDelta", "totalIssuesDelta", "severityDelta"],
+      "properties": {
+        "scoreDelta": { "type": "number" },
+        "totalIssuesDelta": { "type": "number" },
+        "severityDelta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["error", "warning", "info"],
+          "properties": {
+            "error": { "type": "number" },
+            "warning": { "type": "number" },
+            "info": { "type": "number" }
+          }
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "passed", "actual", "limit", "message"],
+        "properties": {
+          "id": { "type": "string" },
+          "passed": { "type": "boolean" },
+          "actual": { "type": "number" },
+          "limit": { "type": "number" },
+          "message": { "type": "string" }
+        }
+      }
+    },
+    "current": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "$schema",
+        "toolVersion",
+        "scannedAt",
+        "targetPath",
+        "files",
+        "totalIssues",
+        "totalScore",
+        "totalFiles",
+        "summary",
+        "quality",
+        "maintenanceRisk"
+      ],
+      "properties": {
+        "$schema": {
+          "const": "schemas/drift-report.v1.json"
+        },
+        "toolVersion": {
+          "type": "string"
+        },
+        "scannedAt": {
+          "type": "string"
+        },
+        "targetPath": {
+          "type": "string"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "issues", "score"],
+            "properties": {
+              "path": { "type": "string" },
+              "score": { "type": "number" },
+              "issues": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["rule", "severity", "message", "line", "column", "snippet"],
+                  "properties": {
+                    "rule": { "type": "string" },
+                    "severity": { "enum": ["error", "warning", "info"] },
+                    "message": { "type": "string" },
+                    "line": { "type": "number" },
+                    "column": { "type": "number" },
+                    "snippet": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "totalIssues": { "type": "number" },
+        "totalScore": { "type": "number" },
+        "totalFiles": { "type": "number" },
+        "summary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["errors", "warnings", "infos", "byRule"],
+          "properties": {
+            "errors": { "type": "number" },
+            "warnings": { "type": "number" },
+            "infos": { "type": "number" },
+            "byRule": {
+              "type": "object",
+              "additionalProperties": { "type": "number" }
+            }
+          }
+        },
+        "quality": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["overall", "dimensions"],
+          "properties": {
+            "overall": { "type": "number" },
+            "dimensions": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["architecture", "complexity", "ai-patterns", "testing"],
+              "properties": {
+                "architecture": { "type": "number" },
+                "complexity": { "type": "number" },
+                "ai-patterns": { "type": "number" },
+                "testing": { "type": "number" }
+              }
+            }
+          }
+        },
+        "maintenanceRisk": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["score", "level", "hotspots", "signals"],
+          "properties": {
+            "score": { "type": "number" },
+            "level": { "enum": ["low", "medium", "high", "critical"] },
+            "hotspots": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "file",
+                  "driftScore",
+                  "complexityIssues",
+                  "hasNearbyTests",
+                  "changeFrequency",
+                  "risk",
+                  "reasons"
+                ],
+                "properties": {
+                  "file": { "type": "string" },
+                  "driftScore": { "type": "number" },
+                  "complexityIssues": { "type": "number" },
+                  "hasNearbyTests": { "type": "boolean" },
+                  "changeFrequency": { "type": "number" },
+                  "risk": { "type": "number" },
+                  "reasons": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  }
+                }
+              }
+            },
+            "signals": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["highComplexityFiles", "filesWithoutNearbyTests", "frequentChangeFiles"],
+              "properties": {
+                "highComplexityFiles": { "type": "number" },
+                "filesWithoutNearbyTests": { "type": "number" },
+                "frequentChangeFiles": { "type": "number" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "diff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseRef",
+        "projectPath",
+        "scannedAt",
+        "files",
+        "totalScoreBefore",
+        "totalScoreAfter",
+        "totalDelta",
+        "newIssuesCount",
+        "resolvedIssuesCount"
+      ],
+      "properties": {
+        "baseRef": { "type": "string" },
+        "projectPath": { "type": "string" },
+        "scannedAt": { "type": "string" },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "scoreBefore",
+              "scoreAfter",
+              "scoreDelta",
+              "newIssues",
+              "resolvedIssues"
+            ],
+            "properties": {
+              "path": { "type": "string" },
+              "scoreBefore": { "type": "number" },
+              "scoreAfter": { "type": "number" },
+              "scoreDelta": { "type": "number" },
+              "newIssues": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["rule", "severity", "message", "line", "column", "snippet"],
+                  "properties": {
+                    "rule": { "type": "string" },
+                    "severity": { "enum": ["error", "warning", "info"] },
+                    "message": { "type": "string" },
+                    "line": { "type": "number" },
+                    "column": { "type": "number" },
+                    "snippet": { "type": "string" }
+                  }
+                }
+              },
+              "resolvedIssues": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["rule", "severity", "message", "line", "column", "snippet"],
+                  "properties": {
+                    "rule": { "type": "string" },
+                    "severity": { "enum": ["error", "warning", "info"] },
+                    "message": { "type": "string" },
+                    "line": { "type": "number" },
+                    "column": { "type": "number" },
+                    "snippet": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "totalScoreBefore": { "type": "number" },
+        "totalScoreAfter": { "type": "number" },
+        "totalDelta": { "type": "number" },
+        "newIssuesCount": { "type": "number" },
+        "resolvedIssuesCount": { "type": "number" }
+      }
+    }
+  }
+}

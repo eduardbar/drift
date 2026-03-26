@@ -91,7 +91,9 @@ drift doctor --json
 |------|-------------|
 | `--json` | Output structured doctor report JSON |
 
-Checks include Node major version support (`>=18`), `package.json`, ESM mode, `tsconfig.json`, source file count, optional `--low-memory` recommendation, and `drift.config.*` detection.
+Checks include Node major version support (`>=20`), `package.json`, ESM mode, `tsconfig.json`, source file count, optional `--low-memory` recommendation, and `drift.config.*` detection.
+
+When `--json` is enabled, output includes `$schema` and `toolVersion` metadata and follows [`schemas/drift-doctor.v1.json`](./schemas/drift-doctor.v1.json).
 
 ---
 
@@ -189,6 +191,8 @@ Behavior:
 - With `--base`, guard enforces no-regression checks for score and total issues, then applies optional budget/severity thresholds.
 - Without `--base`, guard requires a baseline (inline or file) and compares only against available baseline anchors.
 - Exit code is `1` when any guard check fails.
+
+When `--json` is enabled, output includes `$schema` and `toolVersion` metadata and follows [`schemas/drift-guard.v1.json`](./schemas/drift-guard.v1.json).
 
 ---
 
@@ -661,15 +665,24 @@ jobs:
 
 ### Required quality checks for merge and release
 
-This repository enforces `.github/workflows/quality.yml` on `pull_request` and `push` to `master`.
+This repository enforces `.github/workflows/quality.yml` on `pull_request` and `push` to `main`/`master`.
 
 The workflow runs a required Node.js matrix (`20`, `22`) and executes these checks in each matrix job:
 - `npm ci`
+- `npm run check:runtime-policy`
+- `npm run check:docs-drift`
 - `npm test`
 - `npm run test:coverage`
 - `npm run build`
+- `npm run smoke:repo -- --base HEAD --out .drift-smoke/ci-node-<node>`
 
-Coverage artifacts are uploaded from each matrix run to support traceability.
+Additionally, Node 20 runs a deterministic performance regression gate:
+- `npm run check:perf-budget -- --out .drift-perf/ci-node-20/benchmark-latest.json`
+- Budget source of truth: [`benchmarks/perf-budget.v1.json`](./benchmarks/perf-budget.v1.json)
+
+`check:docs-drift` enforces documentation source-of-truth contracts: package version claims come from `package.json` and rule catalog/count claims come from `RULE_WEIGHTS` in `src/analyzer.ts`.
+
+Coverage artifacts and smoke E2E artifacts are uploaded from each matrix run to support traceability and CI debugging. The perf gate also uploads `.drift-perf/...` artifacts on Node 20.
 
 `publish.yml` now runs `release-verify` before publish, reusing the same quality workflow contract. `publish` only runs after `release-verify` passes.
 
@@ -794,7 +807,7 @@ See [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) before participating.
 | [`commander`](https://github.com/tj/commander.js) | CLI commands and flags |
 | [`kleur`](https://github.com/lukeed/kleur) | Terminal colors (zero dependencies) |
 
-**Runtime:** Node.js 18+ · TypeScript 5.x · ES Modules · Supports TypeScript (`.ts`, `.tsx`) and JavaScript (`.js`, `.jsx`) files
+**Runtime:** Node.js 20.x and 22.x (LTS) · TypeScript 5.x · ES Modules · Supports TypeScript (`.ts`, `.tsx`) and JavaScript (`.js`, `.jsx`) files
 
 ---
 

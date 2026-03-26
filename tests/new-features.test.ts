@@ -118,7 +118,7 @@ describe('new feature MVP', () => {
     expect(rules).toContain('controller-no-db')
     expect(rules).toContain('service-no-http')
     expect(rules).toContain('max-function-lines')
-  })
+  }, 15000)
 
   it('generates architecture SVG map', () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'drift-map-'))

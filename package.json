@@ -16,7 +16,10 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "benchmark": "node --import tsx src/benchmark.ts",
-    "smoke:repo": "node ./scripts/smoke-repo.mjs"
+    "smoke:repo": "node ./scripts/smoke-repo.mjs",
+    "check:runtime-policy": "node ./scripts/check-runtime-policy.mjs",
+    "check:docs-drift": "node ./scripts/check-docs-drift.mjs",
+    "check:perf-budget": "node ./scripts/check-performance-budget.mjs"
   },
   "keywords": [
     "vibe-coding",
@@ -28,6 +31,9 @@
   ],
   "author": "eduardbar",
   "license": "MIT",
+  "engines": {
+    "node": "^20.0.0 || ^22.0.0"
+  },
   "homepage": "https://github.com/eduardbar/drift#readme",
   "repository": {
     "type": "git",
@@ -43,9 +49,9 @@
   },
   "devDependencies": {
     "@types/node": "^25.3.0",
-    "@vitest/coverage-v8": "^4.0.18",
+    "@vitest/coverage-v8": "^4.1.2",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.18"
+    "vitest": "^4.1.2"
   }
 }
