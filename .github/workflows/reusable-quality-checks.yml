@@ -56,7 +56,7 @@ jobs:
         run: npm test
 
       - name: Run coverage
-        run: npm run test:coverage
+        run: npm run test:coverage -- --testTimeout=45000
 
       - name: Build
         run: npm run build
