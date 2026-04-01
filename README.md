@@ -2,7 +2,7 @@
 
 Stop merging AI-generated technical debt blindly. `drift` gives every PR a structural trust score before it hits `main`.
 
-![drift demo preview](./assets/readme/drift-demo.gif)
+![drift demo preview](./assets/readme/drift-demo-v2.gif)
 
 [Live landing page](https://drift-ai-detection.vercel.app/)
 
