@@ -1,8 +1,16 @@
 export function FinalCtaSection() {
   return (
-    <section className="section shell js-reveal" id="cta">
-      <div className="surface-card final-cta">
-        <h2>Stop shipping silent architecture debt.</h2>
+    <section
+      className="section shell section-surface section-accent-cta final-cta-section js-reveal"
+      id="cta"
+      aria-labelledby="cta-title"
+    >
+      <div className="section-divider" aria-hidden="true">
+        <span className="js-divider-line" />
+      </div>
+      <div className="panel-card final-cta">
+        <span className="section-chip">Ready to gate merges</span>
+        <h2 id="cta-title">Stop shipping silent architecture debt.</h2>
         <p>
           Install drift, run a first scan in minutes, and make trust an explicit merge
           requirement.

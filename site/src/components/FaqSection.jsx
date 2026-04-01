@@ -18,14 +18,22 @@ const faqs = [
 
 export function FaqSection() {
   return (
-    <section className="section shell faq js-reveal" id="faq">
+    <section
+      className="section shell section-surface section-accent-faq faq js-reveal"
+      id="faq"
+      aria-labelledby="faq-title"
+    >
+      <div className="section-divider" aria-hidden="true">
+        <span className="js-divider-line" />
+      </div>
       <div className="section-head">
         <p className="eyebrow">FAQ</p>
-        <h2>Short answers. No marketing fog.</h2>
+        <h2 id="faq-title">Short answers. No marketing fog.</h2>
+        <span className="section-chip">Direct answers</span>
       </div>
       <div className="faq-list">
         {faqs.map((item) => (
-          <details key={item.question} className="surface-card">
+          <details key={item.question} className="panel-card faq-item js-reveal-scale">
             <summary>{item.question}</summary>
             <p>{item.answer}</p>
           </details>

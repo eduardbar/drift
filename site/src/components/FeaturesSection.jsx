@@ -23,14 +23,22 @@ const features = [
 
 export function FeaturesSection() {
   return (
-    <section className="section shell js-reveal" id="features">
+    <section
+      className="section shell section-surface section-accent-features features-section js-reveal"
+      id="features"
+      aria-labelledby="features-title"
+    >
+      <div className="section-divider" aria-hidden="true">
+        <span className="js-divider-line" />
+      </div>
       <div className="section-head">
         <p className="eyebrow">Core features</p>
-        <h2>Technical signal your team can gate on.</h2>
+        <h2 id="features-title">Technical signal your team can gate on.</h2>
+        <span className="section-chip">Signal stack</span>
       </div>
       <div className="feature-grid">
         {features.map((feature) => (
-          <article key={feature.title} className="surface-card feature-card js-stagger">
+          <article key={feature.title} className="panel-card feature-card js-reveal-scale">
             <h3>{feature.title}</h3>
             <p>{feature.description}</p>
           </article>
