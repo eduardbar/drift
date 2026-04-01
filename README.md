@@ -1,12 +1,8 @@
-![drift - AI Code Audit CLI for merge trust](./assets/og.png)
-
 # drift
 
 Stop merging AI-generated technical debt blindly. `drift` gives every PR a structural trust score before it hits `main`.
 
-![drift demo preview (fallback image)](./assets/readme/drift-demo-fallback.png)
-
-> Demo media note: a true animated GIF was not generated in this environment because no GIF/video encoder tooling is available in this runtime.
+![drift demo preview](./assets/readme/drift-demo.gif)
 
 [Live landing page](https://drift-ai-detection.vercel.app/)
 
