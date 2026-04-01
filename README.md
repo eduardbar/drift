@@ -2,13 +2,32 @@
 
 # drift
 
-AI Code Audit CLI for AI-assisted PRs. Drift turns static signals into merge trust decisions before you merge.
+Stop merging AI-generated technical debt blindly. `drift` gives every PR a structural trust score before it hits `main`.
+
+![drift demo preview (fallback image)](./assets/readme/drift-demo-fallback.png)
+
+> Demo media note: a true animated GIF was not generated in this environment because no GIF/video encoder tooling is available in this runtime.
+
+[Live landing page](https://drift-ai-detection.vercel.app/)
+
+## Quick Install
+
+```bash
+npx @eduardbar/drift scan .
+```
 
 ![npm](https://img.shields.io/npm/v/@eduardbar/drift?color=6366f1&label=npm)
 ![license](https://img.shields.io/badge/license-MIT-green.svg)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6.svg)
 ![ts-morph](https://img.shields.io/badge/powered%20by-ts--morph-6366f1.svg)
 ![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)
+
+## Why Now
+
+- AI-assisted output is faster than review capacity in most teams.
+- Structural debt compounds silently until velocity collapses.
+- Traditional linters catch style and correctness, not merge trust.
+- `drift` gives you deterministic signals (`scan`, `review`, `trust`) you can gate in CI.
 
 [Why](#why) · [Installation](#installation) · [Product Docs](#product-docs) · [Commands](#commands) · [Rules](#rules) · [Score](#score) · [Configuration](#configuration) · [CI Integration](#ci-integration) · [drift-ignore](#drift-ignore) · [Contributing](#contributing)
 
