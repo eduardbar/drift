@@ -16,6 +16,10 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "benchmark": "node --import tsx src/benchmark.ts",
+    "video:studio": "remotion studio",
+    "video:list": "remotion compositions",
+    "video:render:promo": "remotion render DriftMarketingPulse out/drift-marketing-pulse.mp4",
+    "video:render:readme-gif": "remotion render DriftReadmeDemo assets/readme/drift-demo.gif --codec=gif --frames=0-149",
     "smoke:repo": "node ./scripts/smoke-repo.mjs",
     "check:runtime-policy": "node ./scripts/check-runtime-policy.mjs",
     "check:docs-drift": "node ./scripts/check-docs-drift.mjs",
@@ -48,8 +52,14 @@
     "ts-morph": "^27.0.2"
   },
   "devDependencies": {
+    "@remotion/cli": "^4.0.443",
     "@types/node": "^25.3.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@vitest/coverage-v8": "^4.1.2",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "remotion": "^4.0.443",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.2"
