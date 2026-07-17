@@ -13,7 +13,6 @@
 
 Decision needed before apply: No (resolved: stacked-to-main)
 Chained PRs recommended: Yes
-Chain strategy: pending
 400-line budget risk: High
 
 ### Suggested Work Units
