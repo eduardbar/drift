@@ -27,4 +27,12 @@ export interface DriftConfig {
     }
   }
   trustGate?: TrustGatePolicyConfig
+  aiIntegration?: {
+    contextOutput?: string
+    maxIssues?: number
+  }
+  aiGuard?: {
+    budget?: number
+    blockOnRules?: string[]
+  }
 }
