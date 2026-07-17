@@ -121,3 +121,39 @@ function resolveRefHash(projectPath: string, ref: string): string {
     return ref
   }
 }
+
+/**
+ * Read the unified diff of staged changes in a git repository.
+ * Returns an empty string when nothing is staged.
+ */
+export function readStagedDiff(projectPath: string): string {
+  verifyGitRepo(projectPath)
+
+  try {
+    return execSync('git diff --cached --no-color', {
+      cwd: projectPath,
+      encoding: 'utf-8',
+      stdio: 'pipe',
+    })
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * Read the unified diff between the working tree and a git ref.
+ */
+export function readDiffFromBase(projectPath: string, ref: string): string {
+  verifyGitRepo(projectPath)
+  verifyRefExists(projectPath, ref)
+
+  try {
+    return execSync(`git diff --no-color ${ref}`, {
+      cwd: projectPath,
+      encoding: 'utf-8',
+      stdio: 'pipe',
+    })
+  } catch {
+    return ''
+  }
+}
