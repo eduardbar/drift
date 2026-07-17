@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { execFileSync, spawn } from 'node:child_process'
 import {
   existsSync,
   mkdtempSync,
@@ -9,13 +10,36 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import {
   buildContextDocument,
   checkContextFreshness,
   formatContextMarkdown,
   writeContextFile,
 } from '../src/context.js'
+import { runInit } from '../src/init.js'
 import type { AIOutput, DriftConfig, DriftReport } from '../src/types.js'
+
+const CLI_PATH = join(process.cwd(), 'src', 'cli.ts')
+const TSX_LOADER = pathToFileURL(join(process.cwd(), 'node_modules', 'tsx', 'dist', 'loader.mjs')).href
+
+function runCli(args: string[], cwd: string): { stdout: string; stderr: string; exitCode: number } {
+  try {
+    const stdout = execFileSync(process.execPath, ['--import', TSX_LOADER, CLI_PATH, ...args], {
+      cwd,
+      encoding: 'utf-8',
+      stdio: 'pipe',
+    })
+    return { stdout, stderr: '', exitCode: 0 }
+  } catch (error) {
+    const err = error as { stdout?: string; stderr?: string; status: number | null }
+    return {
+      stdout: err.stdout ?? '',
+      stderr: err.stderr ?? '',
+      exitCode: err.status ?? 1,
+    }
+  }
+}
 
 function createTempDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
@@ -336,6 +360,159 @@ describe('context-file', () => {
       expect(result.fresh).toBe(false)
       expect(result.recordedScore).toBe(80)
       expect(result.delta).toBe(15)
+    })
+  })
+
+  describe('runInit --context', () => {
+    it('generates context file and appends .gitignore', async () => {
+      const dir = createTempDir('drift-init-context-')
+      tempDirs.push(dir)
+      writeFileSync(join(dir, 'a.ts'), 'export const a = 1\n')
+
+      const output: string[] = []
+      vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+        output.push(String(chunk))
+        return true
+      })
+      vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+
+      await runInit(dir, { context: true })
+
+      const contextPath = join(dir, '.drift', 'context.md')
+      expect(existsSync(contextPath)).toBe(true)
+      const content = readFileSync(contextPath, 'utf8')
+      expect(content).toContain('# Drift Context')
+
+      const gitignore = readFileSync(join(dir, '.gitignore'), 'utf8')
+      expect(gitignore).toContain('.drift/context.md')
+    })
+  })
+
+  describe('drift context CLI', () => {
+    it('writes default .drift/context.md', () => {
+      const dir = createTempDir('drift-cli-context-default-')
+      tempDirs.push(dir)
+      writeFileSync(join(dir, 'a.ts'), 'export const a = 1\n')
+
+      const { exitCode } = runCli(['context'], dir)
+      expect(exitCode).toBe(0)
+
+      const contextPath = join(dir, '.drift', 'context.md')
+      expect(existsSync(contextPath)).toBe(true)
+      const content = readFileSync(contextPath, 'utf8')
+      expect(content).toContain('# Drift Context')
+      expect(content).toContain('<!-- drift-context-metadata:')
+    })
+
+    it('writes to custom output path and not default', () => {
+      const dir = createTempDir('drift-cli-context-output-')
+      tempDirs.push(dir)
+      writeFileSync(join(dir, 'a.ts'), 'export const a = 1\n')
+      const customPath = join(dir, 'docs', 'ai-context.md')
+
+      const { exitCode } = runCli(['context', '--output', customPath], dir)
+      expect(exitCode).toBe(0)
+
+      expect(existsSync(customPath)).toBe(true)
+      expect(existsSync(join(dir, '.drift', 'context.md'))).toBe(false)
+    })
+
+    it('emits JSON to stdout and writes no file', () => {
+      const dir = createTempDir('drift-cli-context-json-')
+      tempDirs.push(dir)
+      writeFileSync(join(dir, 'a.ts'), 'export const a = 1\n')
+
+      const { stdout, exitCode } = runCli(['context', '--format', 'json'], dir)
+      expect(exitCode).toBe(0)
+
+      const parsed = JSON.parse(stdout) as { projectPath: string; health: { score: number } }
+      expect(parsed.projectPath).toBe(dir)
+      expect(typeof parsed.health.score).toBe('number')
+      expect(existsSync(join(dir, '.drift', 'context.md'))).toBe(false)
+    })
+
+    it('exits 1 in CI mode when file is stale', () => {
+      const dir = createTempDir('drift-cli-context-ci-stale-')
+      tempDirs.push(dir)
+      writeFileSync(join(dir, 'a.ts'), 'export const a = 1\n')
+
+      const doc = buildContextDocument(dir, buildMockReport({ totalScore: 80 }), buildMockAIOutput())
+      mkdirSync(join(dir, '.drift'), { recursive: true })
+      writeContextFile(join(dir, '.drift', 'context.md'), doc)
+
+      // Add a violation to make current score worse than recorded 80
+      writeFileSync(join(dir, 'a.ts'), 'console.log("debug")\n')
+
+      const { stderr, exitCode } = runCli(['context', '--ci'], dir)
+      expect(exitCode).toBe(1)
+      expect(stderr).toContain('stale')
+    })
+
+    it('exits 0 in CI mode when file is fresh', () => {
+      const dir = createTempDir('drift-cli-context-ci-fresh-')
+      tempDirs.push(dir)
+      writeFileSync(join(dir, 'a.ts'), 'export const a = 1\n')
+
+      const { exitCode } = runCli(['context'], dir)
+      expect(exitCode).toBe(0)
+
+      const { exitCode: ciExitCode } = runCli(['context', '--ci'], dir)
+      expect(ciExitCode).toBe(0)
+    })
+
+    it('exits 1 in CI mode when context file is missing', () => {
+      const dir = createTempDir('drift-cli-context-ci-missing-')
+      tempDirs.push(dir)
+      writeFileSync(join(dir, 'a.ts'), 'export const a = 1\n')
+
+      const { stderr, exitCode } = runCli(['context', '--ci'], dir)
+      expect(exitCode).toBe(1)
+      expect(stderr).toContain('missing')
+    })
+
+    it('exits 1 and writes no file for unwritable output path', () => {
+      const dir = createTempDir('drift-cli-context-unwritable-')
+      tempDirs.push(dir)
+      writeFileSync(join(dir, 'a.ts'), 'export const a = 1\n')
+      // Using an existing directory as the output path forces a write error.
+      const outputPath = dir
+
+      const { stderr, exitCode } = runCli(['context', '--output', outputPath], dir)
+      expect(exitCode).toBe(1)
+      expect(stderr).toContain('Error')
+    })
+
+    it('regenerates file in watch mode when source changes', async () => {
+      const dir = createTempDir('drift-cli-context-watch-')
+      tempDirs.push(dir)
+      const sourceFile = join(dir, 'a.ts')
+      writeFileSync(sourceFile, 'export const a = 1\n')
+
+      const child = spawn(process.execPath, ['--import', TSX_LOADER, CLI_PATH, 'context', '--watch'], {
+        cwd: dir,
+        stdio: 'pipe',
+      })
+
+      const stderr: string[] = []
+      child.stderr?.on('data', (chunk) => stderr.push(String(chunk)))
+
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+      const contextPath = join(dir, '.drift', 'context.md')
+      expect(existsSync(contextPath)).toBe(true)
+      const before = readFileSync(contextPath, 'utf8')
+
+      writeFileSync(sourceFile, 'export const a = 2\n')
+
+      await vi.waitFor(() => {
+        const after = readFileSync(contextPath, 'utf8')
+        return after !== before
+      }, { timeout: 5000 })
+
+      child.kill('SIGTERM')
+      await new Promise((resolve) => {
+        child.on('exit', resolve)
+        setTimeout(resolve, 500)
+      })
     })
   })
 })

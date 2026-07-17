@@ -2,7 +2,7 @@
 // drift-ignore-file
 import { Command } from 'commander'
 import { readFileSync, writeFileSync } from 'node:fs'
-import { basename, relative, resolve } from 'node:path'
+import { basename, join, relative, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { createInterface } from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
@@ -46,6 +46,13 @@ import { computeTrustKpis, formatTrustKpiConsole, formatTrustKpiJson } from './t
 import { runBenchmarkCli } from './benchmark.js'
 import { runInit, INIT_PRESETS } from './init.js'
 import { runDoctor } from './doctor.js'
+import {
+  buildContextDocument,
+  checkContextFreshness,
+  formatContextMarkdown,
+  runWatch,
+  writeContextFile,
+} from './context.js'
 import { resolveOutputFormat } from './format.js'
 import { toSarif, diffToSarif } from './sarif.js'
 import type { DriftDiff, DriftTrustReport, DriftAnalysisOptions, MergeRiskLevel } from './types.js'
@@ -300,14 +307,16 @@ program
   .option('--preset <type>', `Scaffold config with preset: ${INIT_PRESETS.join(', ')}`)
   .option('--ci', 'Generate GitHub Actions workflow for drift review')
   .option('--baseline', 'Create drift-baseline.json with current project score')
-  .action(async (options: { preset?: string; ci?: boolean; baseline?: boolean }) => {
+  .option('--context', 'Generate .drift/context.md and add it to .gitignore')
+  .action(async (options: { preset?: string; ci?: boolean; baseline?: boolean; context?: boolean }) => {
     const projectRoot = resolve('.')
-    
+
     try {
       await runInit(projectRoot, {
         preset: options.preset,
         ci: options.ci,
         baseline: options.baseline,
+        context: options.context,
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -315,6 +324,98 @@ program
       process.exit(1)
     }
   })
+
+addResourceOptions(
+  program
+    .command('context [path]')
+    .description('Generate a Markdown context file for AI coding assistants')
+    .option('-o, --output <file>', 'Output file path (default: .drift/context.md)')
+    .option('--format <type>', 'Output format: markdown|json')
+    .option('--max-issues <n>', 'Maximum violations to include (default: 20)', '20')
+    .option('--ci', 'Exit 1 if the context file is stale')
+    .option('--watch', 'Regenerate context file when source files change')
+    .action(async (
+      targetPath: string | undefined,
+      options: {
+        output?: string
+        format?: string
+        maxIssues: string
+        ci?: boolean
+        watch?: boolean
+      } & ResourceOptionFlags,
+    ) => {
+      const resolvedPath = resolve(targetPath ?? '.')
+      const outputPath = resolve(options.output ?? join(resolvedPath, '.drift', 'context.md'))
+      const maxIssues = Number(options.maxIssues)
+      const isJson = options.format === 'json'
+
+      try {
+        const config = await loadConfig(resolvedPath)
+        const files = analyzeProject(resolvedPath, config, resolveAnalysisOptions(options))
+        const report = buildReport(resolvedPath, files)
+
+        if (options.ci) {
+          const freshness = checkContextFreshness(outputPath, report.totalScore)
+          if (freshness.missing) {
+            process.stderr.write(`\n  Error: context file is missing: ${outputPath}\n\n`)
+            process.exit(1)
+          }
+          if (!freshness.fresh) {
+            process.stderr.write(
+              `\n  Warning: context file is stale (recorded score ${freshness.recordedScore}, current ${report.totalScore}, delta ${freshness.delta}). Run 'drift context' to regenerate.\n\n`,
+            )
+            process.exit(1)
+          }
+          process.stderr.write('\n  Context file is fresh.\n\n')
+          return
+        }
+
+        const aiOutput = formatAIOutput(report)
+        const doc = buildContextDocument(resolvedPath, report, aiOutput, config, {
+          maxIssues: Number.isNaN(maxIssues) ? undefined : maxIssues,
+        })
+
+        if (isJson) {
+          process.stdout.write(`${JSON.stringify(doc, null, 2)}\n`)
+          return
+        }
+
+        if (options.watch) {
+          const generate = async (): Promise<void> => {
+            const currentFiles = analyzeProject(resolvedPath, config, resolveAnalysisOptions(options))
+            const currentReport = buildReport(resolvedPath, currentFiles)
+            const currentAiOutput = formatAIOutput(currentReport)
+            const currentDoc = buildContextDocument(resolvedPath, currentReport, currentAiOutput, config, {
+              maxIssues: Number.isNaN(maxIssues) ? undefined : maxIssues,
+            })
+            writeContextFile(outputPath, currentDoc)
+          }
+
+          await generate()
+          const watcher = runWatch(resolvedPath, generate)
+
+          process.stderr.write(`\nWatching ${resolvedPath} for changes. Press Ctrl+C to stop.\n`)
+
+          process.on('SIGINT', () => {
+            watcher.close()
+            process.exit(0)
+          })
+          process.on('SIGTERM', () => {
+            watcher.close()
+            process.exit(0)
+          })
+          return
+        }
+
+        writeContextFile(outputPath, doc)
+        process.stderr.write(`\n  Context file written to ${outputPath}\n\n`)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        process.stderr.write(`\n  Error: ${message}\n\n`)
+        process.exit(1)
+      }
+    }),
+)
 
 addResourceOptions(
   program

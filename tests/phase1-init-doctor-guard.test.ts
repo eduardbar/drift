@@ -223,7 +223,7 @@ describe('phase 1: doctor/init/guard', () => {
 
       await runInit(projectDir, {})
 
-      expect(output.join('')).toContain('No actions taken. Use --preset, --ci, or --baseline flags.')
+      expect(output.join('')).toContain('No actions taken. Use --preset, --ci, --baseline, or --context flags.')
     })
   })
 
