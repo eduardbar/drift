@@ -9,9 +9,9 @@
 | Chained PRs recommended | Yes |
 | Suggested split | PR 1 (foundation + context-file) → PR 2 (mcp-server) → PR 3 (ai-guard) → PR 4 (E2E/docs) |
 | Delivery strategy | ask-on-risk |
-| Chain strategy | pending |
+| Chain strategy | stacked-to-main |
 
-Decision needed before apply: Yes
+Decision needed before apply: No (resolved: stacked-to-main)
 Chained PRs recommended: Yes
 Chain strategy: pending
 400-line budget risk: High
@@ -45,11 +45,11 @@ Chain strategy: pending
 
 ## Phase 3: mcp-server (Feature 2)
 
-- [ ] 3.1 RED: Write unit tests for `SessionCache` hit/miss/invalidation/serialization and `inspectMCPTools` in `tests/mcp-server.test.ts`.
-- [ ] 3.2 GREEN: Create `src/mcp-server.ts` with stdio server, 6 tool handlers, `SessionCache`, and stderr-only logger.
-- [ ] 3.3 REFACTOR: Verify stdout contains only JSON-RPC; forbid `console.log` in `mcp-server.ts` via project lint or comment guard.
-- [ ] 3.4 Modify `src/cli.ts` to register `mcp` command with `--inspect`.
-- [ ] 3.5 Integration: Spawn `drift mcp` child process and verify initialize handshake, `tools/list`, all 6 `tools/call`, malformed request returns `-32600`, unknown tool returns `-32601`, and SIGTERM cleanup.
+- [x] 3.1 RED: Write unit tests for `SessionCache` hit/miss/invalidation/serialization and `inspectMCPTools` in `tests/mcp-server.test.ts`.
+- [x] 3.2 GREEN: Create `src/mcp-server.ts` with stdio server, 6 tool handlers, `SessionCache`, and stderr-only logger.
+- [x] 3.3 REFACTOR: Verify stdout contains only JSON-RPC; forbid `console.log` in `mcp-server.ts` via project lint or comment guard.
+- [x] 3.4 Modify `src/cli.ts` to register `mcp` command with `--inspect`.
+- [x] 3.5 Integration: Spawn `drift mcp` child process and verify initialize handshake, `tools/list`, all 6 `tools/call`, malformed request returns `-32600`, unknown tool returns `-32601`, and SIGTERM cleanup.
 
 ## Phase 4: ai-guard (Feature 3)
 
