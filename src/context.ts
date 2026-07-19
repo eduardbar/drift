@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync, existsSync, readFileSync, renameSync, unlinkSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { Project } from 'ts-morph'
@@ -15,7 +15,7 @@ import type {
 import { scoreToGradeText } from './utils.js'
 import { FIX_SUGGESTIONS } from './reporter-constants.js'
 import { detectCycleEdges } from './map-cycles.js'
-import { createDebouncedWatcher } from './watch-utils.js'
+import { createDebouncedWatcher, isOutputArtifactPath } from './watch-utils.js'
 
 const require = createRequire(import.meta.url)
 const { version: VERSION } = require('../package.json') as { version: string }
@@ -310,12 +310,7 @@ export function runWatch(
       })
     },
     delayMs,
-    outputPath
-      ? (eventPath) => {
-          const resolvedEventPath = resolve(eventPath)
-          return resolvedEventPath === resolve(outputPath) || resolvedEventPath === resolve(dirname(outputPath))
-        }
-      : undefined,
+    outputPath ? (eventPath) => isOutputArtifactPath(eventPath, outputPath) : undefined,
   )
 
   return watcher

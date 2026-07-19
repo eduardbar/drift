@@ -500,7 +500,7 @@ describe('context-file', () => {
       expect(stderr).toContain('Error')
     })
 
-    it('regenerates file in watch mode when source changes', async () => {
+    it('regenerates on source changes, ignores atomic output artifacts, and shuts down cleanly', async () => {
       const dir = createTempDir('drift-cli-context-watch-')
       tempDirs.push(dir)
       const sourceFile = join(dir, 'a.ts')
@@ -514,28 +514,62 @@ describe('context-file', () => {
       const stderr: string[] = []
       child.stderr?.on('data', (chunk) => stderr.push(String(chunk)))
 
-      await new Promise((resolve) => setTimeout(resolve, 2000))
-      const contextPath = join(dir, '.drift', 'context.md')
-      expect(existsSync(contextPath)).toBe(true)
-      const before = readFileSync(contextPath, 'utf8')
+      try {
+        const contextPath = join(dir, '.drift', 'context.md')
+        await vi.waitFor(() => expect(existsSync(contextPath)).toBe(true), { timeout: 10000 })
+        const before = readFileSync(contextPath, 'utf8')
 
-      writeFileSync(sourceFile, 'export const a = 2\n')
+        writeFileSync(sourceFile, 'export const a = 2\n')
 
-      await vi.waitFor(() => {
-        const after = readFileSync(contextPath, 'utf8')
-        return after !== before
-      }, { timeout: 5000 })
+        await vi.waitFor(() => {
+          const after = readFileSync(contextPath, 'utf8')
+          expect(after).not.toBe(before)
+        }, { timeout: 5000 })
 
-      child.kill('SIGTERM')
-      await new Promise((resolve) => {
-        child.on('exit', resolve)
-        setTimeout(resolve, 500)
-      })
+        const regenerated = readFileSync(contextPath, 'utf8')
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+        expect(readFileSync(contextPath, 'utf8')).toBe(regenerated)
+        expect(stderr.join('')).toContain('Watching')
+      } finally {
+        child.kill('SIGTERM')
+        const exitResult = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+          child.once('error', reject)
+          child.once('exit', (code, signal) => resolve({ code, signal }))
+        })
+        expect(child.killed).toBe(true)
+        expect(exitResult.code === 0 || (process.platform === 'win32' && exitResult.code === null)).toBe(true)
+        expect(exitResult.signal === null || (process.platform === 'win32' && exitResult.signal === 'SIGTERM')).toBe(true)
+      }
+    })
+
+    it('rejects an invalid target before creating output directories', () => {
+      const dir = createTempDir('drift-cli-context-invalid-target-')
+      tempDirs.push(dir)
+      const invalidTarget = join(dir, 'missing-project')
+
+      const { stderr, exitCode } = runCli(['context', invalidTarget], dir)
+
+      expect(exitCode).toBe(1)
+      expect(stderr).toContain('target')
+      expect(existsSync(invalidTarget)).toBe(false)
+    })
+
+    it('rejects a file target without creating a sibling output directory', () => {
+      const dir = createTempDir('drift-cli-context-file-target-')
+      tempDirs.push(dir)
+      const targetFile = join(dir, 'target.ts')
+      writeFileSync(targetFile, 'export const value = 1\n')
+
+      const { stderr, exitCode } = runCli(['context', targetFile], dir)
+
+      expect(exitCode).toBe(1)
+      expect(stderr).toContain('directory')
+      expect(existsSync(`${targetFile}.drift`)).toBe(false)
     })
   })
 
   describe('runWatch', () => {
-    it('does not regenerate again when its own output file changes', async () => {
+    it('does not regenerate again when its own atomic output artifacts change', async () => {
       const dir = createTempDir('drift-context-watch-output-')
       tempDirs.push(dir)
       const outputPath = join(dir, '.drift', 'context.md')
@@ -543,12 +577,13 @@ describe('context-file', () => {
       let generations = 0
       const watcher = runWatch(dir, async () => {
         generations += 1
-        writeFileSync(outputPath, `generation ${generations}\n`)
+        const doc = buildContextDocument(dir, buildMockReport(), buildMockAIOutput())
+        writeContextFile(outputPath, doc)
       }, 50, outputPath)
 
       writeFileSync(join(dir, 'a.ts'), 'export const a = 1\n')
       await vi.waitFor(() => expect(generations).toBe(1), { timeout: 2000 })
-      await new Promise((resolve) => setTimeout(resolve, 250))
+      await new Promise((resolve) => setTimeout(resolve, 500))
       watcher.close()
 
       expect(generations).toBe(1)

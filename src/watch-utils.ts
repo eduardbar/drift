@@ -1,8 +1,26 @@
 import { watch, type FSWatcher } from 'node:fs'
-import { resolve } from 'node:path'
+import { basename, dirname, resolve } from 'node:path'
 
 export interface DebouncedWatcher {
   close: () => void
+}
+
+function samePath(left: string, right: string): boolean {
+  const normalizedLeft = resolve(left)
+  const normalizedRight = resolve(right)
+  return process.platform === 'win32'
+    ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
+    : normalizedLeft === normalizedRight
+}
+
+/** Return whether a recursive watch event belongs to an atomic output write. */
+export function isOutputArtifactPath(eventPath: string, outputPath: string): boolean {
+  if (samePath(eventPath, outputPath) || samePath(eventPath, dirname(outputPath))) return true
+
+  const outputName = basename(outputPath)
+  const eventName = basename(eventPath)
+  const escapedOutputName = outputName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`^${escapedOutputName}\\.[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\.tmp$`, 'i').test(eventName)
 }
 
 /**
