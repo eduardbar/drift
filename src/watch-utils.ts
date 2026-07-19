@@ -1,4 +1,5 @@
 import { watch, type FSWatcher } from 'node:fs'
+import { resolve } from 'node:path'
 
 export interface DebouncedWatcher {
   close: () => void
@@ -14,10 +15,12 @@ export function createDebouncedWatcher(
   path: string,
   callback: () => void,
   delayMs = 300,
+  ignorePath?: (eventPath: string) => boolean,
 ): DebouncedWatcher {
   let timer: ReturnType<typeof setTimeout> | undefined
 
-  const watcher: FSWatcher = watch(path, { recursive: true }, () => {
+  const watcher: FSWatcher = watch(path, { recursive: true }, (_eventType, filename) => {
+    if (ignorePath && filename && ignorePath(resolve(path, filename.toString()))) return
     if (timer) clearTimeout(timer)
     timer = setTimeout(() => {
       timer = undefined

@@ -392,7 +392,7 @@ addResourceOptions(
           }
 
           await generate()
-          const watcher = runWatch(resolvedPath, generate)
+          const watcher = runWatch(resolvedPath, generate, 300, outputPath)
 
           process.stderr.write(`\nWatching ${resolvedPath} for changes. Press Ctrl+C to stop.\n`)
 

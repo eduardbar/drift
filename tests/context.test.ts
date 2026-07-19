@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync, spawn } from 'node:child_process'
+import * as fs from 'node:fs'
 import {
   existsSync,
   mkdtempSync,
@@ -16,6 +17,7 @@ import {
   checkContextFreshness,
   formatContextMarkdown,
   writeContextFile,
+  runWatch,
 } from '../src/context.js'
 import { runInit } from '../src/init.js'
 import type { AIOutput, DriftConfig, DriftReport } from '../src/types.js'
@@ -324,6 +326,22 @@ describe('context-file', () => {
       expect(content).toContain('# Drift Context')
       expect(content).toContain('<!-- drift-context-metadata:')
     })
+
+    it('preserves an existing destination and cleans the temporary file when replacement fails', () => {
+      const dir = createTempDir('drift-context-atomic-failure-')
+      tempDirs.push(dir)
+      const outputPath = join(dir, 'context.md')
+      const original = 'existing context\n'
+      writeFileSync(outputPath, original)
+      const doc = buildContextDocument(dir, buildMockReport(), buildMockAIOutput())
+      expect(() => writeContextFile(outputPath, doc, {
+        renameSync: () => {
+          throw new Error('simulated rename failure')
+        },
+      })).toThrow('simulated rename failure')
+      expect(readFileSync(outputPath, 'utf8')).toBe(original)
+      expect(fs.readdirSync(dir)).toEqual(['context.md'])
+    })
   })
 
   describe('checkContextFreshness', () => {
@@ -513,6 +531,27 @@ describe('context-file', () => {
         child.on('exit', resolve)
         setTimeout(resolve, 500)
       })
+    })
+  })
+
+  describe('runWatch', () => {
+    it('does not regenerate again when its own output file changes', async () => {
+      const dir = createTempDir('drift-context-watch-output-')
+      tempDirs.push(dir)
+      const outputPath = join(dir, '.drift', 'context.md')
+      mkdirSync(join(dir, '.drift'), { recursive: true })
+      let generations = 0
+      const watcher = runWatch(dir, async () => {
+        generations += 1
+        writeFileSync(outputPath, `generation ${generations}\n`)
+      }, 50, outputPath)
+
+      writeFileSync(join(dir, 'a.ts'), 'export const a = 1\n')
+      await vi.waitFor(() => expect(generations).toBe(1), { timeout: 2000 })
+      await new Promise((resolve) => setTimeout(resolve, 250))
+      watcher.close()
+
+      expect(generations).toBe(1)
     })
   })
 })

@@ -1,5 +1,6 @@
-import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { mkdirSync, writeFileSync, existsSync, readFileSync, renameSync, unlinkSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { Project } from 'ts-morph'
 import type {
@@ -238,11 +239,28 @@ export function formatContextMarkdown(doc: ContextDocument): string {
   return lines.join('\n')
 }
 
-export function writeContextFile(filePath: string, doc: ContextDocument): void {
+export function writeContextFile(
+  filePath: string,
+  doc: ContextDocument,
+  fileSystem: { renameSync?: typeof renameSync } = {},
+): void {
   const dir = dirname(filePath)
   mkdirSync(dir, { recursive: true })
   const markdown = formatContextMarkdown(doc)
-  writeFileSync(filePath, markdown, 'utf8')
+  const tempPath = `${filePath}.${randomUUID()}.tmp`
+  const move = fileSystem.renameSync ?? renameSync
+
+  try {
+    writeFileSync(tempPath, markdown, 'utf8')
+    move(tempPath, filePath)
+  } catch (error) {
+    try {
+      unlinkSync(tempPath)
+    } catch {
+      // Preserve the original write error if cleanup also fails.
+    }
+    throw error
+  }
 }
 
 export function checkContextFreshness(
@@ -278,6 +296,7 @@ export function runWatch(
   projectPath: string,
   generate: () => Promise<void>,
   delayMs = 300,
+  outputPath?: string,
 ): WatchHandle {
   let running = false
 
@@ -291,6 +310,12 @@ export function runWatch(
       })
     },
     delayMs,
+    outputPath
+      ? (eventPath) => {
+          const resolvedEventPath = resolve(eventPath)
+          return resolvedEventPath === resolve(outputPath) || resolvedEventPath === resolve(dirname(outputPath))
+        }
+      : undefined,
   )
 
   return watcher
