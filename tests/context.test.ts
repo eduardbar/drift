@@ -3,6 +3,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import * as fs from 'node:fs'
 import {
   existsSync,
+  chmodSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
@@ -15,10 +16,10 @@ import { pathToFileURL } from 'node:url'
 import {
   buildContextDocument,
   checkContextFreshness,
-  formatContextMarkdown,
   writeContextFile,
   runWatch,
 } from '../src/context.js'
+import { formatContextMarkdown } from '../src/context-markdown.js'
 import { runInit } from '../src/init.js'
 import type { AIOutput, DriftConfig, DriftReport } from '../src/types.js'
 
@@ -180,7 +181,7 @@ describe('context-file', () => {
         },
       })
 
-      const doc = buildContextDocument(projectDir, report, aiOutput, undefined, { maxIssues: 10 })
+      const doc = buildContextDocument(projectDir, report, aiOutput, { maxIssues: 10 })
       expect(doc.topViolations).toHaveLength(10)
       expect(doc.topViolations[0].rank).toBe(1)
       expect(doc.health.filesAffected).toBe(1)
@@ -197,7 +198,7 @@ describe('context-file', () => {
       const report = buildMockReport({ targetPath: projectDir })
       const aiOutput = buildMockAIOutput()
 
-      const doc = buildContextDocument(projectDir, report, aiOutput, config)
+      const doc = buildContextDocument(projectDir, report, aiOutput, { config })
       expect(doc.architectureSummary.layers).toEqual(['api'])
       expect(doc.architectureSummary.modules).toEqual(['shared'])
     })
@@ -566,6 +567,27 @@ describe('context-file', () => {
       expect(stderr).toContain('directory')
       expect(existsSync(`${targetFile}.drift`)).toBe(false)
     })
+
+    it.skipIf(process.platform === 'win32')(
+      'rejects an unreadable directory without creating output (POSIX permissions only; Windows chmod is not enforceable)',
+      () => {
+        const dir = createTempDir('drift-cli-context-unreadable-target-')
+        tempDirs.push(dir)
+        writeFileSync(join(dir, 'a.ts'), 'export const a = 1\n')
+        const target = join(dir, 'restricted')
+        mkdirSync(target)
+        chmodSync(target, 0o000)
+
+        try {
+          const { stderr, exitCode } = runCli(['context', target], dir)
+          expect(exitCode).toBe(1)
+          expect(stderr).toContain('readable directory')
+          expect(existsSync(join(target, '.drift'))).toBe(false)
+        } finally {
+          chmodSync(target, 0o700)
+        }
+      },
+    )
   })
 
   describe('runWatch', () => {

@@ -386,9 +386,11 @@ addResourceOptions(
         }
 
         const aiOutput = formatAIOutput(report)
-        const doc = buildContextDocument(resolvedPath, report, aiOutput, config, {
+        const contextOptions = {
+          config,
           maxIssues: Number.isNaN(maxIssues) ? undefined : maxIssues,
-        })
+        }
+        const doc = buildContextDocument(resolvedPath, report, aiOutput, contextOptions)
 
         if (isJson) {
           process.stdout.write(`${JSON.stringify(doc, null, 2)}\n`)
@@ -400,9 +402,7 @@ addResourceOptions(
             const currentFiles = analyzeProject(resolvedPath, config, resolveAnalysisOptions(options))
             const currentReport = buildReport(resolvedPath, currentFiles)
             const currentAiOutput = formatAIOutput(currentReport)
-            const currentDoc = buildContextDocument(resolvedPath, currentReport, currentAiOutput, config, {
-              maxIssues: Number.isNaN(maxIssues) ? undefined : maxIssues,
-            })
+            const currentDoc = buildContextDocument(resolvedPath, currentReport, currentAiOutput, contextOptions)
             writeContextFile(outputPath, currentDoc)
           }
 
