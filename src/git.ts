@@ -1,4 +1,4 @@
-import { execSync } from 'node:child_process'
+import { execFileSync, execSync } from 'node:child_process'
 import { mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs'
 import { join, sep } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -23,7 +23,7 @@ function verifyGitRepo(projectPath: string): void {
 
 function verifyRefExists(projectPath: string, ref: string): void {
   try {
-    execSync(`git rev-parse --verify ${ref}`, { cwd: projectPath, stdio: 'pipe' })
+    execFileSync('git', ['rev-parse', '--verify', ref], { cwd: projectPath, stdio: 'pipe' })
   } catch {
     throw new Error(`Invalid git ref: '${ref}'. Run 'git log --oneline' to see available commits.`)
   }
@@ -32,9 +32,9 @@ function verifyRefExists(projectPath: string, ref: string): void {
 function listTsFilesAtRef(projectPath: string, ref: string): string[] {
   let fileList: string
   try {
-    fileList = execSync(
-      `git ls-tree -r --name-only ${ref}`,
-      { cwd: projectPath, encoding: 'utf-8', stdio: 'pipe' }
+    fileList = execFileSync(
+      'git', ['ls-tree', '-r', '--name-only', ref],
+      { cwd: projectPath, encoding: 'utf-8', stdio: 'pipe' },
     )
   } catch {
     throw new Error(`Failed to list files at ref '${ref}'`)
@@ -49,9 +49,9 @@ function listTsFilesAtRef(projectPath: string, ref: string): string[] {
 function extractFile(projectPath: string, ref: string, filePath: string, tempDir: string): void {
   let content: string
   try {
-    content = execSync(
-      `git show ${ref}:${filePath}`,
-      { cwd: projectPath, encoding: 'utf-8', stdio: 'pipe' }
+    content = execFileSync(
+      'git', ['show', `${ref}:${filePath}`],
+      { cwd: projectPath, encoding: 'utf-8', stdio: 'pipe' },
     )
   } catch {
     return
@@ -65,10 +65,14 @@ function extractFile(projectPath: string, ref: string, filePath: string, tempDir
 
 function extractArchiveAtRef(projectPath: string, ref: string, tempDir: string): boolean {
   try {
-    execSync(
-      `git archive --format=tar ${ref} | tar -x -C "${tempDir}"`,
-      { cwd: projectPath, stdio: 'pipe' }
-    )
+    const archive = execFileSync('git', ['archive', '--format=tar', ref], {
+      cwd: projectPath,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    execFileSync('tar', ['-x', '-C', tempDir], {
+      input: archive,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
     return true
   } catch {
     return false
@@ -113,9 +117,9 @@ export function cleanupTempDir(tempDir: string): void {
  */
 function resolveRefHash(projectPath: string, ref: string): string {
   try {
-    return execSync(
-      `git rev-parse --short ${ref}`,
-      { cwd: projectPath, encoding: 'utf-8', stdio: 'pipe' }
+    return execFileSync(
+      'git', ['rev-parse', '--short', ref],
+      { cwd: projectPath, encoding: 'utf-8', stdio: 'pipe' },
     ).trim()
   } catch {
     return ref
@@ -148,7 +152,7 @@ export function readDiffFromBase(projectPath: string, ref: string): string {
   verifyRefExists(projectPath, ref)
 
   try {
-    return execSync(`git diff --no-color ${ref}`, {
+    return execFileSync('git', ['diff', '--no-color', ref], {
       cwd: projectPath,
       encoding: 'utf-8',
       stdio: 'pipe',
