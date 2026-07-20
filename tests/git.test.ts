@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { execSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readDiffFromBase, readStagedDiff } from '../src/git.js'
@@ -95,6 +95,18 @@ describe('git diff readers', () => {
       tempDirs.push(dir)
 
       expect(() => readDiffFromBase(dir, 'HEAD')).toThrow('Not a git repository')
+    })
+
+    it('does not execute shell metacharacters in a user-controlled ref', () => {
+      const dir = createTempDir('drift-git-base-shell-')
+      tempDirs.push(dir)
+      initGitRepo(dir)
+      writeFileSync(join(dir, 'a.ts'), 'export const a = 1\n')
+      commitAll(dir, 'initial')
+      const marker = join(dir, 'shell-executed.txt')
+
+      expect(() => readDiffFromBase(dir, `HEAD & echo pwned > "${marker}"`)).toThrow('Invalid git ref')
+      expect(() => readFileSync(marker, 'utf8')).toThrow()
     })
   })
 })

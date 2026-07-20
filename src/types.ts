@@ -49,24 +49,6 @@ export type {
 } from './types/context.js'
 
 export type {
-  MCPToolDefinition,
-  SessionContext,
-  MCPToolHandler,
-  MCPToolRegistryEntry,
-  MCPToolRegistry,
-} from './types/mcp.js'
-
-export type {
-  DiffSource,
-  DiffHunk,
-  ParsedDiffFile,
-  ParsedDiff,
-  AIGuardSuggestion,
-  AIGuardResult,
-  AIGuardOptions,
-} from './types/ai-guard.js'
-
-export type {
   PluginRuleContext,
   DriftPluginRule,
   DriftPlugin,

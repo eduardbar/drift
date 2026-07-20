@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // drift-ignore-file
 import { Command } from 'commander'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { accessSync, constants, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join, relative, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { createInterface } from 'node:readline/promises'
@@ -86,6 +86,20 @@ function resolveAnalysisOptions(options: ResourceOptionFlags): DriftAnalysisOpti
     maxFiles: parseOptionalPositiveInt(options.maxFiles, '--max-files'),
     maxFileSizeKb: parseOptionalPositiveInt(options.maxFileSizeKb, '--max-file-size-kb'),
     includeSemanticDuplication: options.withSemanticDuplication ? true : undefined,
+  }
+}
+
+function validateAnalysisTarget(targetPath: string): void {
+  try {
+    if (!statSync(targetPath).isDirectory()) {
+      throw new Error('target is not a directory')
+    }
+    accessSync(targetPath, constants.R_OK)
+  } catch (error) {
+    const reason = error instanceof Error && error.message === 'target is not a directory'
+      ? error.message
+      : 'target does not exist or is not readable'
+    throw new Error(`analysis target must be a readable directory: ${targetPath} (${reason})`)
   }
 }
 
@@ -351,6 +365,7 @@ addResourceOptions(
       const isJson = options.format === 'json'
 
       try {
+        validateAnalysisTarget(resolvedPath)
         const config = await loadConfig(resolvedPath)
         const files = analyzeProject(resolvedPath, config, resolveAnalysisOptions(options))
         const report = buildReport(resolvedPath, files)
@@ -372,9 +387,11 @@ addResourceOptions(
         }
 
         const aiOutput = formatAIOutput(report)
-        const doc = buildContextDocument(resolvedPath, report, aiOutput, config, {
+        const contextOptions = {
+          config,
           maxIssues: Number.isNaN(maxIssues) ? undefined : maxIssues,
-        })
+        }
+        const doc = buildContextDocument(resolvedPath, report, aiOutput, contextOptions)
 
         if (isJson) {
           process.stdout.write(`${JSON.stringify(doc, null, 2)}\n`)
@@ -386,14 +403,12 @@ addResourceOptions(
             const currentFiles = analyzeProject(resolvedPath, config, resolveAnalysisOptions(options))
             const currentReport = buildReport(resolvedPath, currentFiles)
             const currentAiOutput = formatAIOutput(currentReport)
-            const currentDoc = buildContextDocument(resolvedPath, currentReport, currentAiOutput, config, {
-              maxIssues: Number.isNaN(maxIssues) ? undefined : maxIssues,
-            })
+            const currentDoc = buildContextDocument(resolvedPath, currentReport, currentAiOutput, contextOptions)
             writeContextFile(outputPath, currentDoc)
           }
 
           await generate()
-          const watcher = runWatch(resolvedPath, generate)
+          const watcher = runWatch(resolvedPath, generate, 300, outputPath)
 
           process.stderr.write(`\nWatching ${resolvedPath} for changes. Press Ctrl+C to stop.\n`)
 
