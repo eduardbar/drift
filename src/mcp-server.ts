@@ -462,14 +462,35 @@ export async function runMcpServer(options: RunMcpServerOptions = {}): Promise<S
   const server = createMCPServer(options)
   const transport = new StdioServerTransport(options.stdin, options.stdout)
 
-  process.on('SIGINT', () => {
-    log('info', 'Received SIGINT, shutting down MCP server')
-    server.close().catch((error) => log('error', String(error)))
-  })
-  process.on('SIGTERM', () => {
-    log('info', 'Received SIGTERM, shutting down MCP server')
-    server.close().catch((error) => log('error', String(error)))
-  })
+  let shutdownPromise: Promise<void> | undefined
+  const shutdown = (signal: 'SIGINT' | 'SIGTERM'): void => {
+    if (shutdownPromise) return
+    log('info', `Received ${signal}, shutting down MCP server`)
+    shutdownPromise = server.close()
+      .then(() => {
+        // StdioServerTransport detaches its listeners but does not release the
+        // process stdin pipe. Unref it after the server has closed so Node can
+        // finish naturally without an abrupt process.exit or SIGKILL fallback.
+        options.stdin?.pause()
+        if (!options.stdin) {
+          process.stdin.pause()
+          process.stdin.unref?.()
+          process.stdin.destroy()
+        }
+        process.exit(0)
+      })
+      .catch((error) => {
+        log('error', String(error))
+        process.exitCode = 1
+      })
+  }
+
+  process.on('SIGINT', () => shutdown('SIGINT'))
+  process.on('SIGTERM', () => shutdown('SIGTERM'))
+  // Windows does not deliver POSIX signals to child processes. Treating an
+  // orderly stdin close as the equivalent shutdown path keeps the CLI
+  // graceful when its parent cannot deliver SIGTERM.
+  process.stdin.once('end', () => shutdown('SIGTERM'))
 
   await server.connect(transport)
   log('info', `MCP server connected for ${resolve(options.projectPath ?? process.cwd())}`)

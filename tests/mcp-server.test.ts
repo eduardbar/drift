@@ -226,6 +226,20 @@ describe('drift mcp CLI', () => {
     execSync('git commit -m "initial"', { cwd: dir, stdio: 'pipe' })
   }
 
+  function waitForExit(child: ChildProcess, timeoutMs: number): Promise<{ code: number | null; signal: NodeJS.Signals | null } | null> {
+    return new Promise((resolve) => {
+      let settled = false
+      const finish = (result: { code: number | null; signal: NodeJS.Signals | null } | null): void => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        resolve(result)
+      }
+      const timer = setTimeout(() => finish(null), timeoutMs)
+      child.once('exit', (code, signal) => finish({ code, signal }))
+    })
+  }
+
   it('prints tool definitions with --inspect', () => {
     const dir = createProject()
     const { stdout, exitCode } = runCli(['mcp', '--inspect'], dir)
@@ -329,6 +343,49 @@ describe('drift mcp CLI', () => {
       }
     } finally {
       await shutdown()
+    }
+  })
+
+  it('exits gracefully on SIGTERM after closing MCP cache watchers', async () => {
+    const dir = createProject()
+    const child = spawn(process.execPath, ['--import', TSX_LOADER, CLI_PATH, 'mcp'], {
+      cwd: dir,
+      stdio: 'pipe',
+    })
+    const client = createRpcClient(child)
+    const stderr: string[] = []
+    child.stderr?.on('data', (chunk: Buffer) => stderr.push(chunk.toString('utf8')))
+    let assertionFailed = false
+
+    try {
+      await client.call('initialize', {
+        protocolVersion: '2024-11-05',
+        capabilities: {},
+        clientInfo: { name: 'shutdown-test', version: '1.0.0' },
+      }, 1)
+      client.send({ jsonrpc: '2.0', method: 'notifications/initialized' })
+      const score = await client.call('tools/call', {
+        name: 'drift_score',
+        arguments: {},
+      }, 2)
+      expect(score.error).toBeUndefined()
+
+      if (process.platform === 'win32') {
+        child.stdin?.end()
+      } else {
+        child.kill('SIGTERM')
+      }
+      const exit = await waitForExit(child, 3000)
+
+      expect(stderr.join('')).toContain('Received SIGTERM')
+      expect(exit).not.toBeNull()
+      expect(exit?.code).toBe(0)
+      expect(exit?.signal).toBeNull()
+    } catch (error) {
+      assertionFailed = true
+      throw error
+    } finally {
+      if (assertionFailed && !child.killed && child.exitCode === null) child.kill('SIGKILL')
     }
   })
 
