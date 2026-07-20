@@ -49,6 +49,16 @@ export type {
 } from './types/mcp.js'
 
 export type {
+  DiffSource,
+  DiffEntryStatus,
+  DiffHunk,
+  UnifiedDiffEntry,
+  AIGuardIssue,
+  AIGuardResult,
+  AIGuardOptions,
+} from './types/ai-guard.js'
+
+export type {
   ContextHealth,
   ContextViolation,
   ContextArchitectureSummary,

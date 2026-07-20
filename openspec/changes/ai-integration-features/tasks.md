@@ -52,11 +52,11 @@ Chained PRs recommended: Yes
 
 ## Phase 4: ai-guard (Feature 3)
 
-- [ ] 4.1 RED: Write unit tests for `parseUnifiedDiff`, `applyDiffToTempDir`, `computeAIGuardResult`, `enforceBudget`, and `enforceBlockOn` in `tests/ai-guard.test.ts`.
-- [ ] 4.2 GREEN: Create `src/ai-guard.ts` with `runAIGuard`, diff application, temp-dir lifecycle, and budget/block-on enforcement.
-- [ ] 4.3 REFACTOR: Extract diff parsing edge cases (new/delete/rename/binary/empty) and confirm `try/finally` + SIGINT/SIGTERM cleanup in every exit path.
-- [ ] 4.4 Modify `src/cli.ts` to register `ai-guard` with `--stdin`, `--staged`, `--diff-file`, `--base`, `--budget`, `--block-on`, `--format`, `--suggestions`, and resource flags.
-- [ ] 4.5 Integration: Add tmpdir fixture tests for stdin diff, staged diff in a git repo, file diff, conflicting sources, no source, budget/block-on behavior, and temp-dir cleanup.
+- [x] 4.1 RED: Write unit tests for `parseUnifiedDiff`, `applyDiffToTempDir`, `computeAIGuardResult`, `enforceBudget`, and `enforceBlockOn` in `tests/ai-guard.test.ts`.
+- [x] 4.2 GREEN: Create `src/ai-guard.ts` with `runAIGuard`, diff application, temp-dir lifecycle, and budget/block-on enforcement.
+- [x] 4.3 REFACTOR: Extract diff parsing edge cases (new/delete/rename/binary/empty) and confirm `try/finally` + SIGINT/SIGTERM cleanup in every exit path.
+- [x] 4.4 Modify `src/cli.ts` to register `ai-guard` with `--stdin`, `--staged`, `--diff-file`, `--base`, `--budget`, `--block-on`, `--format`, `--suggestions`, and resource flags.
+- [x] 4.5 Integration: Add tmpdir fixture tests for stdin diff, staged diff in a git repo, file diff, conflicting sources, no source, budget/block-on behavior, and temp-dir cleanup.
 
 ## Phase 5: E2E & Verification
 

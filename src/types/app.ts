@@ -31,4 +31,8 @@ export interface DriftConfig {
     contextOutput?: string
     maxIssues?: number
   }
+  aiGuard?: {
+    budget?: number
+    blockOn?: string[]
+  }
 }
