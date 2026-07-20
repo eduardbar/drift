@@ -1,6 +1,7 @@
 // drift-ignore-file
 import { describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync, readdirSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, readdirSync, readFileSync, symlinkSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -41,6 +42,19 @@ describe('ai guard diff engine', () => {
     expect(() => parseUnifiedDiff('diff --git a/safe.ts b/../escape.ts\n--- a/safe.ts\n+++ b/../escape.ts\n@@ -1 +1 @@\n-old\n+new')).toThrow(/unsafe|traversal/i)
   })
 
+  it('rejects symlink and junction ancestors for writes and renames', () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'drift-ai-guard-link-'))
+    const outside = mkdtempSync(join(tmpdir(), 'drift-ai-guard-outside-'))
+    mkdirSync(join(workspace, 'safe')); writeFileSync(join(outside, 'value.ts'), 'export const value = 1\n')
+    symlinkSync(outside, join(workspace, 'safe', 'link'), process.platform === 'win32' ? 'junction' : 'dir')
+    const patch = parseUnifiedDiff('--- a/safe/link/value.ts\n+++ b/safe/link/value.ts\n@@ -1 +1 @@\n-export const value = 1\n+export const value = 2')
+    expect(() => applyDiffToTempDir(workspace, patch)).toThrow(/symlink|junction/i)
+    const rename = parseUnifiedDiff('diff --git a/safe/link/value.ts b/renamed.ts\nsimilarity index 100%\nrename from safe/link/value.ts\nrename to renamed.ts')
+    expect(() => applyDiffToTempDir(workspace, rename)).toThrow(/symlink|junction/i)
+    expect(readFileSync(join(outside, 'value.ts'), 'utf8')).toBe('export const value = 1\n')
+    rmSync(workspace, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true })
+  })
+
   it('applies a content patch inside the supplied workspace only', () => {
     const workspace = 'C:\\temp\\drift-ai-guard-test'
     mkdirSync(`${workspace}\\src`, { recursive: true })
@@ -57,6 +71,17 @@ describe('ai guard diff engine', () => {
     expect(result).toMatchObject({ scoreDelta: -20 })
     expect(result.newIssues.map(issue => issue.rule)).toEqual(['y'])
     expect(result.resolvedIssues.map(issue => issue.rule)).toEqual(['x'])
+  })
+
+  it('compares project-relative identities without treating unchanged findings as new and resolved', () => {
+    const result = computeAIGuardResult(
+      [{ path: 'C:/tmp/before/src/value.ts', score: 90, issues: [{ rule: 'debug-leftover', severity: 'warning', message: 'Remove console.log', line: 2, column: 1, snippet: '' }] }],
+      [{ path: 'C:/tmp/after/src/value.ts', score: 90, issues: [{ rule: 'debug-leftover', severity: 'warning', message: 'Remove console.log', line: 2, column: 1, snippet: '' }] }],
+      { before: 'C:/tmp/before', after: 'C:/tmp/after' },
+    )
+    expect(result.newIssues).toEqual([])
+    expect(result.resolvedIssues).toEqual([])
+    expect(result.issues[0].file).toBe('src/value.ts')
   })
 
   it('enforces score budgets and block-on rules deterministically', () => {
@@ -86,6 +111,47 @@ describe('ai guard diff engine', () => {
     expect(readdirSync(tmpdir()).filter(name => name.startsWith('drift-ai-guard-'))).toEqual(before)
     await expect(runAIGuard({ projectPath, source: { kind: 'stdin', content: 'not a diff' } })).rejects.toThrow(/malformed/i)
     expect(readdirSync(tmpdir()).filter(name => name.startsWith('drift-ai-guard-'))).toEqual(before)
+    rmSync(projectPath, { recursive: true, force: true })
+  })
+
+  it('materializes HEAD as the staged baseline and applies the staged diff once', () => {
+    const projectPath = mkdtempSync(join(tmpdir(), 'drift-ai-guard-git-'))
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: projectPath, stdio: 'pipe', encoding: 'utf8' })
+    git('init', '-q')
+    git('config', 'user.email', 'test@example.com'); git('config', 'user.name', 'Test')
+    mkdirSync(join(projectPath, 'src')); writeFileSync(join(projectPath, 'src', 'value.ts'), 'export const value = 1\n')
+    git('add', '.'); git('commit', '-qm', 'initial')
+    writeFileSync(join(projectPath, 'src', 'value.ts'), 'export const value = 1\nconsole.log(value)\n')
+    git('add', '.')
+    return runAIGuard({ projectPath, source: { kind: 'staged' } }).then(result => {
+      expect(result.source).toBe('staged')
+      expect(result.newIssues.some(issue => issue.file === 'src/value.ts')).toBe(true)
+      expect(result.newIssues.every(issue => !issue.file?.includes('drift-ai-guard-'))).toBe(true)
+      rmSync(projectPath, { recursive: true, force: true })
+    })
+  })
+
+  it('materializes a base ref and applies the working-tree diff once', () => {
+    const projectPath = mkdtempSync(join(tmpdir(), 'drift-ai-guard-base-'))
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: projectPath, stdio: 'pipe', encoding: 'utf8' })
+    git('init', '-q'); git('config', 'user.email', 'test@example.com'); git('config', 'user.name', 'Test')
+    mkdirSync(join(projectPath, 'src')); writeFileSync(join(projectPath, 'src', 'value.ts'), 'export const value = 1\n')
+    git('add', '.'); git('commit', '-qm', 'initial')
+    writeFileSync(join(projectPath, 'src', 'value.ts'), 'export const value = 1\nconsole.log(value)\n')
+    return runAIGuard({ projectPath, source: { kind: 'base', ref: 'HEAD' } }).then(result => {
+      expect(result.source).toBe('base')
+      expect(result.newIssues.some(issue => issue.file === 'src/value.ts')).toBe(true)
+      rmSync(projectPath, { recursive: true, force: true })
+    })
+  })
+
+  it('returns deterministic suggestions only when requested', async () => {
+    const projectPath = mkdtempSync(join(tmpdir(), 'drift-ai-guard-suggest-'))
+    mkdirSync(join(projectPath, 'src')); writeFileSync(join(projectPath, 'src', 'value.ts'), 'export const value = 1\n')
+    const result = await runAIGuard({ projectPath, suggestions: true, source: { kind: 'stdin', content: '--- a/src/value.ts\n+++ b/src/value.ts\n@@ -1 +2 @@\n export const value = 1\n+console.log(value)' } })
+    expect(result.suggestions?.[0]).toMatchObject({ file: 'src/value.ts', rule: 'debug-leftover' })
+    expect(JSON.stringify(result)).not.toContain(projectPath)
+    expect(readFileSync(join(projectPath, 'src', 'value.ts'), 'utf8')).toBe('export const value = 1\n')
     rmSync(projectPath, { recursive: true, force: true })
   })
 })
