@@ -43,6 +43,7 @@ export interface AIGuardResult {
   issues: AIGuardIssue[]
   files: string[]
   reason?: string
+  suggestions?: Array<AIGuardIssue & { suggestion: string }>
 }
 
 export interface AIGuardOptions {

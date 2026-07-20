@@ -1,16 +1,17 @@
 // drift-ignore-file
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { basename, dirname, isAbsolute, join, normalize, relative, resolve, win32 } from 'node:path'
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname, isAbsolute, join, normalize, relative, resolve, sep, win32 } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { analyzeProject } from './analyzer.js'
-import { buildReport, formatAIOutput } from './reporter.js'
-import { readDiffFromBase, readStagedDiff } from './git.js'
+import { buildReport } from './reporter.js'
+import { FIX_SUGGESTIONS } from './reporter-constants.js'
+import { extractFilesAtRef, readDiffFromBase, readStagedDiff, cleanupTempDir } from './git.js'
 import type { DiffSource, AIGuardIssue, AIGuardResult, DiffHunk, GuardFileReports, UnifiedDiffEntry } from './types/ai-guard.js'
 import type { DriftConfig } from './types/app.js'
-import type { DriftIssue, FileReport } from './types/core.js'
 
 const DEV_NULL = '/dev/null'
+const EXCLUDED_ROOTS = new Set(['.git', 'node_modules', 'dist', 'coverage', 'out', '.atl'])
 
 function unsafePath(path: string): never {
   throw new Error(`Unsafe diff path: '${path}' (absolute, drive-prefixed, NUL, or traversal path)`)
@@ -19,15 +20,14 @@ function unsafePath(path: string): never {
 export function validateDiffPath(path: string): string | undefined {
   if (path === DEV_NULL) return undefined
   if (!path || path.includes('\0') || isAbsolute(path) || win32.isAbsolute(path) || /^[A-Za-z]:/.test(path)) unsafePath(path)
-  const normalized = normalize(path.replace(/^a\//, '').replace(/^b\//, ''))
-  if (normalized === '..' || normalized.startsWith(`..${normalize('/')}`) || normalized.includes(`${normalize('/') }..${normalize('/')}`)) unsafePath(path)
-  if (normalized.split(/[\\/]/).includes('..')) unsafePath(path)
+  const stripped = path.replace(/^a[\\/]/, '').replace(/^b[\\/]/, '')
+  const normalized = normalize(stripped)
+  if (normalized === '..' || normalized.startsWith(`..${sep}`) || normalized.split(/[\\/]/).includes('..')) unsafePath(path)
   return normalized.replaceAll('\\', '/')
 }
 
 function parseHeaderPath(line: string): string | undefined {
-  const value = line.slice(4).split('\t', 1)[0]
-  return validateDiffPath(value)
+  return validateDiffPath(line.slice(4).split('\t', 1)[0])
 }
 
 function parseHunkHeader(line: string): DiffHunk {
@@ -39,24 +39,20 @@ function parseHunkHeader(line: string): DiffHunk {
 export function parseUnifiedDiff(diff: string): UnifiedDiffEntry[] {
   if (diff.includes('\0')) throw new Error('Malformed unified diff: NUL byte')
   if (!diff.trim()) return []
-  const lines = diff.replaceAll('\r\n', '\n').split('\n')
   const entries: UnifiedDiffEntry[] = []
   let current: UnifiedDiffEntry | undefined
   let hunk: DiffHunk | undefined
-  let sawFile = false
-
   const finish = () => { if (current) entries.push(current); current = undefined; hunk = undefined }
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
+
+  for (const line of diff.replaceAll('\r\n', '\n').split('\n')) {
     if (line.startsWith('diff --git ')) {
       finish()
       const header = line.slice(11).match(/^(\S+)\s+(\S+)$/)
       if (!header) throw new Error(`Malformed unified diff file header: ${line}`)
       current = { status: 'modified', oldPath: validateDiffPath(header[1]), newPath: validateDiffPath(header[2]), hunks: [] }
-      sawFile = true
       continue
     }
-    if (!current && line.startsWith('--- ')) { current = { status: 'modified', hunks: [] }; sawFile = true }
+    if (!current && line.startsWith('--- ')) current = { status: 'modified', hunks: [] }
     if (!current) continue
     if (line.startsWith('rename from ')) { current.oldPath = validateDiffPath(line.slice(12).trim()); current.status = 'rename'; continue }
     if (line.startsWith('rename to ')) { current.newPath = validateDiffPath(line.slice(10).trim()); current.status = 'rename'; continue }
@@ -67,26 +63,54 @@ export function parseUnifiedDiff(diff: string): UnifiedDiffEntry[] {
     if (line.startsWith('+++ ')) { current.newPath = parseHeaderPath(line); continue }
     if (line.startsWith('@@ ')) { hunk = parseHunkHeader(line); current.hunks.push(hunk); continue }
     if (hunk && (line.startsWith(' ') || line.startsWith('+') || line.startsWith('-') || line.startsWith('\\'))) { hunk.lines.push(line); continue }
-    if (line.trim() && !line.startsWith('index ') && !line.startsWith('similarity index ') && !line.startsWith('old mode ') && !line.startsWith('new mode ')) {
-      if (!line.startsWith('diff --git ')) throw new Error(`Malformed unified diff line: ${line}`)
-    }
+    if (line.trim() && !/^(index |similarity index |old mode |new mode |diff --git )/.test(line)) throw new Error(`Malformed unified diff line: ${line}`)
   }
   finish()
-  if (!sawFile || entries.some(entry => !entry.oldPath && !entry.newPath)) throw new Error('Malformed unified diff: missing file paths')
+  if (entries.length === 0 || entries.some(entry => !entry.oldPath && !entry.newPath)) throw new Error('Malformed unified diff: missing file paths')
   return entries
 }
 
-function containedPath(root: string, path: string): string {
-  const rootResolved = resolve(root)
-  const target = resolve(rootResolved, path)
-  const rel = relative(rootResolved, target)
-  if (rel === '..' || rel.startsWith(`..${normalize('/')}`) || isAbsolute(rel)) unsafePath(path)
-  return target
+function isWithin(root: string, candidate: string): boolean {
+  const rel = relative(root, candidate)
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+}
+
+function canonicalComparable(path: string): string {
+  const value = normalize(path)
+  return process.platform === 'win32' ? value.toLowerCase() : value
+}
+
+/** Validate every existing ancestor. This rejects symlinks and Windows junctions before mutation. */
+function safeMutationPath(root: string, target: string, operation: string): string {
+  const rootPath = resolve(root)
+  const targetPath = resolve(target)
+  if (!isWithin(rootPath, targetPath)) unsafePath(target)
+  const rootReal = realpathSync.native(rootPath)
+  const pathExists = (candidate: string) => { try { lstatSync(candidate); return true } catch { return false } }
+  let current = targetPath
+  const missing: string[] = []
+  while (!pathExists(current)) {
+    missing.unshift(current)
+    const parent = dirname(current)
+    if (parent === current) break
+    current = parent
+  }
+  if (!isWithin(rootPath, current)) unsafePath(target)
+  for (const candidate of [current, ...missing]) {
+    if (!pathExists(candidate)) continue
+    const stat = lstatSync(candidate)
+    if (stat.isSymbolicLink()) throw new Error(`Refusing ${operation} through symlink or junction: '${candidate}'`)
+    const real = realpathSync.native(candidate)
+    if (!isWithin(rootReal, real) || (canonicalComparable(real) !== canonicalComparable(candidate) && candidate !== rootPath)) {
+      throw new Error(`Refusing ${operation} through symlink or junction: '${candidate}'`)
+    }
+  }
+  return targetPath
 }
 
 function applyHunks(filePath: string, hunks: DiffHunk[]): string {
   const source = existsSync(filePath) ? readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n').split('\n') : []
-  if (source.length && source[source.length - 1] === '') source.pop()
+  if (source.at(-1) === '') source.pop()
   let offset = 0
   for (const hunk of hunks) {
     const start = Math.max(0, hunk.oldStart - 1 + offset)
@@ -107,53 +131,56 @@ function applyHunks(filePath: string, hunks: DiffHunk[]): string {
 export function applyDiffToTempDir(tempDir: string, entries: UnifiedDiffEntry[]): void {
   const root = resolve(tempDir)
   mkdirSync(root, { recursive: true })
+  safeMutationPath(root, root, 'write')
   for (const entry of entries) {
-    const oldPath = entry.oldPath ? containedPath(root, entry.oldPath) : undefined
-    const newPath = entry.newPath ? containedPath(root, entry.newPath) : undefined
+    const oldPath = entry.oldPath ? safeMutationPath(root, resolve(root, entry.oldPath), entry.status === 'rename' || entry.status === 'deleted' ? 'delete' : 'read') : undefined
+    const newPath = entry.newPath ? safeMutationPath(root, resolve(root, entry.newPath), entry.status === 'rename' ? 'write' : 'write') : undefined
     if (entry.status === 'binary') continue
     if (entry.status === 'rename') {
       if (!oldPath || !newPath) throw new Error('Malformed rename: both paths are required')
-      mkdirSync(dirname(newPath), { recursive: true })
       if (!existsSync(oldPath)) throw new Error(`Cannot rename missing file '${entry.oldPath}'`)
-      if (resolve(oldPath) === resolve(newPath)) continue
-      rmSync(newPath, { force: true })
-      // renameSync is intentionally avoided for cross-device safety; copy then delete is still contained.
-      cpSync(oldPath, newPath)
-      rmSync(oldPath, { force: true })
-      if (entry.hunks.length > 0) writeFileSync(newPath, applyHunks(newPath, entry.hunks), 'utf8')
+      mkdirSync(dirname(newPath), { recursive: true })
+      safeMutationPath(root, newPath, 'write')
+      if (resolve(oldPath) !== resolve(newPath)) {
+        if (existsSync(newPath)) rmSync(safeMutationPath(root, newPath, 'delete'), { force: true })
+        cpSync(oldPath, newPath)
+        rmSync(safeMutationPath(root, oldPath, 'delete'), { force: true })
+      }
+      if (entry.hunks.length > 0) writeFileSync(safeMutationPath(root, newPath, 'write'), applyHunks(newPath, entry.hunks), 'utf8')
       continue
     }
-    if (entry.status === 'deleted') { if (oldPath) rmSync(oldPath, { force: true }); continue }
+    if (entry.status === 'deleted') { if (oldPath && existsSync(oldPath)) rmSync(safeMutationPath(root, oldPath, 'delete'), { force: true }); continue }
     if (!newPath) throw new Error('Malformed diff: missing destination path')
     mkdirSync(dirname(newPath), { recursive: true })
-    writeFileSync(newPath, applyHunks(newPath, entry.hunks), 'utf8')
+    writeFileSync(safeMutationPath(root, newPath, 'write'), applyHunks(newPath, entry.hunks), 'utf8')
   }
 }
 
-function issueKey(issue: AIGuardIssue): string { return `${issue.file ?? ''}|${issue.rule}|${issue.line ?? 0}|${issue.message ?? ''}` }
-function flatten(reports: GuardFileReports): AIGuardIssue[] {
-  return reports.flatMap(file => file.issues.map(issue => ({ ...issue, file: file.path })))
+function relativeIssuePath(root: string, file: string | undefined): string | undefined {
+  if (!file) return undefined
+  const candidate = isAbsolute(file) ? relative(root, file) : file
+  return candidate.replaceAll('\\', '/').replace(/^\.\//, '')
 }
 
-export function computeAIGuardResult(before: GuardFileReports, after: GuardFileReports): Pick<AIGuardResult, 'scoreBefore' | 'scoreAfter' | 'scoreDelta' | 'newIssues' | 'resolvedIssues' | 'issues'> {
-  const beforeIssues = flatten(before)
-  const afterIssues = flatten(after)
+function flatten(reports: GuardFileReports, root: string): AIGuardIssue[] {
+  return reports.flatMap(file => file.issues.map(issue => ({ ...issue, file: relativeIssuePath(root, file.path) })))
+}
+
+function issueKey(issue: AIGuardIssue): string { return `${issue.file ?? ''}|${issue.rule}|${issue.message ?? ''}` }
+function sortIssues(issues: AIGuardIssue[]): AIGuardIssue[] { return [...issues].sort((a, b) => issueKey(a).localeCompare(issueKey(b)) || (a.line ?? 0) - (b.line ?? 0)) }
+
+export function computeAIGuardResult(before: GuardFileReports, after: GuardFileReports, roots: { before?: string; after?: string } = {}): Pick<AIGuardResult, 'scoreBefore' | 'scoreAfter' | 'scoreDelta' | 'newIssues' | 'resolvedIssues' | 'issues'> {
+  const beforeIssues = sortIssues(flatten(before, roots.before ?? ''))
+  const afterIssues = sortIssues(flatten(after, roots.after ?? ''))
   const beforeKeys = new Set(beforeIssues.map(issueKey))
   const afterKeys = new Set(afterIssues.map(issueKey))
-  return {
-    scoreBefore: before.length ? Math.round(before.reduce((sum, file) => sum + file.score, 0) / before.length) : 100,
-    scoreAfter: after.length ? Math.round(after.reduce((sum, file) => sum + file.score, 0) / after.length) : 100,
-    scoreDelta: (after.length ? Math.round(after.reduce((sum, file) => sum + file.score, 0) / after.length) : 100) - (before.length ? Math.round(before.reduce((sum, file) => sum + file.score, 0) / before.length) : 100),
-    newIssues: afterIssues.filter(issue => !beforeKeys.has(issueKey(issue))),
-    resolvedIssues: beforeIssues.filter(issue => !afterKeys.has(issueKey(issue))),
-    issues: afterIssues,
-  }
+  const score = (files: GuardFileReports) => files.length ? Math.round(files.reduce((sum, file) => sum + file.score, 0) / files.length) : 100
+  const scoreBefore = score(before)
+  const scoreAfter = score(after)
+  return { scoreBefore, scoreAfter, scoreDelta: scoreAfter - scoreBefore, newIssues: afterIssues.filter(issue => !beforeKeys.has(issueKey(issue))), resolvedIssues: beforeIssues.filter(issue => !afterKeys.has(issueKey(issue))), issues: afterIssues }
 }
 
-export function enforceBudget(scoreDelta: number, budget = 0): { passed: boolean; reason?: string } {
-  return scoreDelta <= budget ? { passed: true, reason: undefined } : { passed: false, reason: `score delta ${scoreDelta} exceeds budget ${budget}` }
-}
-
+export function enforceBudget(scoreDelta: number, budget = 0): { passed: boolean; reason?: string } { return scoreDelta <= budget ? { passed: true, reason: undefined } : { passed: false, reason: `score delta ${scoreDelta} exceeds budget ${budget}` } }
 export function enforceBlockOn(issues: Array<Pick<AIGuardIssue, 'rule' | 'severity'>>, blockOn: string[] = []): { passed: boolean; reason?: string } {
   const blocked = issues.find(issue => blockOn.includes(issue.rule) || blockOn.includes(issue.severity))
   return blocked ? { passed: false, reason: `blocked by ${blocked.rule} (${blocked.severity})` } : { passed: true, reason: undefined }
@@ -173,36 +200,71 @@ function sourceDiff(projectPath: string, source: DiffSource): string {
   if (source.kind === 'staged') return readStagedDiff(projectPath)
   if (source.kind === 'base') return readDiffFromBase(projectPath, source.ref)
   if (isAbsolute(source.path) || source.path.includes('\0')) throw new Error('Diff file path must be relative and NUL-free')
-  return readFileSync(containedPath(resolve(projectPath), source.path), 'utf8')
+  return readFileSync(safeMutationPath(resolve(projectPath), resolve(projectPath, source.path), 'read'), 'utf8')
 }
 
 function copyProject(projectPath: string, destination: string): void {
-  cpSync(projectPath, destination, { recursive: true, filter: source => !source.includes(`${normalize('/')}node_modules${normalize('/')}`) && !source.includes(`${normalize('/')}\.git${normalize('/')}`) })
+  const sourceRoot = resolve(projectPath)
+  const copy = (source: string, target: string) => {
+    const stat = lstatSync(source)
+    if (stat.isSymbolicLink()) throw new Error(`Refusing to copy symlink or junction: '${source}'`)
+    if (stat.isDirectory()) {
+      mkdirSync(target, { recursive: true })
+      for (const entry of readdirSync(source)) {
+        if (EXCLUDED_ROOTS.has(entry) || entry.startsWith('drift-ai-guard-') || entry.startsWith('drift-diff-')) continue
+        copy(join(source, entry), join(target, entry))
+      }
+    } else cpSync(source, target)
+  }
+  copy(sourceRoot, destination)
+}
+
+function prepareBaseline(projectPath: string, source: DiffSource, root: string): { before: string; cleanup: () => void } {
+  if (source.kind === 'staged') {
+    const before = extractFilesAtRef(projectPath, 'HEAD')
+    return { before, cleanup: () => cleanupTempDir(before) }
+  }
+  if (source.kind === 'base') {
+    const before = extractFilesAtRef(projectPath, source.ref)
+    return { before, cleanup: () => cleanupTempDir(before) }
+  }
+  const before = join(root, 'before')
+  copyProject(projectPath, before)
+  return { before, cleanup: () => undefined }
 }
 
 export async function runAIGuard(options: { projectPath: string; source: DiffSource; budget?: number; blockOn?: string[]; suggestions?: boolean; analysisOptions?: any; config?: DriftConfig }): Promise<AIGuardResult> {
   const root = mkdtempSync(join(tmpdir(), `drift-ai-guard-${randomUUID()}-`))
-  let stopping = false
-  const cleanup = () => { if (!stopping) { stopping = true; rmSync(root, { recursive: true, force: true }) } }
-  const onSignal = () => { cleanup(); process.exit(130) }
-  process.once('SIGINT', onSignal); process.once('SIGTERM', onSignal)
+  let signal: NodeJS.Signals | undefined
+  const cleanupRoot = () => { try { rmSync(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 20 }) } catch { /* best effort; no fallback process kill */ } }
+  const onSignal = (name: NodeJS.Signals) => { signal = name; cleanupRoot(); process.exitCode = name === 'SIGINT' ? 130 : 143 }
+  const onInt = () => onSignal('SIGINT')
+  const onTerm = () => onSignal('SIGTERM')
+  process.once('SIGINT', onInt); process.once('SIGTERM', onTerm)
+  let baselineCleanup: () => void = () => undefined
   try {
     const diff = sourceDiff(options.projectPath, options.source)
     if (!diff.trim()) throw new Error('The selected diff source is empty')
     const entries = parseUnifiedDiff(diff)
-    const beforePath = join(root, 'before')
+    const prepared = prepareBaseline(options.projectPath, options.source, root)
+    baselineCleanup = prepared.cleanup
     const afterPath = join(root, 'after')
-    copyProject(options.projectPath, beforePath)
-    copyProject(options.projectPath, afterPath)
+    copyProject(prepared.before, afterPath)
     applyDiffToTempDir(afterPath, entries)
-    const beforeReport = buildReport(beforePath, analyzeProject(beforePath, options.config, options.analysisOptions))
+    const beforeReport = buildReport(prepared.before, analyzeProject(prepared.before, options.config, options.analysisOptions))
     const afterReport = buildReport(afterPath, analyzeProject(afterPath, options.config, options.analysisOptions))
-    const delta = computeAIGuardResult(beforeReport.files, afterReport.files)
+    const delta = computeAIGuardResult(beforeReport.files, afterReport.files, { before: prepared.before, after: afterPath })
     const budget = enforceBudget(delta.scoreDelta, options.budget ?? 0)
     const block = enforceBlockOn(delta.newIssues, options.blockOn ?? [])
-    return { ...delta, passed: budget.passed && block.passed, source: options.source.kind, files: entries.flatMap(entry => [entry.oldPath, entry.newPath].filter((path): path is string => Boolean(path))), reason: budget.reason ?? block.reason }
+    const files = [...new Set(entries.flatMap(entry => [entry.oldPath, entry.newPath].filter((path): path is string => Boolean(path))))].sort()
+    const result: AIGuardResult = { ...delta, passed: budget.passed && block.passed, source: options.source.kind, files, reason: budget.reason ?? block.reason }
+    if (options.suggestions) result.suggestions = delta.newIssues.map(issue => ({ ...issue, suggestion: FIX_SUGGESTIONS[issue.rule] ?? 'Review and fix this issue' }))
+    if (signal) result.reason = `interrupted by ${signal}`
+    return result
   } finally {
-    process.removeListener('SIGINT', onSignal); process.removeListener('SIGTERM', onSignal); cleanup()
+    baselineCleanup()
+    process.removeListener('SIGINT', onInt); process.removeListener('SIGTERM', onTerm)
+    cleanupRoot()
   }
 }
 
@@ -210,5 +272,6 @@ export function formatAIGuardJson(result: AIGuardResult): string { return JSON.s
 export function formatAIGuardHuman(result: AIGuardResult): string {
   const lines = [`AI guard: ${result.passed ? 'PASS' : 'FAIL'}`, `Score: ${result.scoreBefore} -> ${result.scoreAfter} (${result.scoreDelta >= 0 ? '+' : ''}${result.scoreDelta})`, `New issues: ${result.newIssues.length}`, `Resolved issues: ${result.resolvedIssues.length}`]
   if (result.reason) lines.push(`Reason: ${result.reason}`)
+  if (result.suggestions?.length) for (const suggestion of result.suggestions) lines.push(`Suggestion [${suggestion.rule}] ${suggestion.file ?? ''}: ${suggestion.suggestion}`)
   return lines.join('\n')
 }

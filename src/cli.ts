@@ -490,6 +490,7 @@ addResourceOptions(
     ) => {
       const projectPath = resolve(targetPath ?? '.')
       try {
+        if (options.format !== 'human' && options.format !== 'json') throw new Error(`Invalid --format '${options.format}'. Expected human or json`)
         const source = selectDiffSource({ stdin: options.stdin, staged: options.staged, file: options.diffFile, base: options.base }, options.stdin ? readFileSync(0, 'utf8') : '')
         const budget = options.budget == null ? undefined : Number(options.budget)
         if (budget != null && (!Number.isFinite(budget))) throw new Error('--budget must be a valid number')
