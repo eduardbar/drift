@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync, execSync, spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -96,6 +96,23 @@ describe('SessionCache', () => {
     await cache.getReport(dir, generate)
 
     expect(generate).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not invalidate a report for generated output changes', async () => {
+    const dir = createTempDir('drift-mcp-cache-generated-')
+    tempDirs.push(dir)
+    mkdirSync(join(dir, 'dist'))
+    const cache = new SessionCache()
+    const report = buildRealReport(dir)
+    const generate = vi.fn().mockResolvedValue(report)
+
+    const first = await cache.getReport(dir, generate)
+    writeFileSync(join(dir, 'dist', 'generated.js'), 'export const generated = true\n')
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    const second = await cache.getReport(dir, generate)
+
+    expect(second).toBe(first)
+    expect(generate).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -310,6 +327,62 @@ describe('drift mcp CLI', () => {
         const parsed = JSON.parse(line)
         expect(parsed.jsonrpc).toBe('2.0')
       }
+    } finally {
+      await shutdown()
+    }
+  })
+
+  it('returns a fresh report after a watched source file changes', async () => {
+    const dir = createProject()
+    const child = spawn(process.execPath, ['--import', TSX_LOADER, CLI_PATH, 'mcp'], {
+      cwd: dir,
+      stdio: 'pipe',
+    })
+    const client = createRpcClient(child)
+
+    async function shutdown(): Promise<void> {
+      child.kill('SIGTERM')
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          child.kill('SIGKILL')
+          resolve()
+        }, 5000)
+        child.on('exit', () => {
+          clearTimeout(timer)
+          resolve()
+        })
+      })
+    }
+
+    try {
+      await client.call('initialize', {
+        protocolVersion: '2024-11-05',
+        capabilities: {},
+        clientInfo: { name: 'watch-regression', version: '1.0.0' },
+      }, 1)
+      client.send({ jsonrpc: '2.0', method: 'notifications/initialized' })
+
+      const before = await client.call('tools/call', {
+        name: 'drift_analyze',
+        arguments: {},
+      }, 2)
+      const beforeAnalysis = JSON.parse(
+        ((before.result as { content: Array<{ text: string }> }).content[0]).text,
+      ) as { violations: Array<{ rule: string }> }
+
+      writeFileSync(join(dir, 'a.ts'), 'console.log("changed")\n')
+      await new Promise((resolve) => setTimeout(resolve, 700))
+
+      const after = await client.call('tools/call', {
+        name: 'drift_analyze',
+        arguments: {},
+      }, 3)
+      const afterAnalysis = JSON.parse(
+        ((after.result as { content: Array<{ text: string }> }).content[0]).text,
+      ) as { violations: Array<{ rule: string }> }
+
+      expect(beforeAnalysis.violations.some((issue) => issue.rule === 'debug-leftover')).toBe(false)
+      expect(afterAnalysis.violations.some((issue) => issue.rule === 'debug-leftover')).toBe(true)
     } finally {
       await shutdown()
     }

@@ -11,7 +11,7 @@ import {
   type TextContent,
 } from '@modelcontextprotocol/sdk/types.js'
 import { createRequire } from 'node:module'
-import { resolve } from 'node:path'
+import { relative, resolve } from 'node:path'
 import type { Readable, Writable } from 'node:stream'
 import { analyzeProject, RULE_WEIGHTS } from './analyzer.js'
 import { loadConfig } from './config.js'
@@ -38,6 +38,27 @@ interface DriftEntry {
   watcher?: DebouncedWatcher
 }
 
+const GENERATED_WATCH_DIRECTORIES = new Set([
+  '.git',
+  '.drift',
+  'node_modules',
+  'dist',
+  'build',
+  '.next',
+  'coverage',
+  'out',
+])
+
+function canonicalProjectPath(projectPath: string): string {
+  return resolve(projectPath)
+}
+
+function shouldIgnoreWatchPath(projectPath: string, eventPath: string): boolean {
+  const segments = relative(projectPath, eventPath).split(/[\\/]/).filter(Boolean)
+  return segments.some((segment) => GENERATED_WATCH_DIRECTORIES.has(segment))
+    || segments.some((segment) => segment === 'drift-history.json' || segment.endsWith('.tmp'))
+}
+
 /**
  * Shared cache for drift reports used by the MCP server.
  *
@@ -58,56 +79,64 @@ export class SessionCache {
     projectPath: string,
     generate: () => Promise<DriftReport>,
   ): Promise<DriftReport> {
-    const cached = this.reports.get(projectPath)
+    const canonicalPath = canonicalProjectPath(projectPath)
+    const cached = this.reports.get(canonicalPath)
     if (cached?.report) return cached.report
 
-    const inFlight = this.pending.get(projectPath)
+    const inFlight = this.pending.get(canonicalPath)
     if (inFlight) return inFlight
+
+    this.watch(canonicalPath)
 
     const promise = generate()
       .then((report) => {
-        const existing = this.reports.get(projectPath)
-        this.reports.set(projectPath, { report, watcher: existing?.watcher })
-        this.pending.delete(projectPath)
+        const existing = this.reports.get(canonicalPath)
+        this.reports.set(canonicalPath, { report, watcher: existing?.watcher })
+        this.pending.delete(canonicalPath)
         return report
       })
       .catch((error) => {
-        this.pending.delete(projectPath)
+        this.pending.delete(canonicalPath)
+        this.reports.get(canonicalPath)?.watcher?.close()
+        this.reports.delete(canonicalPath)
         throw error
       })
 
-    this.pending.set(projectPath, promise)
+    this.pending.set(canonicalPath, promise)
     return promise
   }
 
   invalidate(projectPath: string): void {
-    const cached = this.reports.get(projectPath)
+    const canonicalPath = canonicalProjectPath(projectPath)
+    const cached = this.reports.get(canonicalPath)
     if (cached?.watcher) {
       cached.watcher.close()
     }
-    this.reports.delete(projectPath)
+    this.reports.delete(canonicalPath)
   }
 
   watch(projectPath: string, onChange?: () => void): DebouncedWatcher {
-    const cached = this.reports.get(projectPath)
+    const canonicalPath = canonicalProjectPath(projectPath)
+    const cached = this.reports.get(canonicalPath)
     if (cached?.watcher) {
       return cached.watcher
     }
 
     const watcher = createDebouncedWatcher(
-      projectPath,
+      canonicalPath,
       () => {
-        log('debug', `Invalidating cache for ${projectPath}`)
-        this.invalidate(projectPath)
+        log('debug', `Invalidating cache for ${canonicalPath}`)
+        this.invalidate(canonicalPath)
         onChange?.()
       },
       300,
+      (eventPath) => shouldIgnoreWatchPath(canonicalPath, eventPath),
     )
 
     if (cached) {
       cached.watcher = watcher
     } else {
-      this.reports.set(projectPath, { watcher })
+      this.reports.set(canonicalPath, { watcher })
     }
 
     return watcher
