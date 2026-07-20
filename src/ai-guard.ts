@@ -11,7 +11,7 @@ import type { DiffSource, AIGuardIssue, AIGuardResult, DiffHunk, GuardFileReport
 import type { DriftConfig } from './types/app.js'
 
 const DEV_NULL = '/dev/null'
-const EXCLUDED_ROOTS = new Set(['.git', 'node_modules', 'dist', 'coverage', 'out', '.atl'])
+const EXCLUDED_ROOTS = new Set(['.git', 'node_modules', 'dist', 'coverage', 'out', '.atl', '.drift', '.drift-perf', '.drift-smoke'])
 
 function unsafePath(path: string): never {
   throw new Error(`Unsafe diff path: '${path}' (absolute, drive-prefixed, NUL, or traversal path)`)
