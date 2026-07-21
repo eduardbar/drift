@@ -1,6 +1,7 @@
 export { analyzeProject, analyzeFile, RULE_WEIGHTS } from './analyzer.js'
 export { buildReport, formatMarkdown } from './reporter.js'
 export { computeDiff } from './diff.js'
+export { readStagedDiff, readDiffFromBase } from './git.js'
 export { runGuard, evaluateGuard } from './guard.js'
 export type {
   GuardBaseline,

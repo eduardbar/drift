@@ -4,11 +4,13 @@ import { analyzeProject } from './analyzer.js'
 import { buildReport } from './reporter.js'
 import { loadConfig } from './config.js'
 import { scoreToGrade } from './utils.js'
+import { maybeWriteContext } from './context-init.js'
 
 interface InitOptions {
   preset?: string
   ci?: boolean
   baseline?: boolean
+  context?: boolean
 }
 
 export const INIT_PRESETS = ['node-backend', 'react-app', 'hexagonal', 'monorepo'] as const
@@ -212,9 +214,10 @@ export async function runInit(projectRoot: string, options: InitOptions): Promis
   maybeWritePresetConfig(projectRoot, options.preset, tasks)
   maybeWriteCiWorkflow(projectRoot, options.ci, tasks)
   await maybeWriteBaseline(projectRoot, options.baseline, tasks)
+  await maybeWriteContext(projectRoot, options.context, tasks)
 
   if (tasks.length === 0) {
-    process.stdout.write('\n  No actions taken. Use --preset, --ci, or --baseline flags.\n\n')
+    process.stdout.write('\n  No actions taken. Use --preset, --ci, --baseline, or --context flags.\n\n')
   } else {
     process.stdout.write('\n  drift init complete:\n\n')
     for (const task of tasks) {
@@ -288,11 +291,9 @@ async function maybeWriteBaseline(projectRoot: string, baseline: boolean | undef
   writeFileSync(baselinePath, JSON.stringify(baselineSnapshot, null, 2), 'utf8')
   tasks.push(`✅ Created drift-baseline.json (score: ${report.totalScore}/100, grade: ${baselineSnapshot.grade})`)
 }
-
 function generateConfigPreset(preset: InitPreset): string {
   return CONFIG_PRESET_CONTENT[preset]
 }
-
 function generateGitHubWorkflow(): string {
   return GITHUB_WORKFLOW_TEMPLATE
 }

@@ -41,6 +41,14 @@ export type {
 export type { DriftConfig } from './types/app.js'
 
 export type {
+  ContextHealth,
+  ContextViolation,
+  ContextArchitectureSummary,
+  ContextDocument,
+  ContextOptions,
+} from './types/context.js'
+
+export type {
   PluginRuleContext,
   DriftPluginRule,
   DriftPlugin,
