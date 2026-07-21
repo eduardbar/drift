@@ -1,5 +1,6 @@
-// drift-ignore-file
-import type { DriftIssue, FileReport } from './core.js'
+import type { FileReport } from './core.js'
+import type { DriftAnalysisOptions } from './config.js'
+import type { DriftConfig } from './app.js'
 
 export type DiffSource =
   | { kind: 'stdin'; content: string }
@@ -7,7 +8,7 @@ export type DiffSource =
   | { kind: 'file'; path: string }
   | { kind: 'base'; ref: string }
 
-export type DiffEntryStatus = 'added' | 'modified' | 'deleted' | 'rename' | 'binary'
+type DiffEntryStatus = 'added' | 'modified' | 'deleted' | 'rename' | 'binary'
 
 export interface DiffHunk {
   oldStart: number
@@ -52,8 +53,8 @@ export interface AIGuardOptions {
   budget?: number
   blockOn?: string[]
   suggestions?: boolean
-  analysisOptions?: Record<string, unknown>
+  analysisOptions?: DriftAnalysisOptions
+  config?: DriftConfig
 }
 
 export type GuardFileReports = Pick<FileReport, 'path' | 'score' | 'issues'>[]
-export type GuardDiffIssues = Pick<DriftIssue, 'rule' | 'severity' | 'message' | 'line'>[]

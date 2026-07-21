@@ -56,7 +56,8 @@ import {
 import { inspectMCPTools, runMcpServer } from './mcp-server.js'
 import { resolveOutputFormat } from './format.js'
 import { toSarif, diffToSarif } from './sarif.js'
-import { formatAIGuardHuman, formatAIGuardJson, runAIGuard, selectDiffSource } from './ai-guard.js'
+import { runAIGuard, selectDiffSource } from './ai-guard.js'
+import { formatAIGuardHuman, formatAIGuardJson } from './ai-guard-results.js'
 import type { DriftDiff, DriftTrustReport, DriftAnalysisOptions, MergeRiskLevel } from './types.js'
 import type { GuardResult, GuardThresholds } from './guard-types.js'
 import type { TrustGatePolicyExplanation } from './trust.js'
@@ -469,7 +470,7 @@ addResourceOptions(
     .description('Audit a proposed diff in an isolated before/after workspace')
     .option('--stdin', 'Read the unified diff from stdin')
     .option('--staged', 'Read the staged git diff')
-    .option('--file, --diff-file <file>', 'Read the unified diff from a file')
+    .option('--diff-file <file>', 'Read the unified diff from a file')
     .option('--base <ref>', 'Read the diff from a git ref')
     .option('--budget <n>', 'Maximum allowed score delta (default: 0)')
     .option('--block-on <rules>', 'Comma-separated rules or severities that block the merge')
@@ -1403,4 +1404,9 @@ cloud
     process.stdout.write(`Dashboard saved to ${outPath}\n`)
   })
 
-program.parse()
+if (process.argv.includes('ai-guard') && process.argv.includes('--file')) {
+  process.stderr.write("\n  Error: unknown option '--file'; use --diff-file\n\n")
+  process.exitCode = 2
+} else {
+  program.parse()
+}

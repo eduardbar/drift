@@ -1,4 +1,5 @@
 // drift-ignore-file
+
 export type {
   DriftIssue,
   FileReport,
@@ -50,7 +51,6 @@ export type {
 
 export type {
   DiffSource,
-  DiffEntryStatus,
   DiffHunk,
   UnifiedDiffEntry,
   AIGuardIssue,

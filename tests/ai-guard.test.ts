@@ -1,18 +1,14 @@
-// drift-ignore-file
 import { describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync, readdirSync, readFileSync, symlinkSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  applyDiffToTempDir,
-  computeAIGuardResult,
-  enforceBlockOn,
-  enforceBudget,
-  parseUnifiedDiff,
   selectDiffSource,
   runAIGuard,
 } from '../src/ai-guard.js'
+import { applyDiffToTempDir, parseUnifiedDiff } from '../src/ai-guard-diff.js'
+import { computeAIGuardResult, enforceBlockOn, enforceBudget } from '../src/ai-guard-results.js'
 
 describe('ai guard diff engine', () => {
   it('parses additions, deletions, and renames from a unified diff', () => {
