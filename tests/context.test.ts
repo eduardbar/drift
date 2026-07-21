@@ -545,12 +545,16 @@ describe('context-file', () => {
         await vi.waitFor(() => expect(existsSync(contextPath)).toBe(true), { timeout: 10000 })
         const before = readFileSync(contextPath, 'utf8')
 
+        // Wait for the watcher to be armed before mutating the source, otherwise
+        // the change event can be lost on slower runners (Node 20 CI).
+        await vi.waitFor(() => expect(stderr.join('')).toContain('Watching'), { timeout: 10000 })
+
         writeFileSync(sourceFile, 'export const a = 2\nconsole.log(a)\n')
 
         await vi.waitFor(() => {
           const after = readFileSync(contextPath, 'utf8')
           expect(after).not.toBe(before)
-        }, { timeout: 5000 })
+        }, { timeout: 15000 })
 
         const regenerated = readFileSync(contextPath, 'utf8')
         await new Promise((resolve) => setTimeout(resolve, 1000))
