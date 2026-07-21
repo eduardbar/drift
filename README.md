@@ -167,8 +167,7 @@ OpenCode configuration (`opencode.json` or the equivalent MCP settings):
   "mcp": {
     "drift": {
       "type": "local",
-      "command": "drift",
-      "args": ["mcp", "."]
+      "command": ["drift", "mcp", "."]
     }
   }
 }

@@ -13,7 +13,7 @@ describe('Phase 5 public documentation', () => {
     expect(configMatch, 'OpenCode JSON configuration example is missing').not.toBeNull()
     const config = JSON.parse(configMatch![1])
     const server = config.mcp.drift
-    expect(server).toEqual({ type: 'local', command: 'drift', args: ['mcp', '.'] })
+    expect(server).toEqual({ type: 'local', command: ['drift', 'mcp', '.'] })
 
     for (const flag of ['--stdin', '--staged', '--diff-file', '--base', '--budget', '--block-on']) {
       expect(readme).toContain(flag)
