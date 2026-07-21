@@ -10,6 +10,8 @@ const DEFAULT_BASE_REF = 'HEAD~1'
 const SNIPPET_MAX_LINES = 24
 const SNIPPET_MAX_CHARS = 2400
 const LOG_MAX_BUFFER = 32 * 1024 * 1024
+const CHILD_TIMEOUT_MS = 30_000
+const TIMEOUT_ERROR_CODE = 'ETIMEDOUT'
 
 function printHelp() {
   process.stdout.write(
@@ -118,6 +120,9 @@ function runGit(cwd, args) {
     cwd,
     encoding: 'utf8',
     maxBuffer: LOG_MAX_BUFFER,
+    timeout: CHILD_TIMEOUT_MS,
+    killSignal: 'SIGTERM',
+    windowsHide: true,
   })
 }
 
@@ -130,12 +135,18 @@ function runDriftCommand({ id, description, args, cwd, logsDir, expectFailure, c
     input,
     encoding: 'utf8',
     maxBuffer: LOG_MAX_BUFFER,
+    timeout: CHILD_TIMEOUT_MS,
+    killSignal: 'SIGTERM',
+    windowsHide: true,
   })
   const end = Date.now()
   const finishedAt = new Date(end).toISOString()
 
   const stdout = child.stdout ?? ''
-  const spawnError = child.error ? `${child.error.name}: ${child.error.message}` : ''
+  const timedOut = child.error?.code === TIMEOUT_ERROR_CODE
+  const spawnError = timedOut
+    ? `Error: command timed out after ${CHILD_TIMEOUT_MS}ms; termination signal ${child.signal ?? 'SIGTERM'} was sent`
+    : child.error ? `${child.error.name}: ${child.error.message}` : ''
   const stderr = `${child.stderr ?? ''}${spawnError ? `\n${spawnError}\n` : ''}`
   const stdoutFile = resolve(logsDir, `${id}.stdout.log`)
   const stderrFile = resolve(logsDir, `${id}.stderr.log`)
@@ -161,6 +172,9 @@ function runDriftCommand({ id, description, args, cwd, logsDir, expectFailure, c
     expectedFailure: expectFailure,
     exitCode,
     signal,
+    processId: child.pid,
+    timeoutMs: CHILD_TIMEOUT_MS,
+    timedOut,
     durationMs: end - start,
     startedAt,
     finishedAt,
@@ -250,7 +264,8 @@ function main() {
   const gitReady = isGitRepo && baseRefResolvable
 
   const contextOutput = resolve(outputDir, 'artifacts', 'context.md')
-  const safeDiff = '--- a/value.ts\n+++ b/value.ts\n@@ -1 +1 @@\n-export const value = 1\n+export const value = 2\n'
+  const packageFirstLine = readFileSync(resolve(targetPath, 'package.json'), 'utf8').split(/\r?\n/, 1)[0]
+  const safeDiff = `--- a/package.json\n+++ b/package.json\n@@ -1 +1,2 @@\n ${packageFirstLine}\n+\n`
   const plan = opts.aiIntegration ? [
     {
       id: 'context-generate',

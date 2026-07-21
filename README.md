@@ -167,7 +167,8 @@ OpenCode configuration (`opencode.json` or the equivalent MCP settings):
   "mcp": {
     "drift": {
       "type": "local",
-      "command": ["drift", "mcp", "."]
+      "command": "drift",
+      "args": ["mcp", "."]
     }
   }
 }
@@ -181,6 +182,7 @@ Audit a proposed diff in an isolated before/after workspace. Start with a safe, 
 
 ```bash
 git diff --cached | drift ai-guard . --stdin --format json
+drift ai-guard . --staged --format json
 drift ai-guard . --diff-file change.diff --budget 0 --block-on debug-leftover,large-file
 drift ai-guard . --base origin/main --format json
 ```
