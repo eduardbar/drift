@@ -23,6 +23,7 @@ function printHelp() {
       `  --base <ref>   Git base ref for review/trust (default: ${DEFAULT_BASE_REF})`,
       '  --out <dir>    Output directory (default: .drift-smoke/<repo>-<timestamp>)',
       '  --dry-run      Print planned commands and exit without running them',
+      '  --ai-integration Run bounded built-CLI context/MCP/ai-guard smoke',
       '  --help         Show this help',
       '',
       'Examples:',
@@ -52,6 +53,7 @@ function parseArgs(argv) {
     baseRef: DEFAULT_BASE_REF,
     outDir: undefined,
     dryRun: false,
+    aiIntegration: false,
     help: false,
   }
   let targetPathSet = false
@@ -68,6 +70,12 @@ function parseArgs(argv) {
 
     if (token === '--dry-run') {
       options.dryRun = true
+      index += 1
+      continue
+    }
+
+    if (token === '--ai-integration') {
+      options.aiIntegration = true
       index += 1
       continue
     }
@@ -113,11 +121,13 @@ function runGit(cwd, args) {
   })
 }
 
-function runDriftCommand({ id, description, args, cwd, logsDir, expectFailure, cliPath, tsxLoaderSpecifier }) {
+function runDriftCommand({ id, description, args, cwd, logsDir, expectFailure, cliPath, tsxLoaderSpecifier, input, useBuiltCli = false }) {
   const start = Date.now()
   const startedAt = new Date(start).toISOString()
-  const child = spawnSync(process.execPath, ['--import', tsxLoaderSpecifier, cliPath, ...args], {
+  const commandArgs = useBuiltCli ? [cliPath, ...args] : ['--import', tsxLoaderSpecifier, cliPath, ...args]
+  const child = spawnSync(process.execPath, commandArgs, {
     cwd,
+    input,
     encoding: 'utf8',
     maxBuffer: LOG_MAX_BUFFER,
   })
@@ -145,7 +155,7 @@ function runDriftCommand({ id, description, args, cwd, logsDir, expectFailure, c
   return {
     id,
     description,
-    command: `node --import ${tsxLoaderSpecifier} ${cliPath} ${args.join(' ')}`,
+    command: `node ${commandArgs.join(' ')}`,
     args,
     status,
     expectedFailure: expectFailure,
@@ -204,7 +214,7 @@ function main() {
 
   const scriptPath = fileURLToPath(import.meta.url)
   const repoRoot = resolve(scriptPath, '..', '..')
-  const cliPath = resolve(repoRoot, 'src', 'cli.ts')
+  const cliPath = resolve(repoRoot, opts.aiIntegration ? 'dist' : 'src', opts.aiIntegration ? 'cli.js' : 'cli.ts')
   const packageJsonPath = resolve(repoRoot, 'package.json')
   const tsxLoaderPath = resolve(repoRoot, 'node_modules', 'tsx', 'dist', 'loader.mjs')
   if (!existsSync(tsxLoaderPath)) {
@@ -239,7 +249,47 @@ function main() {
   const baseRefResolvable = Boolean(gitBaseProbe && gitBaseProbe.status === 0)
   const gitReady = isGitRepo && baseRefResolvable
 
-  const plan = [
+  const contextOutput = resolve(outputDir, 'artifacts', 'context.md')
+  const safeDiff = '--- a/value.ts\n+++ b/value.ts\n@@ -1 +1 @@\n-export const value = 1\n+export const value = 2\n'
+  const plan = opts.aiIntegration ? [
+    {
+      id: 'context-generate',
+      description: 'generate AI-readable context document',
+      args: ['context', targetPath, '--output', contextOutput],
+      expectFailure: false,
+      useBuiltCli: true,
+    },
+    {
+      id: 'context-ci-fresh',
+      description: 'verify context freshness in CI mode',
+      args: ['context', targetPath, '--output', contextOutput, '--ci'],
+      expectFailure: false,
+      useBuiltCli: true,
+    },
+    {
+      id: 'mcp-inspect',
+      description: 'inspect the local MCP tool contract without starting a server',
+      args: ['mcp', targetPath, '--inspect'],
+      expectFailure: false,
+      useBuiltCli: true,
+    },
+    {
+      id: 'ai-guard-safe',
+      description: 'audit a safe representative diff',
+      args: ['ai-guard', targetPath, '--stdin', '--format', 'json'],
+      input: safeDiff,
+      expectFailure: false,
+      useBuiltCli: true,
+    },
+    {
+      id: 'ai-guard-safe-repeat',
+      description: 'repeat the safe diff for deterministic output',
+      args: ['ai-guard', targetPath, '--stdin', '--format', 'json'],
+      input: safeDiff,
+      expectFailure: false,
+      useBuiltCli: true,
+    },
+  ] : [
     {
       id: 'scan-json',
       description: 'scan output as JSON',
@@ -330,6 +380,8 @@ function main() {
       expectFailure: item.expectFailure,
       cliPath,
       tsxLoaderSpecifier,
+      input: item.input,
+      useBuiltCli: item.useBuiltCli,
     })
 
     if (item.captureStdoutAs) {
