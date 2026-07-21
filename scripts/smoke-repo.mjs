@@ -10,6 +10,8 @@ const DEFAULT_BASE_REF = 'HEAD~1'
 const SNIPPET_MAX_LINES = 24
 const SNIPPET_MAX_CHARS = 2400
 const LOG_MAX_BUFFER = 32 * 1024 * 1024
+const CHILD_TIMEOUT_MS = 30_000
+const TIMEOUT_ERROR_CODE = 'ETIMEDOUT'
 
 function printHelp() {
   process.stdout.write(
@@ -23,6 +25,7 @@ function printHelp() {
       `  --base <ref>   Git base ref for review/trust (default: ${DEFAULT_BASE_REF})`,
       '  --out <dir>    Output directory (default: .drift-smoke/<repo>-<timestamp>)',
       '  --dry-run      Print planned commands and exit without running them',
+      '  --ai-integration Run bounded built-CLI context/MCP/ai-guard smoke',
       '  --help         Show this help',
       '',
       'Examples:',
@@ -52,6 +55,7 @@ function parseArgs(argv) {
     baseRef: DEFAULT_BASE_REF,
     outDir: undefined,
     dryRun: false,
+    aiIntegration: false,
     help: false,
   }
   let targetPathSet = false
@@ -68,6 +72,12 @@ function parseArgs(argv) {
 
     if (token === '--dry-run') {
       options.dryRun = true
+      index += 1
+      continue
+    }
+
+    if (token === '--ai-integration') {
+      options.aiIntegration = true
       index += 1
       continue
     }
@@ -110,22 +120,33 @@ function runGit(cwd, args) {
     cwd,
     encoding: 'utf8',
     maxBuffer: LOG_MAX_BUFFER,
+    timeout: CHILD_TIMEOUT_MS,
+    killSignal: 'SIGTERM',
+    windowsHide: true,
   })
 }
 
-function runDriftCommand({ id, description, args, cwd, logsDir, expectFailure, cliPath, tsxLoaderSpecifier }) {
+function runDriftCommand({ id, description, args, cwd, logsDir, expectFailure, cliPath, tsxLoaderSpecifier, input, useBuiltCli = false }) {
   const start = Date.now()
   const startedAt = new Date(start).toISOString()
-  const child = spawnSync(process.execPath, ['--import', tsxLoaderSpecifier, cliPath, ...args], {
+  const commandArgs = useBuiltCli ? [cliPath, ...args] : ['--import', tsxLoaderSpecifier, cliPath, ...args]
+  const child = spawnSync(process.execPath, commandArgs, {
     cwd,
+    input,
     encoding: 'utf8',
     maxBuffer: LOG_MAX_BUFFER,
+    timeout: CHILD_TIMEOUT_MS,
+    killSignal: 'SIGTERM',
+    windowsHide: true,
   })
   const end = Date.now()
   const finishedAt = new Date(end).toISOString()
 
   const stdout = child.stdout ?? ''
-  const spawnError = child.error ? `${child.error.name}: ${child.error.message}` : ''
+  const timedOut = child.error?.code === TIMEOUT_ERROR_CODE
+  const spawnError = timedOut
+    ? `Error: command timed out after ${CHILD_TIMEOUT_MS}ms; termination signal ${child.signal ?? 'SIGTERM'} was sent`
+    : child.error ? `${child.error.name}: ${child.error.message}` : ''
   const stderr = `${child.stderr ?? ''}${spawnError ? `\n${spawnError}\n` : ''}`
   const stdoutFile = resolve(logsDir, `${id}.stdout.log`)
   const stderrFile = resolve(logsDir, `${id}.stderr.log`)
@@ -145,12 +166,15 @@ function runDriftCommand({ id, description, args, cwd, logsDir, expectFailure, c
   return {
     id,
     description,
-    command: `node --import ${tsxLoaderSpecifier} ${cliPath} ${args.join(' ')}`,
+    command: `node ${commandArgs.join(' ')}`,
     args,
     status,
     expectedFailure: expectFailure,
     exitCode,
     signal,
+    processId: child.pid,
+    timeoutMs: CHILD_TIMEOUT_MS,
+    timedOut,
     durationMs: end - start,
     startedAt,
     finishedAt,
@@ -204,7 +228,7 @@ function main() {
 
   const scriptPath = fileURLToPath(import.meta.url)
   const repoRoot = resolve(scriptPath, '..', '..')
-  const cliPath = resolve(repoRoot, 'src', 'cli.ts')
+  const cliPath = resolve(repoRoot, opts.aiIntegration ? 'dist' : 'src', opts.aiIntegration ? 'cli.js' : 'cli.ts')
   const packageJsonPath = resolve(repoRoot, 'package.json')
   const tsxLoaderPath = resolve(repoRoot, 'node_modules', 'tsx', 'dist', 'loader.mjs')
   if (!existsSync(tsxLoaderPath)) {
@@ -239,7 +263,48 @@ function main() {
   const baseRefResolvable = Boolean(gitBaseProbe && gitBaseProbe.status === 0)
   const gitReady = isGitRepo && baseRefResolvable
 
-  const plan = [
+  const contextOutput = resolve(outputDir, 'artifacts', 'context.md')
+  const packageFirstLine = readFileSync(resolve(targetPath, 'package.json'), 'utf8').split(/\r?\n/, 1)[0]
+  const safeDiff = `--- a/package.json\n+++ b/package.json\n@@ -1 +1,2 @@\n ${packageFirstLine}\n+\n`
+  const plan = opts.aiIntegration ? [
+    {
+      id: 'context-generate',
+      description: 'generate AI-readable context document',
+      args: ['context', targetPath, '--output', contextOutput],
+      expectFailure: false,
+      useBuiltCli: true,
+    },
+    {
+      id: 'context-ci-fresh',
+      description: 'verify context freshness in CI mode',
+      args: ['context', targetPath, '--output', contextOutput, '--ci'],
+      expectFailure: false,
+      useBuiltCli: true,
+    },
+    {
+      id: 'mcp-inspect',
+      description: 'inspect the local MCP tool contract without starting a server',
+      args: ['mcp', targetPath, '--inspect'],
+      expectFailure: false,
+      useBuiltCli: true,
+    },
+    {
+      id: 'ai-guard-safe',
+      description: 'audit a safe representative diff',
+      args: ['ai-guard', targetPath, '--stdin', '--format', 'json'],
+      input: safeDiff,
+      expectFailure: false,
+      useBuiltCli: true,
+    },
+    {
+      id: 'ai-guard-safe-repeat',
+      description: 'repeat the safe diff for deterministic output',
+      args: ['ai-guard', targetPath, '--stdin', '--format', 'json'],
+      input: safeDiff,
+      expectFailure: false,
+      useBuiltCli: true,
+    },
+  ] : [
     {
       id: 'scan-json',
       description: 'scan output as JSON',
@@ -330,6 +395,8 @@ function main() {
       expectFailure: item.expectFailure,
       cliPath,
       tsxLoaderSpecifier,
+      input: item.input,
+      useBuiltCli: item.useBuiltCli,
     })
 
     if (item.captureStdoutAs) {

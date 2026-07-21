@@ -30,6 +30,9 @@ Comandos top-level definidos en `src/cli.ts`:
 
 - `scan [path]`
 - `init`
+- `context [path]`
+- `mcp [path]`
+- `ai-guard [path]`
 - `diff [ref]`
 - `guard [path]`
 - `benchmark`
@@ -73,6 +76,8 @@ Catálogo completo actualizado en `docs/rules-catalog.md`.
 - `architectureRules`: `controllerNoDb`, `serviceNoHttp`, `maxFunctionLines`
 - `saas`: límites/política local multi-tenant (`strictActorEnforcement` incluido)
 - `trustGate`: políticas de gating para `trust` / `trust-gate`
+- `aiIntegration`: opciones locales para el contexto y el servidor MCP
+- `aiGuard`: presupuesto y reglas de bloqueo para `ai-guard`
 
 Notas:
 
@@ -98,6 +103,9 @@ Notas:
 - `init`: scaffolding de `drift.config.ts`, workflow CI y baseline (`drift-baseline.json`)
 - `doctor`: diagnóstico de entorno/proyecto (`--json` opcional)
 - `guard`: evaluación de regresión por diff (`--base`) o baseline (`--baseline`) con `--budget` y `--by-severity`
+- `context`: documento local `.drift/context.md` y comprobación de frescura con `--ci`
+- `mcp`: servidor MCP local por stdio; `--inspect` expone exactamente seis herramientas sin iniciar el servidor
+- `ai-guard`: análisis aislado de diffs con códigos `0` (pass), `1` (policy block) y `2` (input/error)
 
 ---
 
@@ -112,6 +120,10 @@ Notas:
 ## Archivos clave
 
 - `src/cli.ts` — contrato de comandos y flags
+- `src/context.ts` — generación y frescura de `.drift/context.md`
+- `src/mcp-server.ts` — servidor MCP local stdio y sus seis herramientas
+- `src/ai-guard.ts` — orquestación del guard de diffs
+- `src/ai-guard-guardian.ts` / `src/cleanup-guardian.ts` — aislamiento y limpieza del workspace temporal
 - `src/analyzer.ts` — orquestación de análisis + `RULE_WEIGHTS`
 - `src/rules/*.ts` — detecciones por fase
 - `src/config.ts` y `src/types/*.ts` — contrato de configuración

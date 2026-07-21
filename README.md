@@ -123,6 +123,73 @@ npm run smoke:repo -- ../target-repo --dry-run
 
 The script writes JSON + Markdown summaries and command logs under `.drift-smoke/<repo>-<timestamp>/`.
 
+Use `--ai-integration` for the bounded built-CLI smoke covering context freshness, MCP inspection, and a safe `ai-guard` diff:
+
+```bash
+npm run build
+node ./scripts/smoke-repo.mjs ../target-repo --ai-integration --out .drift-smoke/ai
+```
+
+This smoke is local and does not contact an API, require credentials, or start a long-running process.
+
+### `drift context [path]`
+
+Generate the local, AI-readable project context used by coding assistants. The happy path writes `.drift/context.md` and keeps the complete document in memory before the single file write.
+
+```bash
+drift context .
+drift context . --max-issues 10
+drift context . --format json > context.json
+drift init --context
+```
+
+Run the same command with `--ci` to check freshness without rewriting the file. It exits `1` when the file is missing or its recorded score differs from the current score:
+
+```bash
+drift context . --ci
+```
+
+Recommended workflow: generate `.drift/context.md` locally, let the assistant use it as repository context, run `drift context . --ci` in CI, and review the diff with `drift review` or `drift guard`. The generated file is local context; add it to `.gitignore` if it should not be committed.
+
+### `drift mcp [path]`
+
+Expose drift to an MCP-compatible assistant through a local stdio process. `--inspect` prints the six-tool JSON contract and exits, which is useful for setup checks without starting a server:
+
+```bash
+drift mcp . --inspect
+drift mcp .
+```
+
+OpenCode configuration (`opencode.json` or the equivalent MCP settings):
+
+```json
+{
+  "mcp": {
+    "drift": {
+      "type": "local",
+      "command": ["drift", "mcp", "."]
+    }
+  }
+}
+```
+
+The server is local stdio only. It uses no network service, API key, cloud account, or hosted telemetry.
+
+### `drift ai-guard [path]`
+
+Audit a proposed diff in an isolated before/after workspace. Start with a safe, deterministic stdin diff; use a budget or explicit blocking rules when the command is a merge gate:
+
+```bash
+git diff --cached | drift ai-guard . --stdin --format json
+drift ai-guard . --staged --format json
+drift ai-guard . --diff-file change.diff --budget 0 --block-on debug-leftover,large-file
+drift ai-guard . --base origin/main --format json
+```
+
+Exit behavior is deterministic: `0` means the proposed change passes, `1` means the budget or `--block-on` policy rejects it, and `2` means the input or command is invalid. `ai-guard` is a local static-analysis guard; it does not call an AI provider and requires no API key or cloud service.
+
+The policy is intentionally zero-regression by default for the proposed diff. That does **not** claim that the whole repository has zero drift; it only prevents this change from adding disallowed findings relative to its selected baseline.
+
 ### `drift scan [path]`
 
 Scan a directory and print a scored report to stdout.

@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, existsSync, readFileSync, renameSync, rmSync } from 'node:fs'
+import { accessSync, constants, mkdirSync, writeFileSync, existsSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -22,6 +22,32 @@ const require = createRequire(import.meta.url)
 const { version: VERSION } = require('../package.json') as { version: string }
 const DEFAULT_MAX_ISSUES = 20
 const MAX_RECOMMENDED_ACTIONS = 3
+
+interface ContextFileSystem {
+  statSync?: (path: string) => { isDirectory: () => boolean }
+  accessSync?: (path: string, mode: number) => void
+  renameSync?: typeof renameSync
+}
+
+export function validateAnalysisTarget(
+  targetPath: string,
+  fileSystem: ContextFileSystem = {},
+): void {
+  const stat = fileSystem.statSync ?? statSync
+  const access = fileSystem.accessSync ?? accessSync
+
+  try {
+    if (!stat(targetPath).isDirectory()) {
+      throw new Error('target is not a directory')
+    }
+    access(targetPath, constants.R_OK)
+  } catch (error) {
+    const reason = error instanceof Error && error.message === 'target is not a directory'
+      ? error.message
+      : 'target does not exist or is not readable'
+    throw new Error(`analysis target must be a readable directory: ${targetPath} (${reason})`)
+  }
+}
 
 function buildHealth(report: DriftReport, aiOutput: AIOutput): ContextHealth {
   const grade = scoreToGradeText(report.totalScore)

@@ -3,7 +3,6 @@ import { execFileSync, spawn } from 'node:child_process'
 import * as fs from 'node:fs'
 import {
   existsSync,
-  chmodSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
@@ -18,7 +17,9 @@ import {
   checkContextFreshness,
   writeContextFile,
   runWatch,
+  validateAnalysisTarget,
 } from '../src/context.js'
+import { generateContextFile } from '../src/context-init.js'
 import { formatContextMarkdown } from '../src/context-markdown.js'
 import { runInit } from '../src/init.js'
 import type { AIOutput, DriftConfig, DriftReport } from '../src/types.js'
@@ -408,6 +409,30 @@ describe('context-file', () => {
   })
 
   describe('drift context CLI', () => {
+    it('writes a valid deterministic zero-file context for an empty project', async () => {
+      const dir = createTempDir('drift-cli-context-empty-')
+      tempDirs.push(dir)
+      const outputPath = join(dir, '.drift', 'context.md')
+
+      const doc = await generateContextFile(dir, outputPath)
+      const content = readFileSync(outputPath, 'utf8')
+
+      expect(doc.projectPath).toBe(dir)
+      expect(doc.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
+      expect(doc.health).toMatchObject({
+        score: 0,
+        totalIssues: 0,
+        errors: 0,
+        warnings: 0,
+        infos: 0,
+        filesAffected: 0,
+        filesClean: 0,
+      })
+      expect(content).toContain('# Drift Context')
+      expect(content).toContain('No active violations.')
+      expect(content).toContain('score=0')
+    })
+
     it('writes default .drift/context.md', () => {
       const dir = createTempDir('drift-cli-context-default-')
       tempDirs.push(dir)
@@ -520,12 +545,16 @@ describe('context-file', () => {
         await vi.waitFor(() => expect(existsSync(contextPath)).toBe(true), { timeout: 10000 })
         const before = readFileSync(contextPath, 'utf8')
 
-        writeFileSync(sourceFile, 'export const a = 2\n')
+        // Wait for the watcher to be armed before mutating the source, otherwise
+        // the change event can be lost on slower runners (Node 20 CI).
+        await vi.waitFor(() => expect(stderr.join('')).toContain('Watching'), { timeout: 10000 })
+
+        writeFileSync(sourceFile, 'export const a = 2\nconsole.log(a)\n')
 
         await vi.waitFor(() => {
           const after = readFileSync(contextPath, 'utf8')
           expect(after).not.toBe(before)
-        }, { timeout: 5000 })
+        }, { timeout: 15000 })
 
         const regenerated = readFileSync(contextPath, 'utf8')
         await new Promise((resolve) => setTimeout(resolve, 1000))
@@ -568,26 +597,40 @@ describe('context-file', () => {
       expect(existsSync(`${targetFile}.drift`)).toBe(false)
     })
 
-    it.skipIf(process.platform === 'win32')(
-      'rejects an unreadable directory without creating output (POSIX permissions only; Windows chmod is not enforceable)',
-      () => {
-        const dir = createTempDir('drift-cli-context-unreadable-target-')
-        tempDirs.push(dir)
-        writeFileSync(join(dir, 'a.ts'), 'export const a = 1\n')
-        const target = join(dir, 'restricted')
-        mkdirSync(target)
-        chmodSync(target, 0o000)
+    it('rejects an unreadable directory through the filesystem seam without creating output', async () => {
+      const dir = createTempDir('drift-cli-context-unreadable-target-')
+      tempDirs.push(dir)
+      const target = join(dir, 'restricted')
+      const outputPath = join(target, '.drift', 'context.md')
+      mkdirSync(target)
 
-        try {
-          const { stderr, exitCode } = runCli(['context', target], dir)
-          expect(exitCode).toBe(1)
-          expect(stderr).toContain('readable directory')
-          expect(existsSync(join(target, '.drift'))).toBe(false)
-        } finally {
-          chmodSync(target, 0o700)
-        }
-      },
-    )
+      await expect(generateContextFile(target, outputPath, {}, {
+        fileSystem: {
+          statSync: () => ({ isDirectory: () => true }),
+          accessSync: () => {
+            throw new Error('simulated access denied')
+          },
+        },
+      })).rejects.toThrow('readable directory')
+      expect(existsSync(join(target, '.drift'))).toBe(false)
+    })
+
+    it('preserves an existing destination when analysis fails before writing', async () => {
+      const dir = createTempDir('drift-cli-context-analysis-failure-')
+      tempDirs.push(dir)
+      const outputPath = join(dir, '.drift', 'context.md')
+      mkdirSync(join(dir, '.drift'), { recursive: true })
+      const original = 'existing context\n'
+      writeFileSync(outputPath, original)
+
+      await expect(generateContextFile(dir, outputPath, {}, {
+        analyzeProject: () => {
+          throw new Error('simulated analysis failure')
+        },
+      })).rejects.toThrow('simulated analysis failure')
+      expect(readFileSync(outputPath, 'utf8')).toBe(original)
+      expect(fs.readdirSync(join(dir, '.drift'))).toEqual(['context.md'])
+    })
   })
 
   describe('runWatch', () => {

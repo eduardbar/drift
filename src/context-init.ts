@@ -3,7 +3,46 @@ import { join } from 'node:path'
 import { analyzeProject } from './analyzer.js'
 import { buildReport, formatAIOutput } from './reporter.js'
 import { loadConfig } from './config.js'
-import { buildContextDocument, writeContextFile } from './context.js'
+import { buildContextDocument, validateAnalysisTarget, writeContextFile } from './context.js'
+import type { ContextDocument, DriftAnalysisOptions } from './types.js'
+
+interface ContextFileSystem {
+  statSync?: (path: string) => { isDirectory: () => boolean }
+  accessSync?: (path: string, mode: number) => void
+  renameSync?: typeof import('node:fs').renameSync
+}
+
+interface ContextGenerationDependencies {
+  fileSystem?: ContextFileSystem
+  loadConfig?: typeof loadConfig
+  analyzeProject?: typeof analyzeProject
+  buildReport?: typeof buildReport
+  formatAIOutput?: typeof formatAIOutput
+  writeContextFile?: typeof writeContextFile
+}
+
+export async function generateContextFile(
+  projectPath: string,
+  outputPath: string,
+  options: { analysisOptions?: DriftAnalysisOptions; maxIssues?: number } = {},
+  dependencies: ContextGenerationDependencies = {},
+): Promise<ContextDocument> {
+  validateAnalysisTarget(projectPath, dependencies.fileSystem)
+  const load = dependencies.loadConfig ?? loadConfig
+  const analyze = dependencies.analyzeProject ?? analyzeProject
+  const reportBuilder = dependencies.buildReport ?? buildReport
+  const aiFormatter = dependencies.formatAIOutput ?? formatAIOutput
+  const writer = dependencies.writeContextFile ?? writeContextFile
+  const config = await load(projectPath)
+  const report = reportBuilder(projectPath, analyze(projectPath, config, options.analysisOptions))
+  const doc = buildContextDocument(projectPath, report, aiFormatter(report), {
+    config,
+    maxIssues: options.maxIssues,
+  })
+
+  writer(outputPath, doc, dependencies.fileSystem)
+  return doc
+}
 
 export async function maybeWriteContext(
   projectRoot: string,
