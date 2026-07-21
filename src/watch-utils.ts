@@ -1,7 +1,7 @@
 import { watch, type FSWatcher } from 'node:fs'
 import { basename, dirname, resolve } from 'node:path'
 
-type DebouncedWatcher = { close: () => void }
+export type DebouncedWatcher = { close: () => void }
 
 function samePath(left: string, right: string): boolean {
   const normalizedLeft = resolve(left)

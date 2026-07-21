@@ -53,6 +53,7 @@ import {
   runWatch,
   writeContextFile,
 } from './context.js'
+import { inspectMCPTools, runMcpServer } from './mcp-server.js'
 import { resolveOutputFormat } from './format.js'
 import { toSarif, diffToSarif } from './sarif.js'
 import type { DriftDiff, DriftTrustReport, DriftAnalysisOptions, MergeRiskLevel } from './types.js'
@@ -424,6 +425,35 @@ addResourceOptions(
 
         writeContextFile(outputPath, doc)
         process.stderr.write(`\n  Context file written to ${outputPath}\n\n`)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        process.stderr.write(`\n  Error: ${message}\n\n`)
+        process.exit(1)
+      }
+    }),
+)
+
+addResourceOptions(
+  program
+    .command('mcp [path]')
+    .description('Start a stdio MCP server exposing drift analysis tools')
+    .option('--inspect', 'Print the tool definitions as JSON and exit')
+    .action(async (
+      targetPath: string | undefined,
+      options: { inspect?: boolean } & ResourceOptionFlags,
+    ) => {
+      const resolvedPath = resolve(targetPath ?? '.')
+
+      if (options.inspect) {
+        process.stdout.write(`${JSON.stringify({ tools: inspectMCPTools() }, null, 2)}\n`)
+        return
+      }
+
+      try {
+        await runMcpServer({
+          projectPath: resolvedPath,
+          analysisOptions: resolveAnalysisOptions(options),
+        })
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         process.stderr.write(`\n  Error: ${message}\n\n`)

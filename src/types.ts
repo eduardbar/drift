@@ -41,6 +41,14 @@ export type {
 export type { DriftConfig } from './types/app.js'
 
 export type {
+  MCPToolDefinition,
+  SessionContext,
+  MCPToolHandler,
+  MCPToolRegistryEntry,
+  MCPToolRegistry,
+} from './types/mcp.js'
+
+export type {
   ContextHealth,
   ContextViolation,
   ContextArchitectureSummary,
