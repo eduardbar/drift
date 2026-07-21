@@ -152,7 +152,7 @@ describe('ai-guard CLI contract', () => {
       await waitForExit(guardian)
       expect(existsSync(root)).toBe(false)
 
-      const missing = spawnSync(process.execPath, [guardianPath, join(tmpdir(), `drift-ai-guard-${randomUUID()}-`), String(process.pid)], { encoding: 'utf8' })
+      const missing = spawnSync(process.execPath, ['--import', 'tsx', guardianPath, join(tmpdir(), `drift-ai-guard-${randomUUID()}-`), String(process.pid)], { encoding: 'utf8' })
       expect(missing.status).toBe(2)
       expect(missing.stdout).toBe('')
       succeeded = true
