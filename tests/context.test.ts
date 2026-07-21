@@ -545,7 +545,7 @@ describe('context-file', () => {
         await vi.waitFor(() => expect(existsSync(contextPath)).toBe(true), { timeout: 10000 })
         const before = readFileSync(contextPath, 'utf8')
 
-        writeFileSync(sourceFile, 'export const a = 2\n')
+        writeFileSync(sourceFile, 'export const a = 2\nconsole.log(a)\n')
 
         await vi.waitFor(() => {
           const after = readFileSync(contextPath, 'utf8')
