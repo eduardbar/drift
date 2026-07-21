@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // drift-ignore-file
 import { Command } from 'commander'
-import { accessSync, constants, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { basename, join, relative, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { createInterface } from 'node:readline/promises'
@@ -45,6 +45,7 @@ import {
 import { computeTrustKpis, formatTrustKpiConsole, formatTrustKpiJson } from './trust-kpi.js'
 import { runBenchmarkCli } from './benchmark.js'
 import { runInit, INIT_PRESETS } from './init.js'
+import { generateContextFile } from './context-init.js'
 import { runDoctor } from './doctor.js'
 import {
   buildContextDocument,
@@ -52,6 +53,7 @@ import {
   formatContextMarkdown,
   runWatch,
   writeContextFile,
+  validateAnalysisTarget,
 } from './context.js'
 import { inspectMCPTools, runMcpServer } from './mcp-server.js'
 import { resolveOutputFormat } from './format.js'
@@ -88,20 +90,6 @@ function resolveAnalysisOptions(options: ResourceOptionFlags): DriftAnalysisOpti
     maxFiles: parseOptionalPositiveInt(options.maxFiles, '--max-files'),
     maxFileSizeKb: parseOptionalPositiveInt(options.maxFileSizeKb, '--max-file-size-kb'),
     includeSemanticDuplication: options.withSemanticDuplication ? true : undefined,
-  }
-}
-
-function validateAnalysisTarget(targetPath: string): void {
-  try {
-    if (!statSync(targetPath).isDirectory()) {
-      throw new Error('target is not a directory')
-    }
-    accessSync(targetPath, constants.R_OK)
-  } catch (error) {
-    const reason = error instanceof Error && error.message === 'target is not a directory'
-      ? error.message
-      : 'target does not exist or is not readable'
-    throw new Error(`analysis target must be a readable directory: ${targetPath} (${reason})`)
   }
 }
 
@@ -402,11 +390,10 @@ addResourceOptions(
 
         if (options.watch) {
           const generate = async (): Promise<void> => {
-            const currentFiles = analyzeProject(resolvedPath, config, resolveAnalysisOptions(options))
-            const currentReport = buildReport(resolvedPath, currentFiles)
-            const currentAiOutput = formatAIOutput(currentReport)
-            const currentDoc = buildContextDocument(resolvedPath, currentReport, currentAiOutput, contextOptions)
-            writeContextFile(outputPath, currentDoc)
+            await generateContextFile(resolvedPath, outputPath, {
+              analysisOptions: resolveAnalysisOptions(options),
+              maxIssues: contextOptions.maxIssues,
+            })
           }
 
           await generate()
