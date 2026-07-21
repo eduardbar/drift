@@ -52,12 +52,17 @@ describe('ai guard diff engine', () => {
   })
 
   it('applies a content patch inside the supplied workspace only', () => {
-    const workspace = 'C:\\temp\\drift-ai-guard-test'
-    mkdirSync(`${workspace}\\src`, { recursive: true })
-    writeFileSync(`${workspace}\\src\\file.ts`, 'const value = 1\n')
-    const patch = parseUnifiedDiff('--- a/src/file.ts\n+++ b/src/file.ts\n@@ -1 +1,2 @@\n const value = 1\n+const next = 2')
-    expect(() => applyDiffToTempDir(workspace, patch)).not.toThrow()
-    rmSync(workspace, { recursive: true, force: true })
+    const workspace = mkdtempSync(join(tmpdir(), 'drift-ai-guard-test-'))
+    const sourceFile = join(workspace, 'src', 'file.ts')
+    mkdirSync(join(workspace, 'src'), { recursive: true })
+    writeFileSync(sourceFile, 'const value = 1\n')
+    try {
+      const patch = parseUnifiedDiff('--- a/src/file.ts\n+++ b/src/file.ts\n@@ -1 +1,2 @@\n const value = 1\n+const next = 2')
+      applyDiffToTempDir(workspace, patch)
+      expect(readFileSync(sourceFile, 'utf8')).toBe('const value = 1\nconst next = 2\n')
+    } finally {
+      rmSync(workspace, { recursive: true, force: true })
+    }
   })
 
   it('computes score delta and identifies new and resolved issues', () => {
