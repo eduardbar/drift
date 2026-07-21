@@ -56,6 +56,8 @@ import {
 import { inspectMCPTools, runMcpServer } from './mcp-server.js'
 import { resolveOutputFormat } from './format.js'
 import { toSarif, diffToSarif } from './sarif.js'
+import { runAIGuard, selectDiffSource } from './ai-guard.js'
+import { formatAIGuardHuman, formatAIGuardJson } from './ai-guard-results.js'
 import type { DriftDiff, DriftTrustReport, DriftAnalysisOptions, MergeRiskLevel } from './types.js'
 import type { GuardResult, GuardThresholds } from './guard-types.js'
 import type { TrustGatePolicyExplanation } from './trust.js'
@@ -458,6 +460,50 @@ addResourceOptions(
         const message = err instanceof Error ? err.message : String(err)
         process.stderr.write(`\n  Error: ${message}\n\n`)
         process.exit(1)
+      }
+    }),
+)
+
+addResourceOptions(
+  program
+    .command('ai-guard [path]')
+    .description('Audit a proposed diff in an isolated before/after workspace')
+    .option('--stdin', 'Read the unified diff from stdin')
+    .option('--staged', 'Read the staged git diff')
+    .option('--diff-file <file>', 'Read the unified diff from a file')
+    .option('--base <ref>', 'Read the diff from a git ref')
+    .option('--budget <n>', 'Maximum allowed score delta (default: 0)')
+    .option('--block-on <rules>', 'Comma-separated rules or severities that block the merge')
+    .option('--format <type>', 'Output format: human|json', 'human')
+    .option('--suggestions', 'Include remediation suggestions in output')
+    .action(async (
+      targetPath: string | undefined,
+      options: {
+        stdin?: boolean
+        staged?: boolean
+        diffFile?: string
+        base?: string
+        budget?: string
+        blockOn?: string
+        format?: string
+        suggestions?: boolean
+      } & ResourceOptionFlags,
+    ) => {
+      const projectPath = resolve(targetPath ?? '.')
+      try {
+        if (options.format !== 'human' && options.format !== 'json') throw new Error(`Invalid --format '${options.format}'. Expected human or json`)
+        const source = selectDiffSource({ stdin: options.stdin, staged: options.staged, file: options.diffFile, base: options.base }, options.stdin ? readFileSync(0, 'utf8') : '')
+        const budget = options.budget == null ? undefined : Number(options.budget)
+        if (budget != null && (!Number.isFinite(budget))) throw new Error('--budget must be a valid number')
+        const blockOn = options.blockOn?.split(',').map(value => value.trim()).filter(Boolean)
+        const config = await loadConfig(projectPath)
+        const result = await runAIGuard({ projectPath, source, budget: budget ?? config?.aiGuard?.budget, blockOn: blockOn ?? config?.aiGuard?.blockOn, suggestions: options.suggestions, analysisOptions: resolveAnalysisOptions(options), config })
+        process.stdout.write(`${options.format === 'json' ? formatAIGuardJson(result) : formatAIGuardHuman(result)}\n`)
+        if (!result.passed) process.exitCode = 1
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        process.stderr.write(`\n  Error: ${message}\n\n`)
+        process.exitCode = 2
       }
     }),
 )
@@ -1358,4 +1404,9 @@ cloud
     process.stdout.write(`Dashboard saved to ${outPath}\n`)
   })
 
-program.parse()
+if (process.argv.includes('ai-guard') && process.argv.includes('--file')) {
+  process.stderr.write("\n  Error: unknown option '--file'; use --diff-file\n\n")
+  process.exitCode = 2
+} else {
+  program.parse()
+}

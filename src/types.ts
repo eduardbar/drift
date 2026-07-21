@@ -1,4 +1,5 @@
 // drift-ignore-file
+
 export type {
   DriftIssue,
   FileReport,
@@ -47,6 +48,15 @@ export type {
   MCPToolRegistryEntry,
   MCPToolRegistry,
 } from './types/mcp.js'
+
+export type {
+  DiffSource,
+  DiffHunk,
+  UnifiedDiffEntry,
+  AIGuardIssue,
+  AIGuardResult,
+  AIGuardOptions,
+} from './types/ai-guard.js'
 
 export type {
   ContextHealth,
