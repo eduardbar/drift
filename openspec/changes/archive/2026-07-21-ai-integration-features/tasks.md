@@ -1,4 +1,4 @@
-﻿# Tasks: AI Integration Features (context-file, mcp-server, ai-guard)
+# Tasks: AI Integration Features (context-file, mcp-server, ai-guard)
 
 ## Review Workload Forecast
 
@@ -18,7 +18,7 @@ Chained PRs recommended: Yes
 ### Suggested Work Units
 
 | Unit | Goal | Likely PR | Notes |
-|------|------|-----------|-------|
+|------|------|-----------|------|
 | 1 | Foundation types/git/helpers + context-file | PR 1 | Base: feature/ai-integration. Includes tests/docs for context. |
 | 2 | MCP server + SDK | PR 2 | Base: PR 1 branch. Reuses foundation; no context dependency. |
 | 3 | AI guard diff engine | PR 3 | Base: PR 2 branch. Needs git diff readers from PR 1. |
