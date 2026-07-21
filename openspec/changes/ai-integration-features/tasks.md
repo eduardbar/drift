@@ -60,9 +60,9 @@ Chained PRs recommended: Yes
 
 ## Phase 5: E2E & Verification
 
-- [ ] 5.1 E2E: Run built CLI against drift repo for `drift context`, `drift mcp --inspect`, and `drift ai-guard --staged`; assert exit codes and output schemas.
-- [ ] 5.2 Update `README.md` with `context`, `mcp`, and `ai-guard` usage examples.
-- [ ] 5.3 Run full vitest suite and drift self-scan; fix regressions.
+- [x] 5.1 E2E: Run the bounded built CLI/package smoke for `drift context`, `drift mcp --inspect`, and a safe `drift ai-guard` diff; assert exit codes, output schemas, deterministic output, package guardian inclusion, and cleanup.
+- [x] 5.2 Update `README.md`, `AGENTS.md`, and `CHANGELOG.md` with `context`, `mcp`, and `ai-guard` usage, OpenCode stdio configuration, local/no-cost boundaries, and zero-regression wording.
+- [x] 5.3 Run full vitest suite and drift self-scan; fix regressions.
 
 ## Implementation Order
 
