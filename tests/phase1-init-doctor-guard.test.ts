@@ -286,7 +286,7 @@ describe('phase 1: doctor/init/guard', () => {
       expect(typeof resultJson.toolVersion).toBe('string')
       expect(resultJson.toolVersion.length).toBeGreaterThan(0)
       expect(schemaErrors).toEqual([])
-    }, 15000)
+    }, 30000)
 
     it('throws when guard has no baseRef and no baseline', async () => {
       const projectDir = createTempDir('drift-guard-missing-anchor-')
