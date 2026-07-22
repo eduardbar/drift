@@ -6,7 +6,7 @@
 
 - Publicado en npm como `@eduardbar/drift`
 - Licencia MIT
-- Versión del paquete: `1.5.0` (`package.json`)
+- Versión del paquete: `1.6.0` (`package.json`)
 
 ---
 

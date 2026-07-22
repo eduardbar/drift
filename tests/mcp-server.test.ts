@@ -98,6 +98,21 @@ describe('SessionCache', () => {
     expect(generate).toHaveBeenCalledTimes(2)
   })
 
+  it('keeps cache watcher cleanup idempotent when the watched project disappears', async () => {
+    const dir = createTempDir('drift-mcp-watch-delete-')
+    tempDirs.push(dir)
+    const cache = new SessionCache()
+
+    cache.watch(dir)
+    rmSync(dir, { recursive: true, force: true })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    expect(() => cache.invalidate(dir)).not.toThrow()
+    expect(() => cache.clear()).not.toThrow()
+    expect(() => cache.clear()).not.toThrow()
+    expect(() => cache.watch(dir).close()).not.toThrow()
+  })
+
   it('does not invalidate a report for generated output changes', async () => {
     const dir = createTempDir('drift-mcp-cache-generated-')
     tempDirs.push(dir)

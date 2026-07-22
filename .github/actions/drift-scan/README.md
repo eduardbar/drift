@@ -6,7 +6,7 @@ Composite action to run `drift scan` in CI without global installs.
 
 - Runtime strategy: `npm exec --yes --prefix "$RUNNER_TEMP/drift-cli" --package=@eduardbar/drift@<version> -- drift ...` (no `npm install -g`)
 - Uses isolated `--prefix` under `$RUNNER_TEMP` to avoid bin resolution conflicts in self-hosting repository workflows
-- Default drift version is pinned (`1.5.0`) for deterministic runs
+- Default drift version is pinned (`1.6.0`) for deterministic runs
 - Uses `drift scan --json` and extracts typed outputs
 - Critical command/parse failures are not silenced (step fails immediately)
 
@@ -20,7 +20,7 @@ Composite action to run `drift scan` in CI without global installs.
     path: ./src
     min-score: 60
     fail-on-threshold: true
-    version: 1.5.0
+    version: 1.6.0
 ```
 
 ## Inputs
@@ -30,7 +30,7 @@ Composite action to run `drift scan` in CI without global installs.
 | `path` | Path to scan | `.` |
 | `min-score` | Fail if score exceeds this | `80` |
 | `fail-on-threshold` | Whether to fail on threshold | `true` |
-| `version` | drift version for `npm exec` execution | `1.5.0` |
+| `version` | drift version for `npm exec` execution | `1.6.0` |
 
 ## Outputs
 
