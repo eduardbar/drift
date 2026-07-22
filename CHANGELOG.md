@@ -18,6 +18,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+---
+
+## [1.6.0] - 2026-07-22
+
 ### Added
 - Local AI integration commands: `context`, `mcp`, and `ai-guard`, including bounded built-package smoke coverage and OpenCode stdio configuration guidance.
 
