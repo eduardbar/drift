@@ -7,11 +7,21 @@
   "bin": {
     "drift": "bin/drift.js"
   },
+  "files": [
+    "bin/drift.js",
+    "dist/*.{js,d.ts,js.map,d.ts.map}",
+    "dist/git/*",
+    "dist/rules/*",
+    "dist/saas/*",
+    "dist/types/*",
+    "schemas/*.json",
+    "benchmarks/perf-budget.v1.json"
+  ],
   "scripts": {
-    "build": "tsc",
+    "build": "node ./scripts/build.mjs",
     "dev": "tsc --watch",
     "start": "node dist/cli.js",
-    "prepublishOnly": "npm run build",
+    "prepack": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -47,7 +57,7 @@
     "url": "https://github.com/eduardbar/drift/issues"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.0.4",
+    "@modelcontextprotocol/sdk": "1.29.0",
     "commander": "^14.0.3",
     "kleur": "^4.1.5",
     "ts-morph": "^27.0.2"

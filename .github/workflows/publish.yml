@@ -65,10 +65,6 @@ jobs:
         if: env.skip_publish != 'true'
         run: npm ci
 
-      - name: Build
-        if: env.skip_publish != 'true'
-        run: npm run build
-
       - name: Publish to npm
         if: env.skip_publish != 'true'
         run: npm publish --access public
