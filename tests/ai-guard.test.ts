@@ -115,36 +115,40 @@ describe('ai guard diff engine', () => {
     rmSync(projectPath, { recursive: true, force: true })
   })
 
-  it('materializes HEAD as the staged baseline and applies the staged diff once', () => {
+  it('materializes HEAD as the staged baseline and applies the staged diff once', async () => {
     const projectPath = mkdtempSync(join(tmpdir(), 'drift-ai-guard-git-'))
     const git = (...args: string[]) => execFileSync('git', args, { cwd: projectPath, stdio: 'pipe', encoding: 'utf8' })
-    git('init', '-q')
-    git('config', 'user.email', 'test@example.com'); git('config', 'user.name', 'Test')
-    mkdirSync(join(projectPath, 'src')); writeFileSync(join(projectPath, 'src', 'value.ts'), 'export const value = 1\n')
-    git('add', '.'); git('commit', '-qm', 'initial')
-    writeFileSync(join(projectPath, 'src', 'value.ts'), 'export const value = 1\nconsole.log(value)\n')
-    git('add', '.')
-    return runAIGuard({ projectPath, source: { kind: 'staged' } }).then(result => {
+    try {
+      git('init', '-q')
+      git('config', 'user.email', 'test@example.com'); git('config', 'user.name', 'Test')
+      mkdirSync(join(projectPath, 'src')); writeFileSync(join(projectPath, 'src', 'value.ts'), 'export const value = 1\n')
+      git('add', '.'); git('commit', '-qm', 'initial')
+      writeFileSync(join(projectPath, 'src', 'value.ts'), 'export const value = 1\nconsole.log(value)\n')
+      git('add', '.')
+      const result = await runAIGuard({ projectPath, source: { kind: 'staged' } })
       expect(result.source).toBe('staged')
       expect(result.newIssues.some(issue => issue.file === 'src/value.ts')).toBe(true)
       expect(result.newIssues.every(issue => !issue.file?.includes('drift-ai-guard-'))).toBe(true)
+    } finally {
       rmSync(projectPath, { recursive: true, force: true })
-    })
-  })
+    }
+  }, 30000)
 
-  it('materializes a base ref and applies the working-tree diff once', () => {
+  it('materializes a base ref and applies the working-tree diff once', async () => {
     const projectPath = mkdtempSync(join(tmpdir(), 'drift-ai-guard-base-'))
     const git = (...args: string[]) => execFileSync('git', args, { cwd: projectPath, stdio: 'pipe', encoding: 'utf8' })
-    git('init', '-q'); git('config', 'user.email', 'test@example.com'); git('config', 'user.name', 'Test')
-    mkdirSync(join(projectPath, 'src')); writeFileSync(join(projectPath, 'src', 'value.ts'), 'export const value = 1\n')
-    git('add', '.'); git('commit', '-qm', 'initial')
-    writeFileSync(join(projectPath, 'src', 'value.ts'), 'export const value = 1\nconsole.log(value)\n')
-    return runAIGuard({ projectPath, source: { kind: 'base', ref: 'HEAD' } }).then(result => {
+    try {
+      git('init', '-q'); git('config', 'user.email', 'test@example.com'); git('config', 'user.name', 'Test')
+      mkdirSync(join(projectPath, 'src')); writeFileSync(join(projectPath, 'src', 'value.ts'), 'export const value = 1\n')
+      git('add', '.'); git('commit', '-qm', 'initial')
+      writeFileSync(join(projectPath, 'src', 'value.ts'), 'export const value = 1\nconsole.log(value)\n')
+      const result = await runAIGuard({ projectPath, source: { kind: 'base', ref: 'HEAD' } })
       expect(result.source).toBe('base')
       expect(result.newIssues.some(issue => issue.file === 'src/value.ts')).toBe(true)
+    } finally {
       rmSync(projectPath, { recursive: true, force: true })
-    })
-  })
+    }
+  }, 30000)
 
   it('returns deterministic suggestions only when requested', async () => {
     const projectPath = mkdtempSync(join(tmpdir(), 'drift-ai-guard-suggest-'))
