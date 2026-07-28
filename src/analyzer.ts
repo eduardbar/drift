@@ -7,12 +7,17 @@ import type {
   FileReport,
   DriftConfig,
   DriftAnalysisOptions,
-  DriftPerformanceConfig,
   LoadedPlugin,
   PluginRuleContext,
   PluginLoadError,
   PluginLoadWarning,
 } from './types.js'
+import {
+  chunkPaths,
+  resolveAnalysisOptions,
+  selectSourcesForAnalysis,
+  type AnalyzableSource,
+} from './analysis-options.js'
 
 // Rules
 import { isFileIgnored } from './rules/shared.js'
@@ -287,24 +292,6 @@ function shouldAnalyzeFile(fileName: string): boolean {
   return ANALYZABLE_EXTENSIONS.has(path.extname(fileName))
 }
 
-interface AnalyzableSource {
-  path: string
-  sizeBytes: number
-}
-
-interface ResolvedAnalysisOptions {
-  lowMemory: boolean
-  chunkSize: number
-  maxFiles?: number
-  maxFileSizeKb?: number
-  includeSemanticDuplication: boolean
-}
-
-interface SourceSelection {
-  selectedPaths: string[]
-  skippedReports: FileReport[]
-}
-
 function collectAnalyzableSources(targetPath: string): AnalyzableSource[] {
   const sourcePaths: AnalyzableSource[] = []
   const queue: string[] = [targetPath]
@@ -346,32 +333,6 @@ function collectAnalyzableSources(targetPath: string): AnalyzableSource[] {
   return sourcePaths
 }
 
-function resolveAnalysisOptions(config?: DriftConfig, options?: DriftAnalysisOptions): ResolvedAnalysisOptions {
-  const performance: DriftPerformanceConfig | undefined = config?.performance
-  const lowMemory = options?.lowMemory ?? performance?.lowMemory ?? false
-  const chunkSize = Math.max(1, options?.chunkSize ?? performance?.chunkSize ?? (lowMemory ? 40 : 200))
-  const includeSemanticDuplication = options?.includeSemanticDuplication
-    ?? performance?.includeSemanticDuplication
-    ?? !lowMemory
-
-  return {
-    lowMemory,
-    chunkSize,
-    maxFiles: options?.maxFiles ?? performance?.maxFiles,
-    maxFileSizeKb: options?.maxFileSizeKb ?? performance?.maxFileSizeKb,
-    includeSemanticDuplication,
-  }
-}
-
-function chunkPaths(paths: string[], chunkSize: number): string[][] {
-  if (paths.length === 0) return []
-  const chunks: string[][] = []
-  for (let i = 0; i < paths.length; i += chunkSize) {
-    chunks.push(paths.slice(i, i + chunkSize))
-  }
-  return chunks
-}
-
 function toPathKey(filePath: string): string {
   let normalized = path.normalize(filePath)
   if (process.platform === 'win32' && /^\\[A-Za-z]:\\/.test(normalized)) {
@@ -393,48 +354,6 @@ function createAnalysisSkipReport(filePath: string, rule: 'analysis-skip-max-fil
     path: filePath,
     issues: [issue],
     score: calculateScore([issue], RULE_WEIGHTS),
-  }
-}
-
-function selectSourcesForAnalysis(sources: AnalyzableSource[], options: ResolvedAnalysisOptions): SourceSelection {
-  let selected = sources
-  const skippedReports: FileReport[] = []
-
-  if (typeof options.maxFiles === 'number' && options.maxFiles >= 0 && selected.length > options.maxFiles) {
-    const allowed = selected.slice(0, options.maxFiles)
-    const skipped = selected.slice(options.maxFiles)
-    selected = allowed
-
-    for (const source of skipped) {
-      skippedReports.push(createAnalysisSkipReport(
-        source.path,
-        'analysis-skip-max-files',
-        `Skipped by maxFiles guardrail (${options.maxFiles})`,
-      ))
-    }
-  }
-
-  if (typeof options.maxFileSizeKb === 'number' && options.maxFileSizeKb > 0) {
-    const maxBytes = options.maxFileSizeKb * 1024
-    const keep: AnalyzableSource[] = []
-    for (const source of selected) {
-      if (source.sizeBytes > maxBytes) {
-        const fileSizeKb = Math.ceil(source.sizeBytes / 1024)
-        skippedReports.push(createAnalysisSkipReport(
-          source.path,
-          'analysis-skip-file-size',
-          `Skipped by maxFileSizeKb guardrail (${fileSizeKb}KB > ${options.maxFileSizeKb}KB)`,
-        ))
-      } else {
-        keep.push(source)
-      }
-    }
-    selected = keep
-  }
-
-  return {
-    selectedPaths: selected.map((source) => source.path),
-    skippedReports,
   }
 }
 
@@ -561,7 +480,11 @@ export function analyzeFile(
 export function analyzeProject(targetPath: string, config?: DriftConfig, options?: DriftAnalysisOptions): FileReport[] {
   const analysisOptions = resolveAnalysisOptions(config, options)
   const discoveredSources = collectAnalyzableSources(targetPath)
-  const { selectedPaths: sourcePaths, skippedReports } = selectSourcesForAnalysis(discoveredSources, analysisOptions)
+  const { selectedPaths: sourcePaths, skippedReports } = selectSourcesForAnalysis(
+    discoveredSources,
+    analysisOptions,
+    createAnalysisSkipReport,
+  )
   const sourcePathMap = new Map<string, string>(sourcePaths.map((filePath) => [toPathKey(filePath), filePath]))
   const pluginRuntime = loadPlugins(targetPath, config?.plugins)
 
