@@ -278,7 +278,7 @@ function pluginDiagnosticToIssue(
 }
 
 const ANALYZABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx'])
-const EXCLUDED_DIR_NAMES = new Set(['node_modules', 'dist', '.next', 'build'])
+const EXCLUDED_DIR_NAMES = new Set(['node_modules', 'dist', '.next', 'build', 'coverage'])
 
 function shouldAnalyzeFile(fileName: string): boolean {
   if (fileName.endsWith('.d.ts')) return false
