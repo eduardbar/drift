@@ -7,6 +7,8 @@ drift-report.html
 badge.svg
 .drift-smoke/
 .drift-perf/
+.atl/
+.drift/
 
 # drift snapshot history
 drift-history.json
