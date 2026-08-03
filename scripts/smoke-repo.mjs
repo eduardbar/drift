@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { basename, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -10,7 +9,7 @@ const DEFAULT_BASE_REF = 'HEAD~1'
 const SNIPPET_MAX_LINES = 24
 const SNIPPET_MAX_CHARS = 2400
 const LOG_MAX_BUFFER = 32 * 1024 * 1024
-const CHILD_TIMEOUT_MS = 30_000
+const DEFAULT_TIMEOUT_MS = 30_000
 const TIMEOUT_ERROR_CODE = 'ETIMEDOUT'
 
 function printHelp() {
@@ -19,11 +18,12 @@ function printHelp() {
       'drift repo smoke',
       '',
       'Usage:',
-      '  node ./scripts/smoke-repo.mjs <target-path> [--base <ref>] [--out <dir>] [--dry-run]',
+      '  node ./scripts/smoke-repo.mjs <target-path> [--base <ref>] [--out <dir>] [--timeout <ms>] [--dry-run]',
       '',
       'Options:',
       `  --base <ref>   Git base ref for review/trust (default: ${DEFAULT_BASE_REF})`,
       '  --out <dir>    Output directory (default: .drift-smoke/<repo>-<timestamp>)',
+      `  --timeout <ms> Command timeout in milliseconds (default: ${DEFAULT_TIMEOUT_MS})`,
       '  --dry-run      Print planned commands and exit without running them',
       '  --ai-integration Run bounded built-CLI context/MCP/ai-guard smoke',
       '  --help         Show this help',
@@ -49,11 +49,12 @@ function toSnippet(text) {
   return `${joined.slice(0, SNIPPET_MAX_CHARS)}...`
 }
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const options = {
     targetPath: '.',
     baseRef: DEFAULT_BASE_REF,
     outDir: undefined,
+    timeoutMs: undefined,
     dryRun: false,
     aiIntegration: false,
     help: false,
@@ -98,6 +99,18 @@ function parseArgs(argv) {
       continue
     }
 
+    if (token === '--timeout') {
+      const next = argv[index + 1]
+      if (!next) throw new Error('--timeout requires a value')
+      const timeoutMs = Number(next)
+      if (!/^\d+$/.test(next) || !Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+        throw new Error('--timeout must be a positive integer')
+      }
+      options.timeoutMs = timeoutMs
+      index += 2
+      continue
+    }
+
     if (token.startsWith('--')) {
       throw new Error(`Unknown option: ${token}`)
     }
@@ -115,27 +128,39 @@ function parseArgs(argv) {
   return options
 }
 
-function runGit(cwd, args) {
+export function resolveTimeoutMs(options, env = process.env) {
+  if (options.timeoutMs !== undefined) return options.timeoutMs
+
+  const configuredTimeout = env.DRIFT_SMOKE_TIMEOUT_MS
+  if (configuredTimeout === undefined) return DEFAULT_TIMEOUT_MS
+  const timeoutMs = Number(configuredTimeout)
+  if (!/^\d+$/.test(configuredTimeout) || !Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new Error('DRIFT_SMOKE_TIMEOUT_MS must be a positive integer')
+  }
+  return timeoutMs
+}
+
+function runGit(cwd, args, timeoutMs) {
   return spawnSync('git', args, {
     cwd,
     encoding: 'utf8',
     maxBuffer: LOG_MAX_BUFFER,
-    timeout: CHILD_TIMEOUT_MS,
+    timeout: timeoutMs,
     killSignal: 'SIGTERM',
     windowsHide: true,
   })
 }
 
-function runDriftCommand({ id, description, args, cwd, logsDir, expectFailure, cliPath, tsxLoaderSpecifier, input, useBuiltCli = false }) {
+export function runDriftCommand({ id, description, args, cwd, logsDir, expectFailure, cliPath, tsxLoaderSpecifier, input, timeoutMs, useBuiltCli = false, spawn = spawnSync }) {
   const start = Date.now()
   const startedAt = new Date(start).toISOString()
   const commandArgs = useBuiltCli ? [cliPath, ...args] : ['--import', tsxLoaderSpecifier, cliPath, ...args]
-  const child = spawnSync(process.execPath, commandArgs, {
+  const child = spawn(process.execPath, commandArgs, {
     cwd,
     input,
     encoding: 'utf8',
     maxBuffer: LOG_MAX_BUFFER,
-    timeout: CHILD_TIMEOUT_MS,
+    timeout: timeoutMs,
     killSignal: 'SIGTERM',
     windowsHide: true,
   })
@@ -145,7 +170,7 @@ function runDriftCommand({ id, description, args, cwd, logsDir, expectFailure, c
   const stdout = child.stdout ?? ''
   const timedOut = child.error?.code === TIMEOUT_ERROR_CODE
   const spawnError = timedOut
-    ? `Error: command timed out after ${CHILD_TIMEOUT_MS}ms; termination signal ${child.signal ?? 'SIGTERM'} was sent`
+    ? `Error: command timed out after ${timeoutMs}ms; termination signal ${child.signal ?? 'SIGTERM'} was sent`
     : child.error ? `${child.error.name}: ${child.error.message}` : ''
   const stderr = `${child.stderr ?? ''}${spawnError ? `\n${spawnError}\n` : ''}`
   const stdoutFile = resolve(logsDir, `${id}.stdout.log`)
@@ -173,7 +198,7 @@ function runDriftCommand({ id, description, args, cwd, logsDir, expectFailure, c
     exitCode,
     signal,
     processId: child.pid,
-    timeoutMs: CHILD_TIMEOUT_MS,
+    timeoutMs,
     timedOut,
     durationMs: end - start,
     startedAt,
@@ -225,6 +250,7 @@ function main() {
     printHelp()
     return
   }
+  const timeoutMs = resolveTimeoutMs(opts)
 
   const scriptPath = fileURLToPath(import.meta.url)
   const repoRoot = resolve(scriptPath, '..', '..')
@@ -257,9 +283,9 @@ function main() {
   const reportJson = resolve(outputDir, 'smoke-report.json')
   const summaryMarkdown = resolve(outputDir, 'smoke-summary.md')
 
-  const gitRepoProbe = runGit(targetPath, ['rev-parse', '--is-inside-work-tree'])
+  const gitRepoProbe = runGit(targetPath, ['rev-parse', '--is-inside-work-tree'], timeoutMs)
   const isGitRepo = gitRepoProbe.status === 0
-  const gitBaseProbe = isGitRepo ? runGit(targetPath, ['rev-parse', '--verify', `${opts.baseRef}^{commit}`]) : null
+  const gitBaseProbe = isGitRepo ? runGit(targetPath, ['rev-parse', '--verify', `${opts.baseRef}^{commit}`], timeoutMs) : null
   const baseRefResolvable = Boolean(gitBaseProbe && gitBaseProbe.status === 0)
   const gitReady = isGitRepo && baseRefResolvable
 
@@ -372,6 +398,7 @@ function main() {
     process.stdout.write(`drift smoke dry-run (${SMOKE_SCHEMA_VERSION})\n`)
     process.stdout.write(`target: ${targetPath}\n`)
     process.stdout.write(`base: ${opts.baseRef}\n`)
+    process.stdout.write(`timeout_ms: ${timeoutMs}\n`)
     process.stdout.write(`output: ${outputDir}\n`)
     process.stdout.write(`git_ready: ${gitReady}\n\n`)
     for (const item of plan) {
@@ -396,6 +423,7 @@ function main() {
       cliPath,
       tsxLoaderSpecifier,
       input: item.input,
+      timeoutMs,
       useBuiltCli: item.useBuiltCli,
     })
 
@@ -421,6 +449,7 @@ function main() {
     generatedAt: new Date().toISOString(),
     targetPath,
     baseRef: opts.baseRef,
+    timeoutMs,
     outputDir,
     overallStatus,
     gitContext: {
@@ -452,10 +481,12 @@ function main() {
   }
 }
 
-try {
-  main()
-} catch (error) {
-  const message = error instanceof Error ? error.message : String(error)
-  process.stderr.write(`Error: ${message}\n`)
-  process.exit(1)
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    main()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    process.stderr.write(`Error: ${message}\n`)
+    process.exit(1)
+  }
 }

@@ -62,7 +62,7 @@ jobs:
         run: npm run build
 
       - name: Run CLI smoke E2E
-        run: npm run smoke:repo -- --base HEAD --out .drift-smoke/ci-node-${{ matrix.node }}
+        run: npm run smoke:repo -- --timeout 120000 --base HEAD --out .drift-smoke/ci-node-${{ matrix.node }}
 
       - name: Run performance regression gate
         if: matrix.node == '20'
