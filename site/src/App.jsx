@@ -15,6 +15,22 @@ import { SiteFooter } from "./components/SiteFooter";
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
 
+const FLOW_GLOW_INITIAL_Y = -10;
+const REVEAL_LEFT_OFFSET = -34;
+const FLOW_INACTIVE_OPACITY = 0.62;
+const FLOW_ACTIVE_Y = -4;
+const FLOW_ACTIVE_SCALE = 1.02;
+const FLOW_INACTIVE_SCALE = 0.985;
+const FLOW_ACTIVE_DURATION = 0.4;
+const FLOW_INACTIVE_DURATION = 0.34;
+const FLOW_GLOW_BASE_OPACITY = 0.42;
+const FLOW_GLOW_OPACITY_STEP = 0.18;
+const FLOW_GLOW_BASE_Y = -12;
+const FLOW_GLOW_Y_STEP = 8;
+const FLOW_GLOW_BASE_SCALE = 0.96;
+const FLOW_GLOW_SCALE_STEP = 0.06;
+const HERO_PARALLAX_PERCENT = -8;
+
 export default function App() {
   const rootRef = useRef(null);
 
@@ -74,7 +90,7 @@ export default function App() {
           });
           gsap.set(".js-divider-line", { scaleX: 0, transformOrigin: "0% 50%" });
           gsap.set(".js-flow-meter", { scaleY: 0, transformOrigin: "50% 0%" });
-          gsap.set(".js-flow-glow", { autoAlpha: 0.4, scale: 0.92, y: -10 });
+          gsap.set(".js-flow-glow", { autoAlpha: 0.4, scale: 0.92, y: FLOW_GLOW_INITIAL_Y });
 
           const heroTimeline = gsap.timeline({ defaults: { ease: "power3.out" } });
 
@@ -122,7 +138,7 @@ export default function App() {
           });
 
           gsap.from(".js-reveal-left", {
-            x: -34,
+            x: REVEAL_LEFT_OFFSET,
             autoAlpha: 0,
             duration: 0.7,
             ease: "power2.out",
@@ -173,19 +189,19 @@ export default function App() {
                 stage.classList.toggle("is-active", isActive);
 
                 gsap.to(stage, {
-                  autoAlpha: isActive ? 1 : 0.62,
-                  y: isActive ? -4 : 0,
-                  scale: isActive ? 1.02 : 0.985,
-                  duration: isActive ? 0.4 : 0.34,
+                  autoAlpha: isActive ? 1 : FLOW_INACTIVE_OPACITY,
+                  y: isActive ? FLOW_ACTIVE_Y : 0,
+                  scale: isActive ? FLOW_ACTIVE_SCALE : FLOW_INACTIVE_SCALE,
+                  duration: isActive ? FLOW_ACTIVE_DURATION : FLOW_INACTIVE_DURATION,
                   ease: isActive ? "power3.out" : "power2.out",
                   overwrite: "auto"
                 });
               });
 
               gsap.to(".js-flow-glow", {
-                autoAlpha: 0.42 + activeIndex * 0.18,
-                y: -12 + activeIndex * 8,
-                scale: 0.96 + activeIndex * 0.06,
+                autoAlpha: FLOW_GLOW_BASE_OPACITY + activeIndex * FLOW_GLOW_OPACITY_STEP,
+                y: FLOW_GLOW_BASE_Y + activeIndex * FLOW_GLOW_Y_STEP,
+                scale: FLOW_GLOW_BASE_SCALE + activeIndex * FLOW_GLOW_SCALE_STEP,
                 duration: 0.45,
                 ease: "power2.out",
                 overwrite: "auto"
@@ -270,7 +286,7 @@ export default function App() {
 
           if (desktop) {
             gsap.to(".js-hero-panel", {
-              yPercent: -8,
+              yPercent: HERO_PARALLAX_PERCENT,
               ease: "none",
               scrollTrigger: {
                 trigger: ".hero",
