@@ -51,6 +51,7 @@ const DEFAULT_TRUST_PATH = '.'
 const DEFAULT_BASE_REF = 'HEAD~1'
 const DEFAULT_WARMUP_RUNS = 1
 const DEFAULT_MEASURED_RUNS = 5
+const BYTES_PER_MEGABYTE = 1_048_576
 
 const TABLE_WIDTHS = {
   task: 10,
@@ -134,7 +135,7 @@ function formatMs(ms: number): string {
 }
 
 function bytesToMb(bytes: number): number {
-  return bytes / (1024 * 1024)
+  return bytes / BYTES_PER_MEGABYTE
 }
 
 async function runTask(

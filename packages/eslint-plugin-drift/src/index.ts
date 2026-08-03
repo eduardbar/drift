@@ -4,7 +4,7 @@ import { Project } from 'ts-morph'
 import type { Rule } from 'eslint'
 
 // Tipos auxiliares
-type RuleType = 'problem' | 'suggestion' | 'layout'
+type RuleType = 'problem' | 'suggestion'
 
 // Mapeo rule → descripción legible
 const RULE_DOCS: Record<string, { type: RuleType; description: string }> = {
