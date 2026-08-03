@@ -162,8 +162,8 @@ addResourceOptions(
   .option('--json', 'Output raw JSON report')
   .option('--ai', 'Output AI-optimized JSON for LLM consumption')
   .option('--fix', 'Show fix suggestions for each issue')
-  .option('--min-score <n>', 'Exit with code 1 if overall score exceeds this threshold', '0')
-  .action(async (targetPath: string | undefined, options: { output?: string; format?: string; json?: boolean; ai?: boolean; fix?: boolean; minScore: string } & ResourceOptionFlags) => {
+  .option('--min-score <n>', 'Exit with code 1 if overall score exceeds this threshold')
+  .action(async (targetPath: string | undefined, options: { output?: string; format?: string; json?: boolean; ai?: boolean; fix?: boolean; minScore?: string } & ResourceOptionFlags) => {
     const resolvedPath = resolve(targetPath ?? '.')
 
     process.stderr.write(`\nScanning ${resolvedPath}...\n`)
@@ -185,37 +185,27 @@ addResourceOptions(
 
     if (format === 'sarif') {
       process.stdout.write(`${JSON.stringify(toSarif(report), null, 2)}\n`)
-      return
-    }
-
-    if (format === 'ai') {
+    } else if (format === 'ai') {
       const aiOutput = formatAIOutput(report)
       process.stdout.write(JSON.stringify(aiOutput, null, 2))
-      return
-    }
-
-    if (format === 'json') {
+    } else if (format === 'json') {
       process.stdout.write(JSON.stringify(report, null, 2))
-      return
-    }
-
-    if (format === 'markdown') {
+    } else if (format === 'markdown') {
       process.stdout.write(`${formatMarkdown(report)}\n`)
-      return
-    }
+    } else {
+      printConsole(report, { showFix: options.fix })
 
-    printConsole(report, { showFix: options.fix })
-
-    if (options.output) {
-      const md = formatMarkdown(report)
-      const outPath = resolve(options.output)
-      writeFileSync(outPath, md, 'utf8')
-      // drift-ignore
-      console.error(`Report saved to ${outPath}`)
+      if (options.output) {
+        const md = formatMarkdown(report)
+        const outPath = resolve(options.output)
+        writeFileSync(outPath, md, 'utf8')
+        // drift-ignore
+        console.error(`Report saved to ${outPath}`)
+      }
     }
 
     const minScore = Number(options.minScore)
-    if (minScore > 0 && report.totalScore > minScore) {
+    if (options.minScore !== undefined && report.totalScore > minScore) {
       process.exit(1)
     }
   }),
@@ -901,8 +891,8 @@ addResourceOptions(
   .description('Emit GitHub Actions annotations and step summary')
   .option('--format <type>', 'Output format: console|json|markdown|ai|sarif')
   .option('--json', 'Output raw JSON report (legacy alias for --format json)')
-  .option('--min-score <n>', 'Exit with code 1 if overall score exceeds this threshold', '0')
-  .action(async (targetPath: string | undefined, options: { format?: string; json?: boolean; minScore: string } & ResourceOptionFlags) => {
+  .option('--min-score <n>', 'Exit with code 1 if overall score exceeds this threshold')
+  .action(async (targetPath: string | undefined, options: { format?: string; json?: boolean; minScore?: string } & ResourceOptionFlags) => {
     const resolvedPath = resolve(targetPath ?? '.')
     const config = await loadConfig(resolvedPath)
     const files = analyzeProject(resolvedPath, config, resolveAnalysisOptions(options))
@@ -925,7 +915,7 @@ addResourceOptions(
       printCISummary(report)
     }
     const minScore = Number(options.minScore)
-    if (minScore > 0 && report.totalScore > minScore) {
+    if (options.minScore !== undefined && report.totalScore > minScore) {
       process.exit(1)
     }
   }),
