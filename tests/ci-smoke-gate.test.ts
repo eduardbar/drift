@@ -13,7 +13,8 @@ describe('CI smoke E2E gate', () => {
     const workflow = readRepoFile('.github/workflows/reusable-quality-checks.yml')
 
     expect(workflow).toContain('name: Run CLI smoke E2E')
-    expect(workflow).toContain('run: npm run smoke:repo -- --base HEAD --out .drift-smoke/ci-node-${{ matrix.node }}')
+    expect(workflow).toContain('run: npm run smoke:repo -- --timeout 120000 --base HEAD --out .drift-smoke/ci-node-${{ matrix.node }}')
+    expect(workflow).not.toContain('run: npm run smoke:repo -- --base HEAD --out .drift-smoke/ci-node-${{ matrix.node }}')
   })
 
   it('uploads smoke artifacts even when smoke fails', () => {

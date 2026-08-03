@@ -4,6 +4,7 @@ import { Command } from 'commander'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { basename, join, relative, resolve } from 'node:path'
 import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { createInterface } from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
 const require = createRequire(import.meta.url)
@@ -521,13 +522,20 @@ addResourceOptions(
   }),
 )
 
-program
-  .command('benchmark')
-  .description('Run benchmark harness for scan/review/trust commands')
-  .allowUnknownOption(true)
-  .action(async () => {
-    await runBenchmarkCli(process.argv.slice(3))
-  })
+export function createBenchmarkCommand(
+  runBenchmark: (argv: string[]) => Promise<void> = runBenchmarkCli,
+  getArgv: () => string[] = () => process.argv.slice(3),
+): Command {
+  return new Command('benchmark')
+    .description('Run benchmark harness for scan/review/trust commands')
+    .allowUnknownOption(true)
+    .allowExcessArguments(true)
+    .action(async () => {
+      await runBenchmark(getArgv())
+    })
+}
+
+program.addCommand(createBenchmarkCommand())
 
 program
   .command('review')
@@ -1308,6 +1316,6 @@ cloud
 if (process.argv.includes('ai-guard') && process.argv.includes('--file')) {
   process.stderr.write("\n  Error: unknown option '--file'; use --diff-file\n\n")
   process.exitCode = 2
-} else {
+} else if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   program.parse()
 }

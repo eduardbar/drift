@@ -1,5 +1,6 @@
 import { Command } from 'commander'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { createBenchmarkCommand } from '../src/cli.js'
 import {
   addResourceOptions,
   parseBySeverity,
@@ -8,6 +9,24 @@ import {
 } from '../src/cli-options.js'
 
 describe('CLI option parsing contracts', () => {
+  it('accepts benchmark runner flags and forwards them to the runner', async () => {
+    const runBenchmark = vi.fn(async () => {})
+    const command = createBenchmarkCommand(runBenchmark, () => ['--runs', '1', '--warmup', '0'])
+
+    await command.parseAsync(['node', 'drift', '--runs', '1', '--warmup', '0'])
+
+    expect(runBenchmark).toHaveBeenCalledWith(['--runs', '1', '--warmup', '0'])
+  })
+
+  it('accepts benchmark flags alongside a value-bearing option', async () => {
+    const runBenchmark = vi.fn(async () => {})
+    const command = createBenchmarkCommand(runBenchmark, () => ['--runs', '2', '--warmup', '1', '--base', 'main'])
+
+    await command.parseAsync(['node', 'drift', '--runs', '2', '--warmup', '1', '--base', 'main'])
+
+    expect(runBenchmark).toHaveBeenCalledWith(['--runs', '2', '--warmup', '1', '--base', 'main'])
+  })
+
   it('resolves resource flags without changing their defaults or boolean semantics', () => {
     expect(resolveAnalysisOptions({})).toEqual({
       lowMemory: undefined,
