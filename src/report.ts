@@ -2,6 +2,7 @@
 import { basename } from 'node:path'
 import { createRequire } from 'node:module'
 import { DriftReport, DriftIssue } from './types.js'
+import { severityIcon } from './utils.js'
 
 const require = createRequire(import.meta.url)
 const { version: VERSION } = require('../package.json') as { version: string }
@@ -13,14 +14,6 @@ function severityColor(severity: DriftIssue['severity']): string {
     case 'error':   return '#ef4444'
     case 'warning': return '#f59e0b'
     case 'info':    return '#3b82f6'
-  }
-}
-
-function severityIcon(severity: DriftIssue['severity']): string {
-  switch (severity) {
-    case 'error':   return '✖'
-    case 'warning': return '▲'
-    case 'info':    return '◦'
   }
 }
 
