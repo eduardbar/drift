@@ -60,104 +60,18 @@ import { resolveOutputFormat } from './format.js'
 import { toSarif, diffToSarif } from './sarif.js'
 import { runAIGuard, selectDiffSource } from './ai-guard.js'
 import { formatAIGuardHuman, formatAIGuardJson } from './ai-guard-results.js'
-import type { DriftDiff, DriftTrustReport, DriftAnalysisOptions, MergeRiskLevel } from './types.js'
-import type { GuardResult, GuardThresholds } from './guard-types.js'
+import {
+  addResourceOptions,
+  parseBySeverity,
+  parseOptionalNumber,
+  resolveAnalysisOptions,
+  type ResourceOptionFlags,
+} from './cli-options.js'
+import type { DriftDiff, DriftTrustReport, MergeRiskLevel } from './types.js'
+import type { GuardResult } from './guard-types.js'
 import type { TrustGatePolicyExplanation } from './trust.js'
 import type { SnapshotHistory } from './snapshot.js'
 const program = new Command()
-
-type ResourceOptionFlags = {
-  lowMemory?: boolean
-  chunkSize?: string
-  maxFiles?: string
-  maxFileSizeKb?: string
-  withSemanticDuplication?: boolean
-}
-
-function parseOptionalPositiveInt(rawValue: string | undefined, flagName: string): number | undefined {
-  if (rawValue == null) return undefined
-  const value = Number(rawValue)
-  if (!Number.isInteger(value) || value < 0) {
-    throw new Error(`${flagName} must be a non-negative integer`)
-  }
-  return value
-}
-
-function resolveAnalysisOptions(options: ResourceOptionFlags): DriftAnalysisOptions {
-  return {
-    lowMemory: options.lowMemory,
-    chunkSize: parseOptionalPositiveInt(options.chunkSize, '--chunk-size'),
-    maxFiles: parseOptionalPositiveInt(options.maxFiles, '--max-files'),
-    maxFileSizeKb: parseOptionalPositiveInt(options.maxFileSizeKb, '--max-file-size-kb'),
-    includeSemanticDuplication: options.withSemanticDuplication ? true : undefined,
-  }
-}
-
-function addResourceOptions(command: Command): Command {
-  return command
-    .option('--low-memory', 'Reduce peak memory usage by chunking AST analysis')
-    .option('--chunk-size <n>', 'Files per chunk in low-memory mode (default: 40)')
-    .option('--max-files <n>', 'Maximum files to analyze before soft-skipping extras')
-    .option('--max-file-size-kb <n>', 'Skip files above this size and report diagnostics')
-    .option('--with-semantic-duplication', 'Keep semantic-duplication rule enabled in low-memory mode')
-}
-
-function parseOptionalNumber(rawValue: string | undefined, flagName: string): number | undefined {
-  if (rawValue == null) return undefined
-  const value = Number(rawValue)
-  if (!Number.isFinite(value)) {
-    throw new Error(`${flagName} must be a valid number`)
-  }
-  return value
-}
-
-function parseBySeverity(rawValue: string | undefined): GuardThresholds | undefined {
-  if (rawValue == null) return undefined
-
-  const spec = rawValue.trim()
-  if (!spec) {
-    throw new Error('--by-severity must not be empty. Expected format: error=0,warning=2,info=5')
-  }
-
-  const thresholds: GuardThresholds = {}
-  const seen = new Set<string>()
-
-  for (const segment of spec.split(',')) {
-    const pair = segment.trim()
-    if (!pair) continue
-
-    const equalIndex = pair.indexOf('=')
-    if (equalIndex <= 0 || equalIndex === pair.length - 1) {
-      throw new Error(`Invalid --by-severity entry '${pair}'. Expected key=value (e.g. warning=2).`)
-    }
-
-    const key = pair.slice(0, equalIndex).trim().toLowerCase()
-    const rawThreshold = pair.slice(equalIndex + 1).trim()
-
-    if (key !== 'error' && key !== 'warning' && key !== 'info') {
-      throw new Error(`Invalid --by-severity key '${key}'. Allowed keys: error, warning, info.`)
-    }
-
-    if (seen.has(key)) {
-      throw new Error(`Duplicate --by-severity key '${key}'.`)
-    }
-
-    const threshold = Number(rawThreshold)
-    if (!Number.isFinite(threshold)) {
-      throw new Error(`Invalid --by-severity value for '${key}': '${rawThreshold}'. Must be a valid number.`)
-    }
-
-    const severityKey: keyof GuardThresholds = key
-    thresholds[severityKey] = threshold
-    seen.add(severityKey)
-  }
-
-  if (seen.size === 0) {
-    throw new Error('--by-severity must include at least one threshold. Example: error=0,warning=2')
-  }
-
-  return thresholds
-}
 
 function formatSigned(value: number): string {
   return value > 0 ? `+${value}` : `${value}`
