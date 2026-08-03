@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runDoctor } from '../src/doctor.js'
 import { runInit } from '../src/init.js'
-import { evaluateGuard, formatGuardJsonObject, runGuard } from '../src/guard.js'
+import { evaluateGuard, formatGuardJson, runGuard } from '../src/guard.js'
 import { analyzeProject } from '../src/analyzer.js'
 import { buildReport } from '../src/reporter.js'
 
@@ -271,7 +271,7 @@ describe('phase 1: doctor/init/guard', () => {
         budget: 0,
         bySeverity: { error: 0, warning: 0, info: 0 },
       })
-      const resultJson = formatGuardJsonObject(result)
+      const resultJson = JSON.parse(formatGuardJson(result)) as Record<string, unknown>
       const schema = loadSchema('drift-guard.v1.json')
       const schemaErrors = validateAgainstSchema(schema, JSON.parse(JSON.stringify(resultJson)))
 
@@ -284,7 +284,7 @@ describe('phase 1: doctor/init/guard', () => {
       expect(result.checks.some((check) => check.id === 'no-regression-total-issues')).toBe(true)
       expect(resultJson.$schema).toBe('schemas/drift-guard.v1.json')
       expect(typeof resultJson.toolVersion).toBe('string')
-      expect(resultJson.toolVersion.length).toBeGreaterThan(0)
+      expect(String(resultJson.toolVersion).length).toBeGreaterThan(0)
       expect(schemaErrors).toEqual([])
     }, 30000)
 

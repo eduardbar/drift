@@ -132,7 +132,7 @@ export function evaluateGuard(input: GuardEvalInput): GuardEvaluation {
   }
 }
 
-export function formatGuardJsonObject(result: GuardResult): GuardResultJson {
+function formatGuardJsonObject(result: GuardResult): GuardResultJson {
   return withOutputMetadata(result, OUTPUT_SCHEMA.guard)
 }
 
