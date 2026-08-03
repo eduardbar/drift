@@ -1,6 +1,14 @@
-import { createElement } from "../site/node_modules/react/index.js";
-import { renderToStaticMarkup } from "../site/node_modules/react-dom/server.js";
+import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
+import { resolve } from "node:path";
 import { HeaderHero } from "../site/src/components/HeaderHero.jsx";
+
+const runtimePackageJson = existsSync(resolve(process.cwd(), "site/node_modules/react/package.json"))
+  ? resolve(process.cwd(), "site/package.json")
+  : resolve(process.cwd(), "package.json");
+const runtimeRequire = createRequire(runtimePackageJson);
+const { createElement } = runtimeRequire("react") as typeof import("react");
+const { renderToStaticMarkup } = runtimeRequire("react-dom/server") as typeof import("react-dom/server");
 
 function renderHero() {
   return renderToStaticMarkup(createElement(HeaderHero));
