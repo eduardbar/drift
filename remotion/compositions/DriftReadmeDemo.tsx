@@ -50,6 +50,28 @@ const stages = [
   },
 ];
 
+const BODY_START_FRAME = 10;
+const FOOTER_START_FRAME = 34;
+const OUTRO_FADE_START_OFFSET_FRAMES = 14;
+const SWEEP_START_FRAME = 12;
+const SWEEP_EDGE_OFFSET_PX = 220;
+const PULSE_PERIOD_FRAMES = 14;
+const COMMAND_REVEAL_START_FRAME = 18;
+const COMMAND_REVEAL_STAGGER_FRAMES = 10;
+const COMMAND_REVEAL_DURATION_FRAMES = 8;
+const COMMAND_REVEAL_OFFSET_PX = 10;
+const EVALUATE_STAGE_START_FRAME = 72;
+const GATE_STAGE_START_FRAME = 108;
+const PULSE_MIN_SCALE = 0.95;
+const PULSE_MAX_SCALE = 1.07;
+const TITLE_INITIAL_OFFSET_PX = 36;
+const BODY_INITIAL_OFFSET_PX = 28;
+const GRID_INSET_PX = 120;
+const GLOW_TOP_OFFSET_PX = 120;
+const GLOW_LEFT_OFFSET_PX = 140;
+const GLOW_SIZE_PX = 360;
+const ACTIVE_STAGE_SCALE = 1.02;
+
 export const DriftReadmeDemo = () => {
   const frame = useCurrentFrame();
   const {fps, durationInFrames, width} = useVideoConfig();
@@ -62,35 +84,35 @@ export const DriftReadmeDemo = () => {
 
   const bodyIn = spring({
     fps,
-    frame: frame - 10,
+    frame: frame - BODY_START_FRAME,
     config: {damping: 16, mass: 0.92},
   });
 
   const footerIn = spring({
     fps,
-    frame: frame - 34,
+    frame: frame - FOOTER_START_FRAME,
     config: {damping: 18, mass: 0.95},
   });
 
-  const outro = interpolate(frame, [durationInFrames - 14, durationInFrames], [1, 0], {
+  const outro = interpolate(frame, [durationInFrames - OUTRO_FADE_START_OFFSET_FRAMES, durationInFrames], [1, 0], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
     easing: Easing.out(Easing.cubic),
   });
 
-  const titleY = interpolate(intro, [0, 1], [36, 0]);
+  const titleY = interpolate(intro, [0, 1], [TITLE_INITIAL_OFFSET_PX, 0]);
   const titleOpacity = interpolate(intro, [0, 1], [0, 1]);
-  const bodyY = interpolate(bodyIn, [0, 1], [28, 0]);
+  const bodyY = interpolate(bodyIn, [0, 1], [BODY_INITIAL_OFFSET_PX, 0]);
   const bodyOpacity = interpolate(bodyIn, [0, 1], [0, 1]);
   const footerOpacity = interpolate(footerIn, [0, 1], [0, 1]);
 
-  const sweepX = interpolate(frame, [12, durationInFrames], [-220, width + 220], {
+  const sweepX = interpolate(frame, [SWEEP_START_FRAME, durationInFrames], [-SWEEP_EDGE_OFFSET_PX, width + SWEEP_EDGE_OFFSET_PX], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
   });
 
-  const pulse = interpolate(Math.sin(frame / 14), [-1, 1], [0.95, 1.07]);
-  const activeStage = frame < 72 ? 0 : frame < 108 ? 1 : 2;
+  const pulse = interpolate(Math.sin(frame / PULSE_PERIOD_FRAMES), [-1, 1], [PULSE_MIN_SCALE, PULSE_MAX_SCALE]);
+  const activeStage = frame < EVALUATE_STAGE_START_FRAME ? 0 : frame < GATE_STAGE_START_FRAME ? 1 : 2;
 
   return (
     <AbsoluteFill
@@ -108,7 +130,7 @@ export const DriftReadmeDemo = () => {
     >
       <AbsoluteFill
         style={{
-          inset: -120,
+          inset: -GRID_INSET_PX,
           opacity: 0.32,
           backgroundImage:
             'linear-gradient(rgba(120,163,214,0.16) 1px, transparent 1px), linear-gradient(90deg, rgba(120,163,214,0.16) 1px, transparent 1px)',
@@ -118,10 +140,10 @@ export const DriftReadmeDemo = () => {
 
       <AbsoluteFill
         style={{
-          top: -120,
-          left: -140,
-          width: 360,
-          height: 360,
+          top: -GLOW_TOP_OFFSET_PX,
+          left: -GLOW_LEFT_OFFSET_PX,
+          width: GLOW_SIZE_PX,
+          height: GLOW_SIZE_PX,
           borderRadius: 999,
           transform: `scale(${pulse})`,
           background: 'radial-gradient(circle, rgba(103,167,255,0.42), rgba(103,167,255,0))',
@@ -214,8 +236,8 @@ export const DriftReadmeDemo = () => {
               Typical PR check flow
             </div>
             {commandRows.map((line, index) => {
-              const start = 18 + index * 10;
-              const reveal = interpolate(frame, [start, start + 8], [0, 1], {
+              const start = COMMAND_REVEAL_START_FRAME + index * COMMAND_REVEAL_STAGGER_FRAMES;
+              const reveal = interpolate(frame, [start, start + COMMAND_REVEAL_DURATION_FRAMES], [0, 1], {
                 extrapolateLeft: 'clamp',
                 extrapolateRight: 'clamp',
               });
@@ -228,7 +250,7 @@ export const DriftReadmeDemo = () => {
                     background: 'rgba(8, 20, 40, 0.72)',
                     padding: '12px 14px',
                     opacity: reveal,
-                    transform: `translateY(${(1 - reveal) * 10}px)`,
+                    transform: `translateY(${(1 - reveal) * COMMAND_REVEAL_OFFSET_PX}px)`,
                     fontFamily: 'IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, monospace',
                     fontSize: 15,
                     color: '#d7eaff',
@@ -262,7 +284,7 @@ export const DriftReadmeDemo = () => {
                       : 'rgba(7, 19, 38, 0.64)',
                     padding: '10px 12px',
                     boxShadow: isActive ? `0 12px 24px ${stage.accent}22` : 'none',
-                    transform: `translateY(${isActive ? -2 : 0}px) scale(${isActive ? 1.02 : 1})`,
+                    transform: `translateY(${isActive ? -2 : 0}px) scale(${isActive ? ACTIVE_STAGE_SCALE : 1})`,
                   }}
                 >
                   <div
