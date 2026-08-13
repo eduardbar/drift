@@ -9,6 +9,7 @@ badge.svg
 .drift-perf/
 .atl/
 .drift/
+.codegraph/
 
 # drift snapshot history
 drift-history.json

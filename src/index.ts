@@ -2,6 +2,17 @@ export { analyzeProject, analyzeFile, RULE_WEIGHTS } from './analyzer.js'
 export { buildReport, formatMarkdown } from './reporter.js'
 export { computeDiff } from './diff.js'
 export { readStagedDiff, readDiffFromBase } from './git.js'
+export {
+  defaultGuardianConfig, deriveVerdict, countFindings, findingId, GUARDIAN_SEVERITY_ORDER,
+  changesFromDiff, collectChanges, collectWorkingTreeChanges, affectedFiles,
+} from './guardian/index.js'
+export type {
+  GuardianSeverity, GuardianFindingCategory, GuardianLocation, GuardianFinding, GuardianRule,
+  GuardianPolicy, GuardianChange, GuardianContext, GuardianVerdict, GuardianResult, AIReview,
+  AIReviewProvider, GuardianArchitectureRule, GuardianForbiddenDependency, GuardianProtectedPath,
+  GuardianAiConfig, GuardianExitConfig, GuardianConfig,
+  ChangeCollectionOptions,
+} from './guardian/index.js'
 export { runGuard, evaluateGuard } from './guard.js'
 export type {
   GuardBaseline,

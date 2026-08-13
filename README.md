@@ -64,7 +64,12 @@ npm install --save-dev @eduardbar/drift
 
 ## Product Docs
 
-- Product requirements and roadmap: [`docs/PRD.md`](./docs/PRD.md)
+- Product vision: [`docs/product/vision.md`](./docs/product/vision.md)
+- Product user story: [`docs/product/user-story.md`](./docs/product/user-story.md)
+- Strategic roadmap: [`docs/product/roadmap.md`](./docs/product/roadmap.md)
+- AI continuity protocol: [`docs/product/ai-continuity.md`](./docs/product/ai-continuity.md)
+- Architecture index and ADRs: [`docs/architecture/index.md`](./docs/architecture/index.md)
+- Product requirements: [`docs/PRD.md`](./docs/PRD.md)
 - Trust core release checklist: [`docs/trust-core-release-checklist.md`](./docs/trust-core-release-checklist.md)
 - Rules catalog (source-of-truth snapshot): [`docs/rules-catalog.md`](./docs/rules-catalog.md)
 - Contributor/agent workflow guide: [`docs/AGENTS.md`](./docs/AGENTS.md)

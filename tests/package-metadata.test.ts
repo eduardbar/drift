@@ -8,6 +8,6 @@ const packageJson = JSON.parse(
 
 describe('eslint plugin package metadata', () => {
   it('depends on the published drift package version used by this repository', () => {
-    expect(packageJson.dependencies['@eduardbar/drift']).toBe('^1.6.0')
+    expect(packageJson.dependencies['@eduardbar/drift']).toBe('^1.7.0')
   })
 })

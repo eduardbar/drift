@@ -2,9 +2,8 @@
 
 > **AI Code Audit CLI para recuperar confianza de merge en PRs asistidos por IA.**
 
-**Version del PRD**: 1.3.0-scope-refresh  
-**Version de producto vigente**: 1.2.0  
-**Estado**: Activo  
+**Version del PRD**: 1.3.0-scope-refresh
+**Estado**: Activo
 **Producto**: `@eduardbar/drift`  
 **Owner**: Eduardo Barba  
 **Fecha**: 2026-03-15
@@ -50,7 +49,7 @@ Mover el foco de "contar smells" a "reducir riesgo de merge" con una salida resu
 
 ---
 
-## 4. Estado real del producto (v1.2.0)
+## 4. Capacidades entregadas y dirección de producto
 
 ### 4.1 Capacidades entregadas y activas
 
@@ -71,19 +70,21 @@ Mover el foco de "contar smells" a "reducir riesgo de merge" con una salida resu
 - Hardening del contrato de plugins para ecosistema externo de largo plazo.
 - Evolucion de foundations cloud-like hacia experiencia multi-tenant completa (auth, roles, billing) cuando corresponda.
 
-Nota: este PRD no declara como implementado nada fuera de las capacidades ya reflejadas en v1.2.0.
+Nota: el PRD expresa intención y alcance de producto; la versión publicada y la
+implementación son autoritativas en `package.json` y el código correspondiente.
 
 ---
 
-## 5. Feature estrella: `drift trust`
+## 5. Feature estrella: `drift trust` entregado
 
 ### 5.1 Objetivo
 
-Introducir `drift trust` como salida de alto nivel para decision de merge en PRs asistidos por IA.
+Ofrecer `drift trust` como salida de alto nivel para decisión de merge en PRs
+asistidos por IA.
 
-### 5.2 Output conceptual esperado
+### 5.2 Output de producto
 
-`drift trust` debe sintetizar en un bloque corto y accionable:
+`drift trust` sintetiza en un bloque corto y accionable:
 
 | Campo | Proposito |
 |---|---|
@@ -98,7 +99,8 @@ Introducir `drift trust` como salida de alto nivel para decision de merge en PRs
 - Prioriza interpretabilidad: cada resultado debe explicar por que sube/baja la confianza.
 - Se diseña para uso local y CI sin requerir servicio central.
 
-Importante: en este documento, `drift trust` se define como **scope de producto**; su implementacion tecnica se planifica por etapas.
+El modo baseline está entregado; el modo avanzado añade contexto histórico,
+comparativas y guidance de remediación de equipo según el alcance comercial.
 
 ---
 
@@ -170,14 +172,14 @@ Nota: Premium define direccion comercial; la activacion concreta depende del roa
 
 - Actualizar narrativa publica: de "deuda tecnica IA" a "merge trust para PRs asistidos por IA".
 - Publicar docs y ejemplos orientados a decision de merge.
-- CTA principal: probar `drift review` y futura experiencia `drift trust`.
+- CTA principal: probar `drift review` y `drift trust`.
 
-### Etapa 2 - `drift trust` baseline (producto)
+### Etapa 2 - Evolución de `drift trust`
 
-- Entregar salida conceptual en CLI/CI con Trust Score, Merge Risk, Top Reasons, Fix Priorities.
-- Incorporar senales de diff/PR de forma deterministica (`--base`) y salida markdown lista para comentarios de PR.
-- Medir adopcion en PR workflows y feedback de interpretabilidad.
-- Ajustar pesos/heuristicas con evidencia de uso real.
+- Consolidar la salida de CLI/CI con Trust Score, Merge Risk, Top Reasons y Fix Priorities.
+- Mantener señales de diff/PR deterministas (`--base`) y salida markdown lista para comentarios de PR.
+- Medir adopción en PR workflows y feedback de interpretabilidad.
+- Ajustar pesos y heurísticas con evidencia de uso real.
 
 ### Etapa 3 - Conversion y expansion
 
@@ -228,7 +230,7 @@ Nota: Premium define direccion comercial; la activacion concreta depende del roa
 ## 13. Definition of Done para este refresh de scope
 
 - PRD unificado con posicionamiento "AI Code Audit CLI".
-- `drift trust` definido como feature estrella con output conceptual completo.
+- `drift trust` definido como feature estrella con output operativo completo.
 - Delimitacion explicita de que Drift es/no es.
 - Pricing y Core vs Premium documentados de forma consistente.
 - Estrategia operativa sin infraestructura propia y monetizacion via Sponsors declaradas.

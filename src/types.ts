@@ -59,6 +59,13 @@ export type {
 } from './types/ai-guard.js'
 
 export type {
+  GuardianSeverity, GuardianFindingCategory, GuardianLocation, GuardianFinding, GuardianRule,
+  GuardianPolicy, GuardianChange, GuardianContext, GuardianVerdict, GuardianResult, AIReview,
+  AIReviewProvider, GuardianArchitectureRule, GuardianForbiddenDependency, GuardianProtectedPath,
+  GuardianAiConfig, GuardianExitConfig, GuardianConfig,
+} from './guardian/types.js'
+
+export type {
   ContextHealth,
   ContextViolation,
   ContextArchitectureSummary,

@@ -20,6 +20,16 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [1.7.0] - 2026-08-13
+
+### Added
+
+- **Drift Guardian core**: deterministic policy gate for git diffs (`src/guardian/`). Includes the domain model (`GuardianFinding`, `GuardianRule`, `GuardianPolicy`, `GuardianContext`, `GuardianResult`, `AIReviewProvider`) and the git change collector (stdin / staged / base ref / diff file / working tree), reusing the existing unified-diff parser and git readers without new runtime dependencies.
+- Product and technical documentation for Guardian: `docs/guardian/` (PRD, TRD, APP_FLOW, UI_UX_DESIGN_BRIEF, BACKEND_SCHEMA, IMPLEMENTATION_PLAN).
+- OpenSpec delta spec for the `guardian` domain under `openspec/specs/guardian/`.
+
+---
+
 ## [1.6.0] - 2026-07-22
 
 ### Added

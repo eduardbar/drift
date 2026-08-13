@@ -18,7 +18,7 @@ inputs:
   version:
     description: 'Version of @eduardbar/drift to use'
     required: false
-    default: '1.6.0'
+    default: '1.7.0'
   min-trust:
     description: 'Fail gate if trust score is below this threshold'
     required: false
