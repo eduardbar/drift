@@ -1,0 +1,54 @@
+# OpenSpec project configuration for Drift v1.8 planning.
+# Product implementation is intentionally out of scope for SDD initialization.
+project:
+  name: drift
+  package: '@eduardbar/drift'
+  version: '1.8.0'
+  language: TypeScript
+  runtime: 'Node.js 20.x and 22.x (ES modules)'
+
+sdd:
+  execution: auto
+  artifactStore: openspec
+  deliveryStrategy: ask-on-risk
+  reviewBudget: 400
+  strict_tdd: true
+  phaseRules:
+    explore: establish current CLI, analyzer, baseline, performance, monorepo, and agent-integration context before proposing scope
+    proposal: keep v1.8 planning-only; do not imply implementation approval
+    spec: express externally observable behavior and stable compatibility constraints
+    design: preserve local-first architecture and identify incremental rollout boundaries
+    tasks: split work into independently reviewable slices within the 400-line review budget
+
+  testing:
+    runner: vitest
+    command: npm test
+    buildCommand: npm run build
+    supportingChecks:
+      - npm run check:runtime-policy
+      - npm run check:docs-drift
+      - npm run check:perf-budget
+
+productDirection:
+  release: Drift v1.8
+  goals:
+    - unified drift check for pull requests
+    - stable finding identities and baselines
+    - incremental and monorepo performance
+    - optional gentle-pi agent integration
+  nonGoals:
+    - product implementation during SDD initialization
+    - hosted backend or mandatory agent integration
+
+context:
+  existingSpecs:
+    - openspec/specs/guardian/spec.md
+    - openspec/specs/repository-cleanup/spec.md
+  sourceOfTruth:
+    - AGENTS.md
+    - src/cli.ts
+    - src/analyzer.ts
+    - src/config.ts
+    - src/types
+    - package.json
+  preserveUnrelatedUntrackedFiles: true

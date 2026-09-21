@@ -1,7 +1,7 @@
 {
   "name": "@eduardbar/drift",
-  "version": "1.7.0",
-  "description": "AI Code Audit CLI for merge trust in AI-assisted PRs",
+  "version": "1.8.0",
+  "description": "Static analysis CLI for TypeScript and JavaScript structural debt, architecture risk, and CI merge gates",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -37,12 +37,18 @@
     "check:perf-budget": "node ./scripts/check-performance-budget.mjs"
   },
   "keywords": [
-    "vibe-coding",
+    "static-analysis",
     "technical-debt",
-    "ai",
-    "cli",
+    "architecture",
+    "code-quality",
+    "pull-request",
+    "ci",
+    "merge-gate",
     "typescript",
-    "static-analysis"
+    "javascript",
+    "ast",
+    "dead-code",
+    "complexity"
   ],
   "author": "eduardbar",
   "license": "MIT",

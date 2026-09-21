@@ -1,4 +1,4 @@
-const NPM_PACKAGE_URL = "https://www.npmjs.com/package/@eduardbar/drift";
+import resourceLinks from "../resource-links.json";
 
 function HeroNavigation() {
   return (
@@ -7,9 +7,14 @@ function HeroNavigation() {
       <div className="nav-links" role="list" aria-label="Key sections">
         <a className="chip-link" href="#features" role="listitem">Features</a>
         <a className="chip-link" href="#commands" role="listitem">Commands</a>
-        <a className="chip-link" href={NPM_PACKAGE_URL} target="_blank" rel="noreferrer" role="listitem">
+        <a className="chip-link" href={resourceLinks.npm} target="_blank" rel="noreferrer" role="listitem">
           npm
         </a>
+        <a className="chip-link" href={resourceLinks.github} target="_blank" rel="noreferrer" role="listitem">GitHub</a>
+        <a className="chip-link" href={resourceLinks.marketplace} target="_blank" rel="noreferrer" role="listitem">VS Code</a>
+        <a className="chip-link" href={resourceLinks.actions} target="_blank" rel="noreferrer" role="listitem">Actions</a>
+        <a className="chip-link" href={resourceLinks.mcp} target="_blank" rel="noreferrer" role="listitem">MCP</a>
+        <a className="chip-link" href={resourceLinks.docs} target="_blank" rel="noreferrer" role="listitem">Docs</a>
       </div>
     </nav>
   );
@@ -33,7 +38,7 @@ function HeroCopy() {
         <li>CI ready trust gate</li>
       </ul>
       <div className="hero-actions js-hero-actions">
-        <a className="btn btn-primary" href={NPM_PACKAGE_URL} target="_blank" rel="noreferrer">
+        <a className="btn btn-primary" href={resourceLinks.npm} target="_blank" rel="noreferrer">
           Install drift
         </a>
         <a className="btn btn-secondary" href="#commands">Review command flow</a>

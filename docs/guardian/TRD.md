@@ -1,7 +1,7 @@
 # Drift Guardian — Technical Requirement Document (TRD)
 
 **Status:** Draft v1
-**Target codebase:** drift v1.7.0, TypeScript strict, ESM (`"type": "module"`), Node ^20 || ^22
+**Target codebase:** drift v1.8.0, TypeScript strict, ESM (`"type": "module"`), Node ^20 || ^22
 **Documentation index:** see `docs/guardian/` — PRD (product), APP_FLOW (flows), UI_UX_DESIGN_BRIEF (presentation), BACKEND_SCHEMA (data), IMPLEMENTATION_PLAN (phases).
 
 ---

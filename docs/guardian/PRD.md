@@ -2,7 +2,7 @@
 
 **Status:** Draft v1
 **Product:** Drift Guardian (sub-command `drift guardian`, plus GitHub Action `eduardbar/drift-guardian`)
-**Base product:** [drift](https://github.com/eduardbar/drift) v1.7.0
+**Base product:** [drift](https://github.com/eduardbar/drift) v1.8.0
 **Audience:** Product, Engineering, Open Source maintainers
 
 ---

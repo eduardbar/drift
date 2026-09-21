@@ -1,0 +1,8 @@
+{
+  "npm": "https://www.npmjs.com/package/@eduardbar/drift",
+  "github": "https://github.com/eduardbar/drift",
+  "marketplace": "https://marketplace.visualstudio.com/items?itemName=eduardbar.vscode-drift",
+  "actions": "https://github.com/eduardbar/drift#github-action-contract-v2",
+  "mcp": "https://github.com/eduardbar/drift#drift-mcp-path",
+  "docs": "https://github.com/eduardbar/drift/tree/main/docs"
+}
