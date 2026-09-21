@@ -14,8 +14,9 @@ changes.
   Guardian product-version references, and the focused package metadata test.
 - Preserve historical version references when they are clearly historical.
 - Preserve all unrelated tracked and untracked worktree changes.
-- Do not access remote systems, push, open PRs, create tags/releases, publish
-  npm, or publish the VS Code Marketplace.
+- Do not access repository remotes, push, open PRs, create tags/releases,
+  publish npm, or publish the VS Code Marketplace. GitHub CLI identity lookup
+  was explicitly authorized only to supply this commit's author metadata.
 - Do not bulk-rewrite archived OpenSpec artifacts or alter schemas,
   producer/consumer implementation, or unrelated documentation.
 
@@ -53,7 +54,7 @@ changes.
 - Relevant CI alignment checks: PASS — included in the focused version test command; action defaults, README literals, and CI hardcoded package references are aligned.
 - VS Code package build: FAIL — `npm --prefix packages/vscode-drift run build`; existing dependency/type resolution failures (`@eduardbar/drift`, `vscode`, and related implicit-any/property errors) because package dependencies are not installed locally. No remote install was attempted.
 - Scope and staged diff review: PASS — staged set contains only the 16 authorized alignment/task files; unrelated changes remain unstaged.
-- Commit: BLOCKED — `git commit -m "chore(release): align local metadata to v1.8.0"` failed because Git user identity is not configured (`Author identity unknown`). No Git configuration was changed.
+- Commit: PASS — `8e1ac35 chore(release): align local metadata to v1.8.0`; author identity was supplied per-command from the authorized GitHub CLI account. Git configuration was not changed.
 
 ## Route evidence (delegated direct)
 
@@ -70,4 +71,4 @@ changes.
 - [x] Version-alignment edits complete.
 - [x] Verification complete with exact results recorded; VS Code package build blocker is explicit.
 - [x] Task document and Engram mirror updated with final evidence.
-- [ ] Scoped Conventional Commit created — blocked by missing local Git author identity.
+- [x] Scoped Conventional Commit created — `8e1ac35`.
