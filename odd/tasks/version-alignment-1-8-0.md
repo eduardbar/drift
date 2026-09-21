@@ -52,7 +52,7 @@ changes.
 - Build: PASS — `npm run build`.
 - Package metadata/content checks: PASS — metadata/lock assertion, alignment text assertion, `npm exec vitest run tests/package-content.test.ts` (1 test), and ESLint plugin build.
 - Relevant CI alignment checks: PASS — included in the focused version test command; action defaults, README literals, and CI hardcoded package references are aligned.
-- VS Code package build: FAIL — `npm --prefix packages/vscode-drift run build`; existing dependency/type resolution failures (`@eduardbar/drift`, `vscode`, and related implicit-any/property errors) because package dependencies are not installed locally. No remote install was attempted.
+- VS Code package build: PASS — installed the locally packed root artifact `eduardbar-drift-1.8.0.tgz` with `npm install --no-save --package-lock=false` and ran `npm run build`; fixed the VS Code API call in `packages/vscode-drift/src/statusbar.ts` from `vscode.createStatusBarItem` to `vscode.window.createStatusBarItem`.
 - Scope and staged diff review: PASS — staged set contains only the 16 authorized alignment/task files; unrelated changes remain unstaged.
 - Commit: PASS — `8e1ac35 chore(release): align local metadata to v1.8.0`; author identity was supplied per-command from the authorized GitHub CLI account. Git configuration was not changed.
 
@@ -72,3 +72,4 @@ changes.
 - [x] Verification complete with exact results recorded; VS Code package build blocker is explicit.
 - [x] Task document and Engram mirror updated with final evidence.
 - [x] Scoped Conventional Commit created — `8e1ac35`.
+- [x] VS Code build blocker resolved and build re-run successfully.

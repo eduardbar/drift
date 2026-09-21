@@ -13,7 +13,7 @@ export class DriftStatusBarItem {
   private item: vscode.StatusBarItem
 
   constructor() {
-    this.item = vscode.createStatusBarItem(
+    this.item = vscode.window.createStatusBarItem(
       vscode.StatusBarAlignment.Right,
       STATUSBAR_PRIORITY
     )
