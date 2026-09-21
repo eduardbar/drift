@@ -2,7 +2,7 @@
   "name": "vscode-drift",
   "displayName": "drift — Technical Debt Detector",
   "description": "Detect technical debt in TypeScript & JavaScript. AST-based score 0–100: complexity, dead code, coupling, nesting and more.",
-  "version": "0.1.1",
+  "version": "1.8.0",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -113,7 +113,7 @@
     "typescript": "^5.3.0"
   },
   "dependencies": {
-    "@eduardbar/drift": "1.0.0",
+    "@eduardbar/drift": "^1.8.0",
     "ts-morph": "^23.0.0"
   }
 }
