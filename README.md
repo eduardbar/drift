@@ -6,6 +6,8 @@ Stop merging AI-generated technical debt blindly. `drift` gives every PR a struc
 
 [Live landing page](https://drift-ai-detection.vercel.app/)
 
+**Start here:** [Install the npm CLI](https://www.npmjs.com/package/@eduardbar/drift) · [Add the GitHub Action](#github-action-contract-v2) · [Install the VS Code extension](https://marketplace.visualstudio.com/items?itemName=eduardbar.vscode-drift) · [Configure MCP](#drift-mcp-path) · [Browse docs](./docs/) · [Visit the landing page](https://drift-ai-detection.vercel.app/)
+
 ## Quick Install
 
 ```bash

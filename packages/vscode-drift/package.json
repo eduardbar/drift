@@ -1,7 +1,7 @@
 {
   "name": "vscode-drift",
   "displayName": "drift — Technical Debt Detector",
-  "description": "Detect technical debt in TypeScript & JavaScript. AST-based score 0–100: complexity, dead code, coupling, nesting and more.",
+  "description": "Find structural technical debt in TypeScript and JavaScript with AST-based diagnostics, file scores, and workspace analysis.",
   "version": "1.8.0",
   "engines": {
     "vscode": "^1.85.0"
@@ -21,26 +21,19 @@
   "categories": ["Linters", "Programming Languages"],
   "keywords": [
     "technical debt",
-    "debt",
+    "static analysis",
     "code quality",
-    "linter",
+    "architecture",
+    "ast",
     "typescript",
     "javascript",
     "complexity",
     "dead code",
     "coupling",
     "nesting",
-    "score",
-    "refactor",
-    "analyzer",
-    "analysis",
-    "anti-patterns",
-    "ast",
-    "cyclomatic",
-    "any",
-    "console.log",
-    "catch",
-    "multi-root ready"
+    "refactoring",
+    "workspace analysis",
+    "multi-root"
   ],
   "galleryBanner": {
     "color": "#0a0a0f",

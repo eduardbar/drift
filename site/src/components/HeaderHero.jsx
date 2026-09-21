@@ -1,4 +1,9 @@
 const NPM_PACKAGE_URL = "https://www.npmjs.com/package/@eduardbar/drift";
+const GITHUB_URL = "https://github.com/eduardbar/drift";
+const MARKETPLACE_URL = "https://marketplace.visualstudio.com/items?itemName=eduardbar.vscode-drift";
+const ACTIONS_URL = `${GITHUB_URL}#github-action-contract-v2`;
+const MCP_URL = `${GITHUB_URL}#drift-mcp-path`;
+const DOCS_URL = `${GITHUB_URL}/tree/main/docs`;
 
 function HeroNavigation() {
   return (
@@ -10,6 +15,11 @@ function HeroNavigation() {
         <a className="chip-link" href={NPM_PACKAGE_URL} target="_blank" rel="noreferrer" role="listitem">
           npm
         </a>
+        <a className="chip-link" href={GITHUB_URL} target="_blank" rel="noreferrer" role="listitem">GitHub</a>
+        <a className="chip-link" href={MARKETPLACE_URL} target="_blank" rel="noreferrer" role="listitem">VS Code</a>
+        <a className="chip-link" href={ACTIONS_URL} target="_blank" rel="noreferrer" role="listitem">Actions</a>
+        <a className="chip-link" href={MCP_URL} target="_blank" rel="noreferrer" role="listitem">MCP</a>
+        <a className="chip-link" href={DOCS_URL} target="_blank" rel="noreferrer" role="listitem">Docs</a>
       </div>
     </nav>
   );
