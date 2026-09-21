@@ -64,14 +64,14 @@ unverified claims or publishing from a dirty worktree.
 - [x] ODD task document created before source/documentation writes.
 - [x] Implementation work units complete.
 - [x] Focused verification complete.
-- [ ] Work-unit commits recorded.
-- [ ] PR created with required issue linkage and label.
+- [x] Work-unit commits recorded.
+- [x] PR created with required issue linkage and label.
 
 ## Implementation evidence
 
 - **A. Metadata:** Updated root npm description/keywords and VS Code Marketplace description/keywords with specific static-analysis, technical-debt, architecture, CI, TypeScript, JavaScript, AST, complexity, and dead-code terms. Versions remain `1.8.0`; package file boundaries are unchanged. `@vscode/vsce` was not added because the existing Marketplace workflow intentionally invokes it through `npx` and does not require a declared package dependency.
 - **B. Entry points/docs:** Added compact npm, GitHub Actions, VS Code, MCP, docs, and landing-page links to the README top. Replaced the stale VS Code `drift report . --html` example with the current `drift report .` contract, documented `drift fix . --write`, and linked the canonical rules catalog and CLI docs.
-- **C. Landing page:** Added actionable npm, GitHub, Marketplace, Actions, MCP, and docs links to existing hero navigation and footer components without changing the page structure or existing claims.
+- **C. Landing page:** Added actionable npm, GitHub, Marketplace, Actions, MCP, and docs links to existing hero navigation and footer components without changing the page structure or existing claims. Follow-up commit `680b2ff` moved the external resource URLs into `site/src/resource-links.json` after the trust gate identified JSX URL literals as hardcoded configuration.
 - **D. Release automation:** Reviewed `.github/workflows/publish.yml` and `.github/workflows/publish-vscode.yml`. No workflow change was justified: both workflows remain tag/release gated, verify versions, skip already-published versions, and publish only after their existing checks/build steps.
 
 ## Verification evidence
@@ -82,8 +82,12 @@ unverified claims or publishing from a dirty worktree.
 - `npm run build` in `packages/vscode-drift` — passed.
 - `npm run build` in `site` — passed; Vite transformed 48 modules and emitted the production bundle.
 - `git diff --check` — passed; only expected CRLF normalization warnings were reported for existing Windows working-copy files.
+- `npm exec vitest run tests/site-header-hero.test.ts` — passed; 2 tests.
+- `npm run build` in `site` after the trust-gate fix — passed.
+- Full `npm test` — not completed: one `tests/ai-guard-cli.test.ts` failure was observed before the 120-second command timeout; this is separate from the landing-page fix and needs investigation before treating the overall suite as green.
 
 ## Scope review
 
-- Authored diff: 153 additions and 40 deletions across 7 implementation files plus this task document.
+- Authored diff: original implementation plus follow-up commit `680b2ff` across the landing-page components and shared resource-link data.
 - The unrelated dirty worktree files remain unstaged and are not part of the authored change.
+- PR #54 is open and the new Node 20, Node 22, and `drift-review` checks are currently in progress.
