@@ -1,0 +1,48 @@
+name: Discoverability and release readiness
+description: Improve Drift's npm, GitHub, Marketplace, and release discovery surfaces.
+title: "chore: "
+labels:
+  - type:docs
+body:
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      description: Which public discovery or release surface is this about?
+      options:
+        - npm package discovery
+        - GitHub repository discovery
+        - VS Code Marketplace discovery
+        - Release automation
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What makes the project difficult to discover, evaluate, install, or release?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: What observable improvement should this issue deliver?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List the checks or outcomes that prove the work is complete.
+    validations:
+      required: true
+  - type: checkboxes
+    id: policy
+    attributes:
+      label: Maintainer checklist
+      options:
+        - label: I confirm this issue is appropriate for the repository.
+          required: true
+        - label: I will keep release and discovery claims truthful and measurable.
+          required: true
